@@ -15,7 +15,7 @@ worktree:
   setup_timeout_minutes: 10
 
 cursor:
-  enabled: false
+  enabled: true
   command: agent
   output_format: text
   trust_harness_worktrees: true
@@ -125,6 +125,6 @@ doctor:
     - codex
   required_env: []
   min_free_disk_gb: 3
-  check_cursor_models: false
+  check_cursor_models: true
   minimum_versions:
     node: "22.0.0"

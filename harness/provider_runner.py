@@ -24,13 +24,14 @@ class ProviderAgentRunner:
         self.cursor = cursor
         self.usage = usage
 
-    def _disable_key(self, sprint: str) -> str:
-        return f"{sprint}.provider.codex.disabled_run"
+    def _disable_key(self, task: TaskSpec) -> str:
+        # Per task: every new task probes Codex again; only a task that already fell back stays on Cursor.
+        return f"{task.sprint}.{task.id}.provider.codex.disabled"
 
     def _codex_enabled_for(self, task: TaskSpec) -> bool:
         return (
             self.config.codex.enabled
-            and not bool(self.state.get_meta(self._disable_key(task.sprint)))
+            and not bool(self.state.get_meta(self._disable_key(task)))
         )
 
     def _preferred_provider(self, task: TaskSpec) -> str:
@@ -47,7 +48,7 @@ class ProviderAgentRunner:
         return "none"
 
     def _mark_codex_disabled(self, task: TaskSpec, reason: str) -> None:
-        self.state.set_meta(self._disable_key(task.sprint), reason)
+        self.state.set_meta(self._disable_key(task), reason)
         if self.usage is not None:
             self.usage.record({
                 "event_type": "provider_switch", "provider": "codex", "switch_to": "cursor",

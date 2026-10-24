@@ -101,9 +101,10 @@ class RunManifestManager:
                 existing.write_text(json.dumps(existing_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
                 return existing
 
-        # New run: try Codex again. Resume of an active run preserves a prior
-        # Codex->Cursor switch caused by quota/auth/model unavailability.
-        self.state.set_meta(f"{sprint.id}.provider.codex.disabled_run", None)
+        # New run: try Codex again for every task. Resume of an active run preserves
+        # a task's prior Codex->Cursor switch caused by quota/auth/model unavailability.
+        for task_id in sprint.tasks:
+            self.state.set_meta(f"{sprint.id}.{task_id}.provider.codex.disabled", None)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{sprint.id}-{stamp}-{uuid.uuid4().hex[:8]}"
         run_dir = self.runs_root / run_id

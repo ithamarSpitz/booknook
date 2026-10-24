@@ -124,6 +124,9 @@ if "FAKE_QUOTA_5H" in prompt:
 if "FAKE_QUOTA_WEEKLY" in prompt:
     print("weekly usage limit exhausted", file=sys.stderr)
     raise SystemExit(1)
+if "FAKE_QUOTA_CURLY" in prompt:
+    sys.stderr.buffer.write("You\u2019ve hit your usage limit. Try again at 1:29 AM.\n".encode("utf-8"))
+    raise SystemExit(1)
 if "FAKE_QUOTA" in prompt:
     print("You've hit your usage limit. Try again later.", file=sys.stderr)
     raise SystemExit(1)
@@ -258,6 +261,9 @@ def test_codex_quota_capacity_transient_and_model_classification(tmp_path: Path)
     short_quota = invoke("FAKE_QUOTA_5H")
     assert short_quota.quota_exhausted and short_quota.quota_scope == "5h"
 
+    curly_quota = invoke("FAKE_QUOTA_CURLY")
+    assert curly_quota.quota_exhausted and not curly_quota.capacity_exhausted
+
     weekly_quota = invoke("FAKE_QUOTA_WEEKLY")
     assert weekly_quota.quota_exhausted and weekly_quota.quota_scope == "weekly"
 
@@ -362,7 +368,7 @@ def test_disabled_cursor_never_receives_codex_quota_fallback(tmp_path: Path):
     assert result.provider == "codex"
     assert result.quota_exhausted
     assert cursor.implement_classes == []
-    assert state.get_meta("S1.provider.codex.disabled_run") is None
+    assert state.get_meta("S1.T1.provider.codex.disabled") is None
     assert router.has_implementation_budget(task)
 
 
@@ -415,9 +421,29 @@ def test_codex_quota_switches_to_cursor_same_attempt_and_preserves_task_attempt(
     runtime = state.get(task.id)
     assert runtime.attempt == 7  # provider router never consumes scheduler attempt
     assert runtime.provider_attempts == {"cursor": 1}
-    assert state.get_meta("S1.provider.codex.disabled_run") == "quota:unspecified"
+    assert state.get_meta("S1.T1.provider.codex.disabled") == "quota:unspecified"
     switch_events = [e for e in usage.events() if e.get("event_type") == "provider_switch"]
     assert len(switch_events) == 1 and switch_events[0]["switch_to"] == "cursor"
+
+
+def test_codex_quota_fallback_is_per_task_and_next_task_probes_codex_again(tmp_path: Path):
+    codex = _FakeCodex([
+        AgentResult(False, "", "limit", quota_exhausted=True, provider="codex"),
+        AgentResult(True, "codex ok", provider="codex"),
+    ])
+    cursor = _FakeCursor([AgentResult(True, "cursor ok", provider="cursor")] * 2)
+    router, state, _ = _router(tmp_path, codex, cursor)
+    first = _task(tmp_path)
+    second = TaskSpec(id="T2", file=first.file, sprint="S1", stage=1, review=True, allowed_paths=["**"])
+    workspace = tmp_path / "w"
+    workspace.mkdir()
+
+    assert router.implement(first, workspace, 1, 1, None).provider == "cursor"
+    assert router.implement(second, workspace, 1, 1, None).provider == "codex"
+    # The task that fell back stays on Cursor for its own retries and review.
+    assert router.active_provider(first) == "cursor"
+    assert router.active_provider(second) == "codex"
+    assert state.get_meta("S1.T2.provider.codex.disabled") is None
 
 
 def test_codex_capacity_and_transient_retry_same_model_without_consuming_provider_attempt(tmp_path: Path):
@@ -441,7 +467,7 @@ def test_codex_capacity_and_transient_retry_same_model_without_consuming_provide
     assert codex.models == ["gpt-5.6-sol", "gpt-5.6-sol", "gpt-5.6-sol"]
     assert codex.efforts == ["medium", "medium", "medium"]
     assert state.get(task.id).provider_attempts == {"codex": 1}
-    assert state.get_meta("S1.provider.codex.disabled_run") is None
+    assert state.get_meta("S1.T1.provider.codex.disabled") is None
 
 
 def test_codex_review_quota_falls_back_to_cursor_without_reimplementation(tmp_path: Path):
@@ -459,7 +485,7 @@ def test_codex_review_quota_falls_back_to_cursor_without_reimplementation(tmp_pa
     assert cursor.review_calls == 1
     assert cursor.implement_classes == []
     assert state.get(task.id).provider_attempts == {}
-    assert state.get_meta("S1.provider.codex.disabled_run") == "quota:unspecified"
+    assert state.get_meta("S1.T1.provider.codex.disabled") == "quota:unspecified"
 
 
 def test_usage_summary_separates_codex_and_cursor(tmp_path: Path):
@@ -490,7 +516,7 @@ def test_codex_adapter_exception_falls_back_to_cursor_without_losing_state(tmp_p
     assert result.ok and result.provider == "cursor"
     assert cursor.implement_classes == ["worker"]
     assert state.get(task.id).provider_attempts == {"cursor": 1}
-    assert str(state.get_meta("S1.provider.codex.disabled_run")).startswith("integration_error:")
+    assert str(state.get_meta("S1.T1.provider.codex.disabled")).startswith("integration_error:")
 
 
 def test_provider_priority_can_explicitly_choose_cursor_first(tmp_path: Path):

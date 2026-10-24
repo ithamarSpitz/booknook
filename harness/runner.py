@@ -306,7 +306,7 @@ class CursorAgentRunner:
         return result
 
     def _looks_like_quota_exhaustion(self, output: str) -> bool:
-        lowered = output.casefold()
+        lowered = output.replace("’", "'").replace("‘", "'").casefold()
         return any(pattern.casefold() in lowered for pattern in self.config.quota.exhaustion_patterns if pattern)
 
     def _looks_like_capacity_exhaustion(self, output: str) -> bool:

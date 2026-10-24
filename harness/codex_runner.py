@@ -96,7 +96,8 @@ class CodexAgentRunner:
 
     @staticmethod
     def _matches(text: str, patterns: list[str]) -> bool:
-        lowered = text.casefold()
+        # Codex prints typographic apostrophes ("You’ve hit your usage limit"); patterns use ASCII.
+        lowered = text.replace("’", "'").replace("‘", "'").casefold()
         return any(p and p.casefold() in lowered for p in patterns)
 
     def _classify(self, diagnostics: str, *, timed_out: bool, start_error: bool = False) -> str | None:

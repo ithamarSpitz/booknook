@@ -39,7 +39,7 @@ doctor: {}
     )
 
     # A disabled Codex marker is run-local: a brand-new run probes Codex again.
-    state.set_meta("s1.provider.codex.disabled_run", "quota:weekly")
+    state.set_meta("s1.A.provider.codex.disabled", "quota:weekly")
 
     first = manager.start_or_resume(
         sprint=sprint,
@@ -49,14 +49,14 @@ doctor: {}
         integration_branch="main",
         started_from_commit="abc",
     )
-    assert state.get_meta("s1.provider.codex.disabled_run") is None
+    assert state.get_meta("s1.A.provider.codex.disabled") is None
     data = json.loads(first.read_text(encoding="utf-8"))
     assert data["started_from_commit"] == "abc"
     assert data["hashes"]["architecture"]
     assert data["hashes"]["task_files"]
 
     # Resuming the same active run preserves a prior provider switch.
-    state.set_meta("s1.provider.codex.disabled_run", "quota:weekly")
+    state.set_meta("s1.A.provider.codex.disabled", "quota:weekly")
     second = manager.start_or_resume(
         sprint=sprint,
         roadmap_path=tmp_path / "tasks/roadmap.yaml",
@@ -66,7 +66,7 @@ doctor: {}
         started_from_commit="abc",
     )
     assert second == first
-    assert state.get_meta("s1.provider.codex.disabled_run") == "quota:weekly"
+    assert state.get_meta("s1.A.provider.codex.disabled") == "quota:weekly"
     resumed = json.loads(second.read_text(encoding="utf-8"))
     assert len(resumed["resumed_at"]) == 1
 
