@@ -49,10 +49,11 @@ codex:
   planner_model: gpt-5.6-sol
 
 retry:
+  # Cursor ladder stays on Cursor-native models (Composer, Grok); Opus is billed as Other Models.
   sequence:
     - worker
     - hard_worker
-    - escalation
+    - hard_worker
 
 verification:
   global_task_commands:
@@ -117,7 +118,7 @@ capacity:
 
 plan_repair:
   enabled: true
-  planner_model_class: escalation
+  planner_model_class: hard_worker
   timeout_minutes: 20
 
 doctor:
