@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Torimitor</title>
+  <style>
+    body{font:16px/1.4 system-ui,sans-serif;max-width:900px;margin:32px auto;padding:0 16px;color:#222}
+    h1{margin-bottom:4px}h2{margin-top:30px}p{margin-top:4px}input,button{font:inherit;padding:10px}button{cursor:pointer}
+    .status{padding:10px;background:#f2f2f2;margin:12px 0;white-space:pre-wrap}.error{background:#ffe5e5}.ok{background:#e5f5e9}
+    .search-box{position:relative;max-width:620px}.search-box>input{width:100%;box-sizing:border-box}.suggestions{position:absolute;z-index:10;top:100%;left:0;right:0;background:#fff;border:1px solid #bbb;box-shadow:0 5px 18px #0002;max-height:420px;overflow:auto}.hidden{display:none}
+    .suggestion{display:grid;grid-template-columns:42px 1fr;gap:10px;width:100%;border:0;border-bottom:1px solid #ddd;background:#fff;text-align:left;padding:9px}.suggestion:hover,.suggestion:focus{background:#f1f6f3}.suggestion img{width:42px;height:58px;object-fit:cover;background:#eee}.suggestion small,.book small{display:block;color:#666}
+    .book{display:grid;grid-template-columns:70px 1fr auto;gap:12px;align-items:center;border:1px solid #ccc;padding:10px;margin:8px 0}.book img{width:70px;height:95px;object-fit:cover;background:#eee}.book a{margin-right:10px}.selected{border-left:5px solid #277a50}.pending{opacity:.72}.badge{display:inline-block;margin-inline-start:6px;padding:2px 6px;border-radius:10px;background:#e8eef8;color:#234;font-size:11px}
+    @media(max-width:600px){.book{grid-template-columns:55px 1fr}.book img{width:55px;height:75px}.book>button{grid-column:1/-1}}
+  </style>
+</head>
+<body>
+  <h1>Torimitor</h1>
+  <p>Choose books you like and get recommendations automatically.</p>
+
+  <h2>Find a book</h2>
+  <div class="search-box">
+    <input id="query" autocomplete="off" placeholder="Start typing a book title" aria-label="Find a book" aria-autocomplete="list" aria-controls="results">
+    <div id="results" class="suggestions hidden" role="listbox"></div>
+  </div>
+  <div id="status" class="status">Ready.</div>
+
+  <h2>Selected books (<span id="count">0</span>/5)</h2>
+  <div id="selected"><p>No books selected.</p></div>
+
+  <h2>Recommendations</h2>
+  <div id="recommendations"><p>No recommendations yet.</p></div>
+
+  <script>
+    const FUNCTIONS = "http://127.0.0.1:54321/functions/v1";
+    const selected = [];
+    let searchTimer = 0;
+    let searchRun = 0;
+    let recommendationRun = 0;
+    const $ = id => document.getElementById(id);
+    const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, character => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[character]));
+
+    async function api(name,payload) {
+      const response=await fetch(`${FUNCTIONS}/${name}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok) throw new Error(data.error||`${name} returned HTTP ${response.status}.`);
+      return data;
+    }
+    function status(message,kind="") { $("status").textContent=message; $("status").className=`status ${kind}`; }
+    function bookUrl(book) { const url=book.url||""; return url.startsWith("http")?url:`https://simania.co.il${url}`; }
+    function detailsUrl(book) { return book.slug?`https://hardcover.app/books/${book.slug}`:`https://hardcover.app/search?query=${encodeURIComponent(book.title)}`; }
+    function key(book) { return book.id??book.bookId??`${book.title}|${book.author||""}`; }
+
+    function closeSuggestions() { $("results").classList.add("hidden"); $("results").innerHTML=""; }
+    function renderSuggestions(books) {
+      const results=$("results");
+      results.innerHTML=books.length?books.map((book,index)=>`<button type="button" class="suggestion" data-result="${index}" role="option">${book.coverUrl?`<img src="${escapeHtml(book.coverUrl)}" alt="">`:"<span></span>"}<span dir="auto"><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author||"")}${book.year?` · ${escapeHtml(book.year)}`:""}</small></span></button>`).join(""):'<div class="suggestion"><span></span><span>No books found</span></div>';
+      results.classList.remove("hidden");
+      results.querySelectorAll("[data-result]").forEach((button,index)=>button.onclick=()=>selectBook(books[index]));
+    }
+
+    function renderSelected() {
+      $("count").textContent=selected.length;
+      $("selected").innerHTML=selected.length?selected.map((item,index)=>`<article class="book selected ${item.state==="linking"?"pending":""}">${item.simania.coverUrl?`<img src="${escapeHtml(item.simania.coverUrl)}" alt="">`:"<div></div>"}<div dir="auto"><strong>${escapeHtml(item.simania.title)}</strong>${item.state==="linking"?'<span class="badge">Connecting…</span>':""}${item.state==="ready"?`<small>${escapeHtml(item.hardcover.title)} · ${escapeHtml((item.hardcover.cached_contributors||[]).map(value=>value?.author?.name).filter(Boolean).join(", "))}</small><a href="${escapeHtml(bookUrl(item.simania))}" target="_blank" rel="noreferrer">Book page</a><a href="${escapeHtml(detailsUrl(item.hardcover))}" target="_blank" rel="noreferrer">Details</a>`:""}${item.state==="error"?`<small>${escapeHtml(item.error||"This book could not be connected.")}</small>`:""}</div><button type="button" data-remove="${index}">Remove</button></article>`).join(""):"<p>No books selected.</p>";
+      document.querySelectorAll("[data-remove]").forEach(button=>button.onclick=()=>{selected.splice(Number(button.dataset.remove),1);renderSelected();refreshRecommendations();});
+    }
+
+    async function selectBook(book) {
+      $("query").value=""; closeSuggestions();
+      if(selected.length>=5) return status("Five books are already selected.","error");
+      if(selected.some(item=>key(item.simania)===key(book))) return status("That book is already selected.","error");
+      const item={simania:book,state:"linking",hardcover:null,error:""};
+      selected.push(item); renderSelected(); status("Connecting the selected book…");
+      try {
+        const result=await api("resolve-book",{book});
+        if(!selected.includes(item)) return;
+        item.hardcover=result.hardcover; item.state="ready"; renderSelected(); status("Book added. Updating recommendations…","ok"); refreshRecommendations();
+      } catch(error) {
+        if(!selected.includes(item)) return;
+        item.state="error"; item.error=error.message; renderSelected(); status(error.message,"error");
+      }
+    }
+
+    async function refreshRecommendations() {
+      const seeds=selected.filter(item=>item.state==="ready").map(item=>({simaniaTitle:item.simania.title,hardcover:item.hardcover}));
+      const run=++recommendationRun;
+      if(!seeds.length) { $("recommendations").innerHTML="<p>No recommendations yet.</p>"; return; }
+      $("recommendations").innerHTML="<p>Updating recommendations…</p>";
+      try {
+        const data=await api("recommendations",{seeds});
+        if(run!==recommendationRun) return;
+        $("recommendations").innerHTML=data.recommendations.length?data.recommendations.map(item=>`<article class="book">${item.simania.coverUrl?`<img src="${escapeHtml(item.simania.coverUrl)}" alt="">`:"<div></div>"}<div dir="rtl"><strong>${escapeHtml(item.simania.title)}</strong><small>${escapeHtml(item.simania.author||"")} · מקור: ${escapeHtml(item.hardcover.title)}</small><a href="${escapeHtml(bookUrl(item.simania))}" target="_blank" rel="noreferrer">עמוד הספר</a><a href="${escapeHtml(detailsUrl(item.hardcover))}" target="_blank" rel="noreferrer">פרטים</a><small>בגלל שאהבת: ${escapeHtml(item.because.join(" + "))} · ציון ${Number(item.score).toFixed(2)}</small></div></article>`).join(""):"<p>No Hebrew recommendations could be matched.</p>";
+        status("Recommendations updated.","ok");
+      } catch(error) { if(run===recommendationRun) { $("recommendations").innerHTML="<p>No recommendations available.</p>"; status(error.message,"error"); } }
+    }
+
+    $("query").oninput=()=>{
+      clearTimeout(searchTimer); const query=$("query").value.trim(); const run=++searchRun;
+      if(query.length<2) { closeSuggestions(); status(query?"Keep typing…":"Ready."); return; }
+      searchTimer=setTimeout(async()=>{try{status("Searching…");const data=await api("search-books",{query});if(run!==searchRun)return;renderSuggestions(data.books);status(data.books.length?"Choose a book from the list.":"No books found.",data.books.length?"ok":"");}catch(error){if(run===searchRun)status(error.message,"error");}},300);
+    };
+    document.addEventListener("click",event=>{if(!event.target.closest(".search-box"))closeSuggestions();});
+  </script>
+</body>
+</html>

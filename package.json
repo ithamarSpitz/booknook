@@ -1,0 +1,15 @@
+{
+  "name": "torimitor",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "supabase:start": "supabase start",
+    "functions:serve": "supabase functions serve --env-file ../book-discovery-plan/.env.local --no-verify-jwt",
+    "web:serve": "python -m http.server 4175 --bind 127.0.0.1 --directory public",
+    "check": "supabase functions serve --help"
+  },
+  "devDependencies": {
+    "supabase": "^2.54.11"
+  }
+}
+
