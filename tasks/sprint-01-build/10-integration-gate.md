@@ -47,7 +47,8 @@ Prove the merged system works end to end on the local stack with the real extern
    - user A: checks default shelves; `search-books` for "הנסיך הקטן" returns results; `add-book` for 4 well-known translated books (choose ones that resolve through Wikidata, e.g. הנסיך הקטן, 1984, הארי פוטר ואבן החכמים, חוות החיות) onto "קראתי"; at least 3 resolve to a work; `move_book` to "קורא עכשיו" persists; `recommendations` returns at least 5 items, none of them shelved; dismiss one and call again, it does not return;
    - user B cannot read user A's shelves through the REST API;
    - exits non-zero with a clear message on any failure.
-2. Fix defects the gate exposes in any allowed file. A schema fix is a new migration, never an edit of an applied one. Do not weaken tests or constraints.
+2. Consolidate the Simania details helper duplicated in `recommendations/` with `_shared/simania.ts`.
+3. Fix defects the gate exposes in any allowed file. A schema fix is a new migration, never an edit of an applied one. Do not weaken tests or constraints.
 
 # Invariants
 

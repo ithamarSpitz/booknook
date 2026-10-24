@@ -73,6 +73,9 @@ paths:
     - harness.py
     - harness.yaml
     - tasks/**
+    - docs/contract.md
+    - supabase/functions/_shared/types.ts
+    - supabase/functions/_shared/db.ts
   review_required:
     - docs/contract.md
     - supabase/functions/_shared/types.ts

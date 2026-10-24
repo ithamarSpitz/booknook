@@ -40,7 +40,8 @@ Change `recommendations` so it reads the user's library from the database, exclu
 5. Localize with an `editions` lookup by `work_id` first, then the existing bridge; bounded parallelism and attempt limit.
 6. `shared_tags` computed from stored tags only.
 7. Replace the user's non-dismissed rows; return the cards.
-8. Put pure logic (seed selection, scoring, exclusion, shared tags) in `recommendations/logic.ts` and unit test it. Test the handler with stubbed `fetch` and a fake DB client: zero seeds, exclusion of shelved and dismissed, English-only result kept with null `simania_id`, unauthenticated 401.
+8. Linking a localized edition (contract, "Linking a localized edition"): when a new `editions` row is needed, fetch Simania details and rating with a small helper inside `recommendations/` (same MCP call pattern as `_shared/simania.ts`). `_shared/simania.ts` belongs to S1-T2, which runs in parallel; the duplication is accepted and S1-T10 may consolidate it.
+9. Put pure logic (seed selection, scoring, exclusion, shared tags) in `recommendations/logic.ts` and unit test it. Test the handler with stubbed `fetch` and a fake DB client: zero seeds, exclusion of shelved and dismissed, English-only result kept with null `simania_id`, unauthenticated 401.
 
 # Out of scope
 
