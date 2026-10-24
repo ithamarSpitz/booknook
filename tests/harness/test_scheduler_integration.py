@@ -375,3 +375,83 @@ sprints:
     assert not (tmp_path / "out/B.txt").exists()
     assert state.get("A").status == TaskStatus.VERIFIED
     assert state.get("B").status == TaskStatus.VERIFIED
+
+
+class FailingOnceRunner(FakeRunner):
+    def __init__(self):
+        self.calls = 0
+
+    def implement(self, task, workspace, timeout_minutes, attempt, previous_failure, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return AgentResult(False, "", "first attempt fails")
+        return super().implement(task, workspace, timeout_minutes, attempt, previous_failure)
+
+
+def test_resumed_worktree_is_diffed_against_its_own_base_not_a_newer_head(tmp_path: Path):
+    _init_repo(tmp_path)
+    write(tmp_path / ".gitignore", ".harness/\n")
+    write(tmp_path / "AGENTS.md", "# test\n")
+    write(tmp_path / "settings.txt", "parallel: 4\n")
+    write(tmp_path / "harness.yaml", """
+execution:
+  max_parallel_agents: 1
+  default_max_attempts: 1
+  default_timeout_minutes: 1
+cursor:
+  command: agent
+  output_format: text
+  models: {}
+verification:
+  global_task_commands: []
+  stage_commands: []
+paths:
+  protected: [settings.txt]
+  review_required: []
+""")
+    verify = file_exists_command("out/A.txt")
+    write(tmp_path / "tasks/A.md", f"""---
+allowed_paths: [out/A.txt]
+verification: [{yaml_quote(verify)}]
+review: false
+---
+# A
+""")
+    write(tmp_path / "tasks/roadmap.yaml", """
+project: test
+sprints:
+  s1:
+    tasks:
+      A: {file: tasks/A.md, stage: 1, depends_on: []}
+    stage_verification:
+      "1": []
+""")
+    run(["git", "add", "."], tmp_path)
+    run(["git", "commit", "-m", "initial"], tmp_path)
+    first_base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True, capture_output=True, check=True).stdout.strip()
+
+    config = HarnessConfig.load(tmp_path / "harness.yaml")
+    roadmap = Roadmap(tmp_path, tmp_path / "tasks/roadmap.yaml")
+    state = StateStore(tmp_path / ".harness/state.json")
+    worktrees = WorktreeManager(tmp_path, tmp_path / ".harness")
+    verifier = Verifier(config, tmp_path / ".harness/logs", worktrees)
+    runner = FailingOnceRunner()
+    scheduler = Scheduler(tmp_path, config, state, worktrees, runner, verifier)
+    task = roadmap.sprint("s1").tasks["A"]
+
+    assert not scheduler._run_task(task, first_base).ok
+    assert state.get("A").base_ref == first_base
+
+    # The operator commits a protected file between the blocked attempt and the retry.
+    write(tmp_path / "settings.txt", "parallel: 2\n")
+    run(["git", "commit", "-am", "operator change"], tmp_path)
+    newer_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True, capture_output=True, check=True).stdout.strip()
+
+    runtime = state.get("A")
+    runtime.status = TaskStatus.RETRY
+    runtime.attempt = 0
+    state.save()
+    outcome = scheduler._run_task(task, newer_head)
+
+    assert outcome.ok, state.get("A").last_error
+    assert "settings.txt" not in (state.get("A").last_error or "")

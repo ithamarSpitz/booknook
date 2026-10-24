@@ -372,6 +372,10 @@ class Scheduler:
                 self.state.save()
             else:
                 worktree = Path(runtime.worktree)
+                # An existing worktree is diffed against the commit it was created from. Using a newer
+                # stage base would report every later integration commit as a change by this task.
+                if runtime.base_ref:
+                    base_ref = runtime.base_ref
 
             task_env = self.environment.task_env(task, worktree)
             if created:
