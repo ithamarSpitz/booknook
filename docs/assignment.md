@@ -19,8 +19,8 @@ A private Hebrew book library with discovery recommendations, for about 10 invit
 
 ## Product rules
 
-1. One book = one work. The original and every translation are the same book. Several Hebrew translations may exist; the user sees one book.
-2. Hebrew first. If no Hebrew edition is found for a recommended book, it may be shown in English.
+1. One book = one work. The original and every translation are the same book. Several Hebrew translations may exist; the user sees one book, and a user cannot shelve two editions of the same work.
+2. Hebrew first. If no Hebrew edition is found for a recommended book, it is shown in English. Shelves hold Simania books only, so an English-only recommendation can be dismissed but not shelved.
 3. A book that is not on Hardcover can still be shelved. It is simply not used as a recommendation seed.
 4. Users never create or fix catalog records. There is no admin review queue.
 5. Title matching: deterministic normalization and fuzzy matching first. Only when that is ambiguous, an LLM fallback (not built yet, deferred).

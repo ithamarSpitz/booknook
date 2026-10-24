@@ -29,11 +29,16 @@ const typeNames = [
   "AddBookRequest", "AddBookResponse",
   "BookDetailsRequest", "BookDetailsResponse",
   "RecommendationsRequest", "RecommendationsResponse",
+  "MoveBookArgs", "MoveShelfArgs", "DeleteShelfArgs", "RemoveBookArgs",
 ];
 for (const name of typeNames) {
   if (types && !new RegExp(`export\\s+(type|interface)\\s+${name}\\b`).test(types)) {
     failures.push(`types.ts does not export ${name}`);
   }
+}
+
+for (const phrase of ["see architecture", "see docs/architecture", "as described in docs/architecture"]) {
+  if (contract.toLowerCase().includes(phrase)) failures.push(`docs/contract.md defers to the architecture ("${phrase}"); restate the rule`);
 }
 
 for (const name of ["SHELF_KINDS", "FUNCTIONS", "ROUTES", "RPCS"]) {

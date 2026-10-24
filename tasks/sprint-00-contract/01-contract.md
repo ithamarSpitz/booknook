@@ -40,6 +40,15 @@ Write the binding interface between the parallel lanes of sprint S1: every table
 3. `supabase/functions/_shared/db.ts`: `serviceClient()` and `userClient(req)` factories using `npm:@supabase/supabase-js@2.45.4` and the standard `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` env vars, plus `requireUser(req)` that returns the user id or throws `HttpError(401)`.
 4. `public/js/contract.js`: `export const SHELF_KINDS`, `FUNCTIONS` (function names), `ROUTES` (hash routes), `RPCS` (RPC names and parameter names). JSDoc typedefs for `BookCard` and `RecommendationCard`.
 
+# Quality bar (a reviewer rejected earlier attempts for these)
+
+- Self-contained: restate every algorithm, bound and rule an implementer needs (recommendation seeds, scoring, exclusions, localization limits, freshness windows, 409 rules). Never write "see architecture" in place of the rule.
+- A field-by-field table for `BookCard` and `RecommendationCard`: each field, its type, and the exact table column (or computation) that fills it.
+- Typed RPC arguments and results in `types.ts`: `MoveBookArgs`, `MoveShelfArgs`, `DeleteShelfArgs`, `RemoveBookArgs`, each matching the SQL signature in the contract.
+- `profiles`: clients update only `display_name` and `locale`.
+- English-only recommendations: `simania_id` null, no add-to-shelf.
+- One work per user: the `add-book` 409 rules from `functions.md`.
+
 # Out of scope
 
 Migrations, function implementations, UI. Do not change existing function behavior.

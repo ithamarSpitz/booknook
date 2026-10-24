@@ -15,7 +15,7 @@ All functions: POST with a JSON body, CORS for the web origin, JWT verified (`ve
 - Behavior:
   1. Upsert the `editions` row from Simania `books_get_details` and `books_get_rating` if missing or older than 30 days.
   2. If `resolve_status` is `pending`, or `not_found` older than 14 days, resolve to Hardcover (see `matching.md`) and upsert `works`.
-  3. Insert the caller's `shelf_books` row at the end of the shelf. If the book is already on one of the caller's shelves, return 409.
+  3. Insert the caller's `shelf_books` row at the end of the shelf. Return 409 if this edition is already on one of the caller's shelves, or if another edition with the same non-null `work_id` is.
   4. Return the card data.
 - Never fails the add because resolution failed: the book is shelved with `work_id` null.
 
@@ -33,7 +33,7 @@ All functions: POST with a JSON body, CORS for the web origin, JWT verified (`ve
   2. Candidate score: for each seed, the first 40 `works.similar_ids`, score `1 - rank/40`, summed across seeds.
   3. Exclude: works of any book on any of the caller's shelves (including want and stopped), and dismissed recommendations.
   4. Load missing candidate works from Hardcover in batches of 50; upsert `works`.
-  5. Localize the top candidates to Hebrew editions (see `matching.md`), 5 in parallel, stop at 20 results or 40 attempts. Keep English-only results with `simania_id` null.
+  5. Localize the top candidates to Hebrew editions (see `matching.md`), 5 in parallel, stop at 20 results or 40 attempts. Keep English-only results with `simania_id` null; the UI shows them with the Hardcover title and cover and offers dismiss but not add-to-shelf.
   6. `shared_tags`: tags present on the candidate and on at least one of its seeds.
   7. Replace the caller's non-dismissed rows in `recommendations`, return them.
 - Zero seeds returns `{ recommendations: [] }` with status 200.

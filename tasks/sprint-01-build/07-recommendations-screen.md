@@ -33,7 +33,7 @@ The "המלצות בשבילי" screen.
 # Scope
 
 1. `#recs`: show stored recommendations from the table at once, with a "רענן" action that calls the `recommendations` function. A clear loading state for a call that can take tens of seconds.
-2. Each item: cover in the same size as shelf covers, title, and one reason line: "בגלל שקראת X" / "בגלל שקראת X ו-Y" from `because`, or the shared tags. English-only items show the English title.
+2. Each item: cover in the same size as shelf covers, title, and one reason line: "בגלל שקראת X" / "בגלל שקראת X ו-Y" from `because`, or the shared tags. English-only items (`simania_id` null) show the Hardcover title and cover, a short note that there is no Hebrew edition, and only "לא מעניין אותי" (no add-to-shelf).
 3. Tap opens the shared book card (`card.js`) with "הוסף למדף" (shelf select, then the `add-book` function) and "לא מעניין אותי" (sets `dismissed`, removes it from view).
 4. Empty state when the user has no read or reading books: one line pointing them to the library.
 5. Tests for the reason-line builder and list state helpers.

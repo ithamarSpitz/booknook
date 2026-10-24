@@ -33,7 +33,7 @@ Each screen module exports `mount(root, ctx)` where `ctx` holds `{ api, data, ro
 - **Library** (`#library`): shelves in `position` order, books in `position` order, counts, "+" tile, "+ מדף חדש", rename custom shelves, long-press drag for books and shelves (persisted through `move_book` and `move_shelf`).
 - **Book card**: cover, title, author, shelf, Simania rating and count, translator, publisher, year, pages, series, description. Actions: move to shelf (select), remove from library. No external links.
 - **Add book** (from "+" tile, preselected shelf; or from `#search`, user picks the shelf): results while typing, 300 ms debounce, loading, no results, error. Tap a result to add. The book appears at once with a pending state, then fills from the `add-book` response.
-- **Recommendations** (`#recs`): covers with the reason line ("בגלל שקראת X ו-Y" or the shared tags), tap opens the card with "add to shelf" and "לא מעניין אותי". Long loading state. Empty state when there are no seeds.
+- **Recommendations** (`#recs`): covers with the reason line ("בגלל שקראת X ו-Y" or the shared tags), tap opens the card with "add to shelf" and "לא מעניין אותי". English-only items (no `simania_id`) show the Hardcover title and cover, a short note that there is no Hebrew edition, and only "לא מעניין אותי". Long loading state. Empty state when there are no seeds.
 - **Login** (`#login`): email and password, errors in Hebrew, password reset email.
 - **Settings** (`#settings`): display name, log out.
 - **First run**: a new user with no books sees one line inviting them to add a book they loved, pointing at the "+" tile.

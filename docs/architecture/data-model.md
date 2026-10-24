@@ -16,7 +16,7 @@ All tables live in `public`. Timestamps are `timestamptz default now()`. The con
 | locale | text not null default 'he' | |
 | created_at | timestamptz | |
 
-RLS: select and update where `id = auth.uid()`. No insert or delete from clients.
+RLS: select and update where `id = auth.uid()`; clients may update only `display_name` and `locale` (column-level grant). No insert or delete from clients.
 
 ## works
 
@@ -80,7 +80,7 @@ RLS: all operations where `user_id = auth.uid()`; insert only with `kind = 'cust
 | finished_at | timestamptz | set when the book first lands on a `read` shelf |
 | rating | smallint check (rating between 1 and 5) | deferred, unused |
 
-PK `(user_id, simania_id)`: a book sits on one shelf. Unique `(shelf_id, position)` deferrable initially deferred. A check or trigger guarantees `shelf_id` belongs to `user_id`.
+PK `(user_id, simania_id)`: a book sits on one shelf. One work per user is enforced by `add-book` (409 when another edition of the same work is already shelved), not by a constraint, because `work_id` can be resolved after the book is shelved. A later resolution that creates such a duplicate is tolerated; recommendations exclude by work either way. Unique `(shelf_id, position)` deferrable initially deferred. A check or trigger guarantees `shelf_id` belongs to `user_id`.
 
 Deleting a custom shelf: its books move to the end of the `want` shelf (handled by the `delete_shelf` RPC).
 
