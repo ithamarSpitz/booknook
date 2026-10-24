@@ -46,7 +46,7 @@ def main() -> int:
             if result.output:
                 print(result.output, file=sys.stderr)
             return 3
-        if result.output.strip() != "OK":
+        if result.output.strip().rstrip(".") != "OK":
             print("Cursor headless probe returned unexpected output:", file=sys.stderr)
             print(result.output, file=sys.stderr)
             return 3
