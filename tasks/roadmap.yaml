@@ -1,0 +1,118 @@
+project: torimitor
+sprints:
+  S0-contract:
+    name: Interface contract (human review gate before S1)
+    tasks:
+      S0-T1:
+        file: tasks/sprint-00-contract/01-contract.md
+        stage: 1
+        depends_on: []
+    stage_verification:
+      '1':
+      - npm run check:contract
+      - npm run check:functions
+
+  S1-build:
+    name: Database, functions, app shell, screens, integration gate
+    tasks:
+      S1-T1:
+        file: tasks/sprint-01-build/01-database.md
+        stage: 1
+        depends_on: []
+      S1-T2:
+        file: tasks/sprint-01-build/02-add-book-functions.md
+        stage: 1
+        depends_on: []
+      S1-T3:
+        file: tasks/sprint-01-build/03-recommendations-function.md
+        stage: 1
+        depends_on: []
+      S1-T4:
+        file: tasks/sprint-01-build/04-app-shell.md
+        stage: 1
+        depends_on: []
+      S1-T5:
+        file: tasks/sprint-01-build/05-readme.md
+        stage: 1
+        depends_on: []
+      S1-T6:
+        file: tasks/sprint-01-build/06-login-settings.md
+        stage: 2
+        depends_on:
+        - S1-T4
+      S1-T7:
+        file: tasks/sprint-01-build/07-recommendations-screen.md
+        stage: 2
+        depends_on:
+        - S1-T3
+        - S1-T4
+      S1-T8:
+        file: tasks/sprint-01-build/08-add-book-screen.md
+        stage: 2
+        depends_on:
+        - S1-T2
+        - S1-T4
+      S1-T9:
+        file: tasks/sprint-01-build/09-first-run-pwa.md
+        stage: 2
+        depends_on:
+        - S1-T4
+      S1-T10:
+        file: tasks/sprint-01-build/10-integration-gate.md
+        stage: 3
+        depends_on:
+        - S1-T1
+        - S1-T6
+        - S1-T7
+        - S1-T8
+        - S1-T9
+    stage_verification:
+      '1':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run test:db
+      '2':
+      - npm run check:functions
+      - npm run test:web
+      '3':
+      - npm run test:db
+      - npm run verify:integration
+
+  S2-release:
+    name: Deployment preparation
+    tasks:
+      S2-T1:
+        file: tasks/sprint-02-release/01-deploy-prep.md
+        stage: 1
+        depends_on: []
+    stage_verification:
+      '1':
+      - npm run test:db
+      - npm run check:functions
+      - npm run test:functions
+
+  demo:
+    name: Harness demo DAG
+    tasks:
+      D-T1:
+        file: tasks/demo/01-foundation.md
+        stage: 1
+        depends_on: []
+      D-T2:
+        file: tasks/demo/02-left.md
+        stage: 2
+        depends_on:
+        - D-T1
+      D-T3:
+        file: tasks/demo/03-right.md
+        stage: 2
+        depends_on:
+        - D-T1
+      D-T4:
+        file: tasks/demo/04-join.md
+        stage: 3
+        depends_on:
+        - D-T2
+        - D-T3

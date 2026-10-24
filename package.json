@@ -4,12 +4,18 @@
   "version": "0.1.0",
   "scripts": {
     "supabase:start": "supabase start",
-    "functions:serve": "supabase functions serve --env-file ../book-discovery-plan/.env.local --no-verify-jwt",
+    "functions:serve": "node scripts/serve-functions.mjs",
     "web:serve": "python -m http.server 4175 --bind 127.0.0.1 --directory public",
-    "check": "supabase functions serve --help"
+    "check:functions": "deno check supabase/functions",
+    "test:functions": "deno test --permit-no-files --allow-env --allow-read tests/functions",
+    "test:web": "node --test \"tests/web/**/*.test.mjs\"",
+    "test:db": "supabase db reset && supabase test db",
+    "check:contract": "node scripts/check-contract.mjs",
+    "check:harness": "python harness.py validate",
+    "verify:integration": "node scripts/verify-integration.mjs"
   },
   "devDependencies": {
+    "deno": "^2.9.6",
     "supabase": "^2.54.11"
   }
 }
-

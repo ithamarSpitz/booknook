@@ -13,11 +13,11 @@ type Entity = {
   claims?: Record<string, Array<{ mainsnak?: { datavalue?: { value?: { id?: string } } } }>>;
 };
 
-function entityTypes(entity?: Entity): string[] {
+function entityTypes(entity?: Entity | null): string[] {
   return (entity?.claims?.P31 ?? []).map((claim) => claim?.mainsnak?.datavalue?.value?.id).filter(Boolean) as string[];
 }
 
-function isWrittenWork(entity?: Entity): boolean {
+function isWrittenWork(entity?: Entity | null): boolean {
   const types = entityTypes(entity);
   if (types.some((type) => REJECT_TYPES.has(type))) return false;
   return types.some((type) => WORK_TYPES.has(type)) || Boolean(entity?.claims?.P50?.length);
@@ -30,7 +30,7 @@ async function wikidataEntity(id: string, languages = "he|en"): Promise<Entity |
   return (await response.json()).entities?.[id] ?? null;
 }
 
-async function wikidataAuthor(entity?: Entity, language = "en"): Promise<string> {
+async function wikidataAuthor(entity?: Entity | null, language = "en"): Promise<string> {
   const id = entity?.claims?.P50?.[0]?.mainsnak?.datavalue?.value?.id;
   if (!id) return "";
   return (await wikidataEntity(id, `${language}|en`))?.labels?.[language]?.value ?? "";

@@ -1,0 +1,23 @@
+# Testing
+
+## Layers
+
+| Layer | Tool | Command | Network |
+|---|---|---|---|
+| Database | pgTAP via Supabase CLI | `npm run test:db` | local stack only |
+| Edge Functions, types | Deno | `npm run check:functions` | none |
+| Edge Functions, unit | Deno test with stubbed `fetch` and a fake DB client | `npm run test:functions` | none |
+| Web, pure modules | `node --test` | `npm run test:web` | none |
+| Integration gate | Node script against local stack and live APIs | `npm run verify:integration` | live |
+
+## Shared local Supabase stack
+
+There is one local Supabase stack (`project_id = "torimitor"`, API on 54321, DB on 54322), started once by the operator with `npm run supabase:start`. Harness worktrees all talk to it.
+
+- Only tasks whose brief says so may run `supabase db reset` or `supabase test db`. The roadmap never puts two such tasks in the same stage.
+- No task starts, stops or reconfigures the stack.
+- Automated tests never call Simania, Hardcover, Wikidata or NLI. Stub `fetch` with recorded fixtures under `tests/functions/fixtures/`.
+
+## Fixtures
+
+Use real recorded shapes. The prototype (`prototype/test-page.html` and the current `_shared` code) shows the response formats.

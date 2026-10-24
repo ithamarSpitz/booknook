@@ -1,0 +1,130 @@
+version: 5
+
+execution:
+  max_parallel_agents: 4
+  default_max_attempts: 3
+  default_timeout_minutes: 35
+  base_ref: null
+  keep_successful_worktrees: false
+  stall_timeout_minutes: 12
+  watchdog_poll_seconds: 10
+  keep_awake_during_run: true
+
+worktree:
+  setup_commands: [npm ci]
+  setup_timeout_minutes: 10
+
+cursor:
+  enabled: false
+  command: agent
+  output_format: text
+  trust_harness_worktrees: true
+  models:
+    worker: composer-2.5
+    hard_worker: cursor-grok-4.6-high
+    reviewer: cursor-grok-4.6-high
+    escalation: claude-opus-5-thinking-high
+
+providers:
+  priority:
+    - codex
+    - cursor
+
+codex:
+  enabled: true
+  command: codex
+  reasoning_effort: high
+  sandbox: workspace-write
+  windows_implementation_sandbox: danger-full-access
+  approval_policy: never
+  network_access: true
+  implementation_sequence:
+    - model: gpt-5.6-sol
+      reasoning_effort: medium
+    - model: gpt-5.6-sol
+      reasoning_effort: high
+    - model: gpt-6-astra
+      reasoning_effort: medium
+  review_model: gpt-5.6-sol
+  planner_model: gpt-5.6-sol
+
+retry:
+  sequence:
+    - worker
+    - hard_worker
+    - escalation
+
+verification:
+  global_task_commands:
+    - git diff --check
+  stage_commands: []
+  # Fallback only; a real environment value wins. Points at the secrets file outside the repo.
+  env:
+    TORIMITOR_ENV_FILE: C:/Users/itas1/book-discovery-plan/.env.local
+
+paths:
+  protected:
+    - docs/assignment.md
+    - ARCHITECTURE.md
+    - docs/architecture/**
+    - design/**
+    - prototype/**
+    - harness/**
+    - harness.py
+    - harness.yaml
+    - tasks/**
+  review_required:
+    - docs/contract.md
+    - supabase/functions/_shared/types.ts
+    - supabase/migrations/**
+    - supabase/config.toml
+    - package.json
+    - package-lock.json
+    - public/js/api.js
+    - public/js/config.js
+
+context:
+  aliases:
+    assignment: docs/assignment.md
+    architecture.overview: docs/architecture/overview.md
+    architecture.data_model: docs/architecture/data-model.md
+    architecture.functions: docs/architecture/functions.md
+    architecture.matching: docs/architecture/matching.md
+    architecture.frontend: docs/architecture/frontend.md
+    architecture.testing: docs/architecture/testing.md
+    contract: docs/contract.md
+    design: design/library.html
+
+environment:
+  docker_enabled: false
+
+quota:
+  policy: wait
+  reset_at: null
+  probe_interval_minutes: 60
+  reset_grace_minutes: 5
+  keep_awake: true
+  teardown_environment_while_waiting: true
+
+capacity:
+  policy: wait
+  retry_interval_minutes: 5
+  keep_awake: true
+  teardown_environment_while_waiting: true
+
+plan_repair:
+  enabled: true
+  planner_model_class: escalation
+  timeout_minutes: 20
+
+doctor:
+  required_commands:
+    - node
+    - npx
+    - docker
+    - codex
+  required_env: []
+  min_free_disk_gb: 3
+  check_cursor_models: false
+  minimum_versions:
+    node: "22.0.0"

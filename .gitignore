@@ -5,3 +5,23 @@ supabase/.branches/
 supabase/.temp/
 .DS_Store
 
+
+# Harness runtime state
+.harness/state.json
+.harness/logs/
+.harness/reports/
+.harness/worktrees/
+.harness/usage.jsonl
+.harness/runs/
+.harness/failures/
+.harness/change_requests/
+.harness/diagnostics/
+.harness/plan_revisions/
+
+# Python
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
