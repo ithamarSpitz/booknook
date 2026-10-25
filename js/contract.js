@@ -7,9 +7,9 @@ export const SHELF_KINDS = Object.freeze({
 });
 
 export const FUNCTIONS = Object.freeze({
-  SEARCH_BOOKS: "search-books",
   ADD_BOOK: "add-book",
   BOOK_DETAILS: "book-details",
+  LINK_EDITION: "link-edition",
   RECOMMENDATIONS: "recommendations",
 });
 
@@ -81,5 +81,6 @@ export const RPCS = Object.freeze({
  * @property {string} generated_at
  * @property {boolean} english_only
  * @property {boolean} can_add
+ * @property {{source: 'wikidata'|'nli', title: string, author: string|null}|null} hebrew_hint English-only: Hebrew title for the browser's Simania match
  */
 

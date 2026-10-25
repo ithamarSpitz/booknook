@@ -1,5 +1,10 @@
 import { FUNCTIONS } from "./contract.js";
 import { cloneLibrary } from "./data.js";
+import { fetchSimaniaPayload, searchBooks } from "./simania.js";
+
+// Simania is called from the browser (it blocks Edge Function IPs); the
+// response keeps the old search-books envelope so mapSearchResults is unchanged.
+const searchSimania = async (query) => ({ books: await searchBooks(query) });
 
 export const SEARCH_DEBOUNCE_MS = 300;
 export const MIN_SEARCH_QUERY_LEN = 2;
@@ -240,7 +245,7 @@ export function markPendingBooks(libRoot, state) {
 async function callAddBook(simaniaId, shelfId) {
   const api = await import("./api.js");
   const { FUNCTIONS_URL, SUPABASE_ANON_KEY } = await import("./config.js");
-  const session = await api.getSession();
+  const [session, simania] = await Promise.all([api.getSession(), fetchSimaniaPayload(simaniaId)]);
   const token = session?.access_token || SUPABASE_ANON_KEY;
   const res = await fetch(`${FUNCTIONS_URL}/${FUNCTIONS.ADD_BOOK}`, {
     method: "POST",
@@ -249,7 +254,7 @@ async function callAddBook(simaniaId, shelfId) {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ simania_id: simaniaId, shelf_id: shelfId }),
+    body: JSON.stringify({ simania_id: simaniaId, shelf_id: shelfId, simania }),
   });
   const json = await res.json().catch(() => ({}));
   if (res.status === 409) {
@@ -483,10 +488,7 @@ function wirePicker(ctx) {
     pickerCleanup = wireSearchInput({
       input,
       panel,
-      callSearch: (query) => {
-        const api = resolveCtx(ctx)?.api ?? ctx.api;
-        return api.callFunction(FUNCTIONS.SEARCH_BOOKS, { query });
-      },
+      callSearch: searchSimania,
       onPick: (hit) => {
         if (presetShelfId) void addBookToShelf(hit, presetShelfId, { ctx });
       },
@@ -596,7 +598,7 @@ export async function mount(root, ctx) {
   searchUnmount = wireSearchInput({
     input,
     panel,
-    callSearch: (query) => ctx.api.callFunction(FUNCTIONS.SEARCH_BOOKS, { query }),
+    callSearch: searchSimania,
     onPick: (hit) => showShelfPick(hit),
   });
 

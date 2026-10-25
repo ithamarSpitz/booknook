@@ -1,4 +1,5 @@
 import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
+import { fetchSimaniaPayload, matchHebrewBook, simaniaIdOf } from "./simania.js";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
 export const LIBRARY_REMOVE_LABEL = "הסר מהספרייה";
@@ -164,7 +165,76 @@ export function recommendationFromApiCard(card) {
     generated_at: String(c.generated_at ?? ""),
     english_only: simaniaId == null,
     can_add: simaniaId != null,
+    hebrew_hint: simaniaId == null && c.hebrew_hint && typeof c.hebrew_hint === "object"
+      ? {
+        source: c.hebrew_hint.source === "nli" ? "nli" : "wikidata",
+        title: String(c.hebrew_hint.title ?? ""),
+        author: c.hebrew_hint.author != null ? String(c.hebrew_hint.author) : null,
+      }
+      : null,
   };
+}
+
+/**
+ * Localizes English-only cards in the browser: the server found a Hebrew title
+ * (hebrew_hint) but cannot reach Simania, so match it here and ask link-edition
+ * to store and link the edition. A miss or failure leaves the card English-only.
+ * @param {import('./contract.js').RecommendationCard[]} items
+ * @param {{
+ *   callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>,
+ *   onLinked: (workId: string, patch: { simania_id: number, title: string, author: string | null, cover_url: string | null }) => void,
+ *   isCurrent: () => boolean,
+ *   match?: typeof matchHebrewBook,
+ *   fetchPayload?: typeof fetchSimaniaPayload,
+ *   concurrency?: number,
+ * }} deps
+ */
+export async function localizeRecommendations(items, deps) {
+  const match = deps.match ?? matchHebrewBook;
+  const fetchPayload = deps.fetchPayload ?? fetchSimaniaPayload;
+  const queue = items.filter((rec) => rec.english_only && rec.hebrew_hint?.title);
+  async function one(rec) {
+    const hint = rec.hebrew_hint;
+    const book = await match(hint.title, hint.author ?? "");
+    const simaniaId = simaniaIdOf(book);
+    if (simaniaId == null || !deps.isCurrent()) return;
+    const simania = await fetchPayload(simaniaId);
+    if (!deps.isCurrent()) return;
+    const res = await deps.callFunction(FUNCTIONS.LINK_EDITION, {
+      work_id: rec.work_id,
+      simania_id: simaniaId,
+      source: hint.source,
+      simania,
+    });
+    if (res && typeof res === "object" && Number(res.simania_id) === simaniaId && deps.isCurrent()) {
+      deps.onLinked(rec.work_id, {
+        simania_id: simaniaId,
+        title: String(res.title ?? rec.title),
+        author: res.author != null ? String(res.author) : null,
+        cover_url: res.cover_url != null ? String(res.cover_url) : null,
+      });
+    }
+  }
+  const workers = Array.from({ length: Math.min(deps.concurrency ?? 3, queue.length) }, async () => {
+    while (queue.length && deps.isCurrent()) {
+      const rec = queue.shift();
+      try {
+        await one(rec);
+      } catch (err) {
+        console.warn(`Could not localize ${rec.title}:`, err);
+      }
+    }
+  });
+  await Promise.all(workers);
+}
+
+/** Applies a link-edition result to the matching card. */
+export function applyLocalizedRecommendation(items, workId, patch) {
+  return items.map((rec) =>
+    rec.work_id === workId
+      ? { ...rec, ...patch, english_only: false, can_add: true, hebrew_hint: null }
+      : rec
+  );
 }
 
 /**
@@ -631,6 +701,14 @@ export async function mount(root, ctx) {
         ? res.recommendations.map(recommendationFromApiCard)
         : [];
       items = applyRecommendationRefresh(list, excludedWorkIds);
+      void localizeRecommendations(items, {
+        callFunction: ctx.api.callFunction,
+        isCurrent: () => alive && generation === refreshGeneration,
+        onLinked: (workId, patch) => {
+          items = applyLocalizedRecommendation(items, workId, patch);
+          render();
+        },
+      });
     } catch (err) {
       if (alive && generation === refreshGeneration) {
         ctx.showToast(err instanceof Error ? err.message : "לא הצלחנו לרענן המלצות");
