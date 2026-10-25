@@ -59,4 +59,5 @@ Prove the merged system works end to end on the local stack with the real extern
 # Acceptance criteria
 
 1. All verification commands pass.
-2. The script leaves no users, no running function server, and no stray data behind.
+2. The script leaves no throwaway users and no running function server behind. Cleanup runs every step even when one fails, and reports all errors. Deleting a user cascades to its profile, shelves, shelf books and recommendations; that is the user data to clean up.
+3. Catalog rows (`works`, `editions`, `search_cache`) are a shared cache on a shared stack. The gate must not delete, restore or diff them.
