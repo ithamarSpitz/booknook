@@ -8,6 +8,7 @@ import * as auth from "./auth.js";
 import * as settings from "./settings.js";
 import * as recs from "./recs.js";
 import * as addBook from "./add-book.js";
+import * as invite from "./invite.js";
 import { createRecsRefresher } from "./recs-refresh.js";
 import { SHELVES_CHANGED } from "./events.js";
 
@@ -37,6 +38,7 @@ const screens = {
   [ROUTES.RECOMMENDATIONS]: document.getElementById("screen-recs"),
   [ROUTES.SEARCH]: document.getElementById("screen-search"),
   [ROUTES.SETTINGS]: document.getElementById("screen-settings"),
+  [ROUTES.INVITE]: document.getElementById("screen-invite"),
   [ROUTES.LOGIN]: document.getElementById("screen-login"),
 };
 
@@ -45,6 +47,7 @@ const mounts = {
   [ROUTES.RECOMMENDATIONS]: recs,
   [ROUTES.SEARCH]: addBook,
   [ROUTES.SETTINGS]: settings,
+  [ROUTES.INVITE]: invite,
   [ROUTES.LOGIN]: auth,
 };
 

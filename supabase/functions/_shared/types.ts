@@ -239,3 +239,16 @@ export interface ReplaceRecommendationsArgs {
 }
 
 export type ReplaceRecommendationsResult = RecommendationRow[];
+
+export interface InviteUserRequest {
+  email: string;
+}
+
+export interface InvitationRow {
+  email: string;
+  created_at: string;
+}
+
+export interface InviteUserResponse {
+  invitation: InvitationRow;
+}

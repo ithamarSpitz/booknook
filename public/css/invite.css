@@ -1,0 +1,101 @@
+/* Invite friends screen */
+
+.invite-wrap {
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.invite-title {
+  margin: 0 0 10px;
+  font: 700 34px/1.15 "Frank Ruhl Libre", serif;
+  color: #5a3714;
+}
+
+.invite-lead {
+  margin: 0 0 22px;
+  line-height: 1.6;
+  color: var(--muted, #6b5a48);
+}
+
+.invite-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 20px 24px;
+  background: #fffdf8;
+  border-radius: 12px;
+  box-shadow: -4px 4px 0 rgba(90, 55, 20, 0.16);
+  border: 1.5px solid #e8dcc8;
+}
+
+.invite-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+  color: #6b4a2a;
+  font-size: 14px;
+}
+
+.invite-field input {
+  font: inherit;
+  font-weight: 400;
+  padding: 11px 14px;
+  border: 1.5px solid #d6cfc2;
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+}
+
+.invite-error {
+  margin: 0;
+  color: #8b2e2e;
+  font-size: 14px;
+}
+
+.invite-submit {
+  align-self: flex-start;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 22px;
+  font: inherit;
+  font-weight: 700;
+  background: #3a220c;
+  color: #fffdf8;
+  cursor: pointer;
+}
+
+.invite-submit:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.invite-sent h2 {
+  margin: 30px 0 10px;
+  font-size: 18px;
+  color: #5a3714;
+}
+
+.invite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.invite-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid #eee2cc;
+  overflow-wrap: anywhere;
+}
+
+.invite-list small {
+  color: var(--muted, #6b5a48);
+  white-space: nowrap;
+}
+
+.invite-list .invite-empty {
+  color: var(--muted, #6b5a48);
+}

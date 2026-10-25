@@ -228,7 +228,7 @@
   .page-burger{position:fixed;top:14px;right:14px;margin:0;z-index:8;background:#fffdf8;box-shadow:-3px 3px 0 rgba(90,55,20,.18)}
   .page-burger[hidden]{display:none}
   /* room under the page burger so it never covers a screen title */
-  #screen-recs .screen-inner,#screen-search .screen-inner,#screen-settings .settings-wrap{padding-top:70px}
+  #screen-recs .screen-inner,#screen-search .screen-inner,#screen-invite .screen-inner,#screen-settings .settings-wrap{padding-top:70px}
   .screen-inner{padding:28px 16px 40px;max-width:1180px;margin:0 auto}
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:50;padding:12px 20px;border-radius:8px;background:#3a220c;color:#fffdf8;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:min(92vw,420px);text-align:center}
   .toast[hidden]{display:none}

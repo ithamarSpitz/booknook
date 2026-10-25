@@ -66,3 +66,12 @@ Public sign-up must already be off (step 1). In **Authentication → Users**, in
 ## Local development (unchanged)
 
 `npm run supabase:start`, `npm run functions:serve`, `npm run web:serve`, then open [http://127.0.0.1:4175](http://127.0.0.1:4175).
+
+## Invites from inside the app
+
+Any signed-in user can invite friends from the menu (**הזמנת חברים**, route `#invite`). The `invite-user` Edge Function sends the invite (limit 10 per user per day) and records it in `public.invitations`.
+
+Two dashboard steps are needed once, both under **Authentication → Emails**:
+
+1. **SMTP Settings**: set up custom SMTP. Supabase's built-in sender only delivers to members of the project's team, so invites to anyone else fail until this is set. A Gmail app password works (host `smtp.gmail.com`, port `465`, username and sender = the Gmail address, sender name `תורימיטור`).
+2. **Templates → Invite user**: subject `{{ .Data.inviter_name }} מזמין/ה אותך לתורימיטור`, body = the contents of `supabase/templates/invite.html`. Template editing is unlocked only after step 1.

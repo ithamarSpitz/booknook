@@ -21,9 +21,18 @@ additional_redirect_urls = ["https://ithamarspitz.github.io/torimitor-app/**"]
 enable_signup = false
 
 [auth.email]
-enable_signup = false
+# Public sign-up stays off via [auth] above; this keeps the email+password provider on, as in production.
+enable_signup = true
+
+# Production uses the same subject and file, pasted into Authentication > Emails > Invite user.
+[auth.email.template.invite]
+subject = "{{ .Data.inviter_name }} מזמין/ה אותך לתורימיטור"
+content_path = "./supabase/templates/invite.html"
 
 [functions.link-edition]
+verify_jwt = true
+
+[functions.invite-user]
 verify_jwt = true
 
 [functions.add-book]
