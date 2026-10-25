@@ -1,0 +1,1 @@
+-- Intentionally empty: application users and catalog data are created at runtime.
