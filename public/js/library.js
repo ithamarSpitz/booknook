@@ -457,6 +457,12 @@ function setupDrag(root, ctx) {
     settleUntil = performance.now() + SLIDE_MS;
   };
 
+  const shelfAt = (y) =>
+    [...caseEl.querySelectorAll(":scope > .shelf")].find((s) => {
+      const r = s.getBoundingClientRect();
+      return y >= r.top && y < r.bottom;
+    });
+
   const place = () => {
     if (!drag || performance.now() < settleUntil) return;
     const { el, kind, x, y } = drag;
@@ -470,19 +476,20 @@ function setupDrag(root, ctx) {
       }
       return;
     }
+    // Pick the shelf by height and the slot by x, so the spot follows the finger
+    // even when it is over the board, the shelf label or a gap between covers.
+    const wrap = shelfAt(y)?.querySelector(".rowwrap");
+    if (!wrap) return;
     const under = document.elementFromPoint(x, y);
-    const wrap = under?.closest(".rowwrap");
-    if (!wrap || under?.closest(".edge")) return;
+    if (under?.closest(".edge")) return;
     const row = wrap.querySelector(".row");
-    const target = under?.closest(".book");
-    if (target === el) return;
-    let before;
-    if (target && !target.classList.contains("plus")) {
-      const tr = target.getBoundingClientRect();
-      before = x > tr.left + tr.width / 2 ? target : target.nextElementSibling;
-    } else {
-      before = row.querySelector(".plus");
-    }
+    // Rows run right to left: the slot is before the first book whose middle is left of x.
+    const before =
+      [...row.querySelectorAll(":scope > .book:not(.plus)")].find((b) => {
+        if (b === el) return false;
+        const br = b.getBoundingClientRect();
+        return x > br.left + br.width / 2;
+      }) ?? row.querySelector(".plus");
     if (before !== el && el.nextElementSibling !== before) {
       const fromRow = el.parentElement;
       const nodes = [...row.querySelectorAll(":scope > .book")];
@@ -505,8 +512,7 @@ function setupDrag(root, ctx) {
     if (y < edge) scrollBy(0, -(edge - y) / 5);
     else if (y > innerHeight - edge) scrollBy(0, (y - innerHeight + edge) / 5);
     if (kind === "book") {
-      const under = document.elementFromPoint(x, y);
-      const wrap = under?.closest(".rowwrap");
+      const wrap = shelfAt(y)?.querySelector(".rowwrap");
       if (wrap) {
         const row = wrap.querySelector(".row");
         const r = wrap.getBoundingClientRect();
