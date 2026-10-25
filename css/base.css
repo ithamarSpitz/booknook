@@ -20,7 +20,9 @@
   .book{flex:0 0 calc((100% - var(--gap) * (var(--per) - .5)) / var(--per));min-width:0}
   .cover{display:block;width:100%;aspect-ratio:2/3;object-fit:cover;background:#e8e2d6;transition:transform .25s ease,box-shadow .25s ease}
   .book:hover .cover{transform:translateY(-4px) scale(1.04)}
-  .book .t{display:block;margin-top:9px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .book .t{display:block;margin-top:9px;font-size:13px}
+  .book .t b{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+  .book .t small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .edge{position:absolute;top:0;bottom:0;width:72px;border:0;padding:0;cursor:pointer;z-index:2;opacity:0;pointer-events:none;transition:opacity .3s;
     background:transparent;display:flex;align-items:center;direction:ltr}
   .edge::before{content:"";position:absolute;inset:0;backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px)}
@@ -68,7 +70,7 @@
   .book{position:relative}
   .book .t{position:absolute;top:8px;right:6px;left:6px;z-index:2;display:block;margin:0;padding:6px 9px;white-space:normal;
      background:#fffdf8;border-radius:3px;box-shadow:-3px 3px 0 rgba(90,55,20,.22);opacity:0;transform:translateY(-4px);transition:opacity .18s,transform .18s;pointer-events:none}
-  .book .t b{display:block;font-size:13px;line-height:1.25;color:var(--ink)}
+  .book .t b{font-size:13px;line-height:1.25;color:var(--ink)}
   .book .t small{display:block;margin-top:2px;font-size:11.5px;color:var(--muted)}
   .book.show .t{opacity:1;transform:none}
   @media(hover:hover){.book:hover .t{opacity:1;transform:none}}
@@ -100,7 +102,9 @@
   main{padding-top:28px}
   .case{padding-top:0}
   .crown{position:relative;height:64px;margin:0 -24px;background:url("../assets/design-4.svg") 0 0/2600px 64px;border-bottom:3px solid #dcbf8a;display:grid;place-items:center}
-  .crown h1{margin:0;font-size:32px;font-weight:700;color:#5a3714;text-shadow:0 1px 0 rgba(255,255,255,.55)}
+  .crown h1{margin:0;font-size:32px;font-weight:700;color:#5a3714;text-shadow:0 1px 0 rgba(255,255,255,.55);
+     /* one line, clear of the burger on both sides, however long the display name */
+     max-width:calc(100% - 140px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .board{height:34px;background:url("../assets/design-5.svg") 0 0/2600px 34px}
   .shelf:nth-child(2) .board{background-position:-420px 0}.shelf:nth-child(3) .board{background-position:-830px 0}
   .shelf:nth-child(4) .board{background-position:-210px 0}.shelf:nth-child(5) .board{background-position:-640px 0}.shelf:nth-child(6) .board{background-position:-1010px 0}
@@ -141,7 +145,7 @@
     main{padding-top:0}
     .burger{right:8px}
     .crown{margin:0 -8px;height:54px}
-    .crown h1{font-size:26px}
+    .crown h1{font-size:22px;max-width:calc(100% - 110px)}
     .board{margin:0 -12px;height:30px}
     .shelf-head{right:12px;bottom:6px;padding:5px 12px 6px;gap:8px}
     .shelf-head h2{font-size:17px}
@@ -158,7 +162,7 @@
   body.menu-open .door{transform:perspective(1300px) rotateY(0);visibility:visible;transition:transform .55s cubic-bezier(.25,.8,.25,1),visibility 0s}
   .door-panel{flex:1;display:flex;flex-direction:column;padding:22px 20px;border:2px solid #b88c52;box-shadow:inset 0 0 0 6px rgba(255,250,235,.38),inset 0 0 0 8px rgba(184,140,82,.45)}
   .door-panel .x{align-self:flex-end;border:0;background:none;font-size:34px;font-weight:700;line-height:1;color:#5a3714;cursor:pointer;padding:2px 6px;margin:-8px -8px 0 0}
-  .door-panel h2{margin:0 0 22px;font:700 34px/1.15 "Frank Ruhl Libre",serif;color:#4a2a0e;text-shadow:0 1px 0 rgba(255,255,255,.55)}
+  .door-panel h2{margin:0 0 22px;font:700 34px/1.15 "Frank Ruhl Libre",serif;color:#4a2a0e;text-shadow:0 1px 0 rgba(255,255,255,.55);overflow-wrap:anywhere}
   .door-panel nav{display:flex;flex-direction:column;max-width:340px}
   .door-panel nav a{display:flex;align-items:center;gap:14px;padding:17px 4px;color:#3a220c;text-decoration:none;font:800 23px "Assistant",sans-serif;
      text-shadow:0 1px 0 rgba(255,255,255,.5);border-bottom:1px solid rgba(138,90,38,.28)}

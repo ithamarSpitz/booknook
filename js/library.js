@@ -1,5 +1,5 @@
-import { notifyShelvesChanged } from "./events.js?v=f9b69f4";
-import { SHELF_KINDS } from "./contract.js?v=f9b69f4";
+import { notifyShelvesChanged } from "./events.js?v=a1893b7";
+import { SHELF_KINDS } from "./contract.js?v=a1893b7";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -15,9 +15,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js?v=f9b69f4";
-import * as addBook from "./add-book.js?v=f9b69f4";
-import * as firstRun from "./first-run.js?v=f9b69f4";
+} from "./data.js?v=a1893b7";
+import * as addBook from "./add-book.js?v=a1893b7";
+import * as firstRun from "./first-run.js?v=a1893b7";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -70,7 +70,7 @@ function bookTile(book) {
     : `<span class="cover" aria-hidden="true"></span>`;
   return `<div class="book" tabindex="0" data-simania-id="${book.simania_id}">
     ${cover}
-    <span class="t"><b>${title}</b><small>${author}</small></span>
+    <span class="t"><b dir="auto">${title}</b><small dir="auto">${author}</small></span>
   </div>`;
 }
 
@@ -276,10 +276,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=f9b69f4'),
+ *   data: typeof import('./data.js?v=a1893b7'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js?v=f9b69f4').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=f9b69f4').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=a1893b7').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=a1893b7').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx

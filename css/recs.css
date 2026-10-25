@@ -90,24 +90,37 @@
   font-size: 13px;
 }
 
+/* Titles and reasons wrap instead of ending in "…" after a few words:
+   two lines for the title, three for the reason (the opened card shows it all). */
 .rec-item .t b {
-  display: block;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .rec-item .t small {
   display: block;
   color: var(--muted, #6b5a48);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.recs-reason {
+.rec-item .t .recs-reason {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
   margin-top: 4px;
   font-size: 12px;
+  line-height: 1.4;
+}
+
+.bk-rec-reason {
+  margin: 0;
+  font-weight: 600;
+  color: #6b4a2a;
 }
 
 .recs-en {
