@@ -6,6 +6,7 @@ export type LibraryItem = {
   added_at: string;
   finished_at: string | null;
   shelf_kind: string;
+  rating: number | null;
   title: string;
   work: WorkRow | null;
 };
@@ -16,6 +17,21 @@ export type ScoredCandidate = {
   because: number[];
 };
 
+export type Seed = LibraryItem & { weight: number };
+
+/** Weight of an unrated book on the "read" shelf: neutral, never shown to users. */
+export const UNRATED_READ_WEIGHT = 2.5;
+
+/**
+ * How much a shelved book pulls recommendations toward its similar books:
+ * its rating when 3-5 (on any shelf), 2.5 when unrated on "read", otherwise 0.
+ * Ratings 1-2 and unrated books on other shelves are not seeds.
+ */
+export function seedWeight(item: Pick<LibraryItem, "rating" | "shelf_kind">): number {
+  if (item.rating != null) return item.rating >= 3 ? item.rating : 0;
+  return item.shelf_kind === "read" ? UNRATED_READ_WEIGHT : 0;
+}
+
 function descendingDate(left: string | null, right: string | null): number {
   if (left === right) return 0;
   if (left === null) return 1;
@@ -23,20 +39,21 @@ function descendingDate(left: string | null, right: string | null): number {
   return right.localeCompare(left);
 }
 
-export function selectSeeds(items: LibraryItem[], limit = 8): LibraryItem[] {
-  const reading = items.filter((item) =>
-    item.shelf_kind === "reading" && item.work
-  )
-    .sort((a, b) => a.position - b.position || a.simania_id - b.simania_id);
-  const read = items.filter((item) => item.shelf_kind === "read" && item.work)
+/** Every book with a positive weight, strongest first (that order also orders the reasons). */
+export function selectSeeds(items: LibraryItem[]): Seed[] {
+  return items
+    .filter((item) => item.work)
+    .map((item) => ({ ...item, weight: seedWeight(item) }))
+    .filter((seed) => seed.weight > 0)
     .sort((a, b) =>
+      b.weight - a.weight ||
       descendingDate(a.finished_at, b.finished_at) ||
       descendingDate(a.added_at, b.added_at) || a.simania_id - b.simania_id
     );
-  return [...reading, ...read].slice(0, limit);
 }
 
-export function scoreCandidates(seeds: LibraryItem[]): ScoredCandidate[] {
+/** Sum over seeds of weight x closeness, closeness = 1 - rank/40 in the seed's Hardcover similar list. */
+export function scoreCandidates(seeds: Seed[]): ScoredCandidate[] {
   const scores = new Map<number, { score: number; because: number[] }>();
   for (const seed of seeds) {
     for (
@@ -44,7 +61,7 @@ export function scoreCandidates(seeds: LibraryItem[]): ScoredCandidate[] {
     ) {
       if (!Number.isInteger(id)) continue;
       const current = scores.get(id) ?? { score: 0, because: [] };
-      current.score += 1 - rank / 40;
+      current.score += seed.weight * (1 - rank / 40);
       if (!current.because.includes(seed.simania_id)) {
         current.because.push(seed.simania_id);
       }

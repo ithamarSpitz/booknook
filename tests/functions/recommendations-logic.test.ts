@@ -3,6 +3,7 @@ import {
   excludeCandidates,
   type LibraryItem,
   scoreCandidates,
+  seedWeight,
   selectSeeds,
   sharedTags,
 } from "../../supabase/functions/recommendations/logic.ts";
@@ -40,10 +41,12 @@ function item(
   position: number,
   value: WorkRow | null,
   finished: string | null = null,
+  rating: number | null = null,
 ): LibraryItem {
   return {
     simania_id: simaniaId,
     shelf_kind: kind,
+    rating,
     position,
     work: value,
     title: String(simaniaId),
@@ -52,21 +55,50 @@ function item(
   };
 }
 
-Deno.test("selectSeeds prioritizes reading position then recent completed books", () => {
+Deno.test("seed weight: rating 3-5 on any shelf, 2.5 for unrated read books, otherwise not a seed", () => {
+  equal(
+    [
+      seedWeight({ shelf_kind: "want", rating: 5 }),
+      seedWeight({ shelf_kind: "reading", rating: 3 }),
+      seedWeight({ shelf_kind: "read", rating: 2 }),
+      seedWeight({ shelf_kind: "read", rating: 1 }),
+      seedWeight({ shelf_kind: "read", rating: null }),
+      seedWeight({ shelf_kind: "reading", rating: null }),
+      seedWeight({ shelf_kind: "stopped", rating: null }),
+      seedWeight({ shelf_kind: "custom", rating: null }),
+    ],
+    [5, 3, 0, 0, 2.5, 0, 0, 0],
+  );
+});
+
+Deno.test("selectSeeds keeps every weighted book, strongest first, with no count limit", () => {
+  const many = Array.from({ length: 12 }, (_, i) =>
+    item(100 + i, "read", i, work(`r${i}`, 100 + i), `2025-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`));
   const selected = selectSeeds([
-    item(1, "read", 0, work("a", 1), "2025-01-01T00:00:00Z"),
-    item(2, "reading", 1, work("b", 2)),
-    item(3, "reading", 0, work("c", 3)),
-    item(4, "want", 0, work("d", 4)),
-    item(5, "read", 1, work("e", 5), "2026-01-01T00:00:00Z"),
+    ...many,
+    item(1, "reading", 0, work("a", 1)),
+    item(2, "want", 0, work("b", 2), null, 4),
+    item(3, "read", 0, work("c", 3), null, 2),
+    item(4, "stopped", 0, work("d", 4), null, 5),
   ]);
-  equal(selected.map((seed) => seed.simania_id), [3, 2, 5, 1]);
+  equal(selected.length, 14);
+  equal(selected.slice(0, 3).map((seed) => [seed.simania_id, seed.weight]), [[4, 5], [2, 4], [111, 2.5]]);
+});
+
+Deno.test("scores multiply closeness by seed weight and sum across seeds", () => {
+  const seeds = selectSeeds([
+    item(11, "read", 0, work("five", 1, [7, 8]), null, 5),
+    item(12, "read", 1, work("unrated", 2, [8])),
+  ]);
+  const scored = scoreCandidates(seeds);
+  // 8: 5 x (1 - 1/40) + 2.5 x 1 = 7.375; 7: 5 x 1 = 5
+  equal(scored.map((c) => [c.hardcover_id, c.score, c.because]), [[8, 7.375, [11, 12]], [7, 5, [11]]]);
 });
 
 Deno.test("scoring deduplicates reasons and exclusions cover shelved and dismissed works", () => {
-  const seeds = [item(11, "reading", 0, work("seed", 1, [2, 3, 2]))];
+  const seeds = selectSeeds([item(11, "read", 0, work("seed", 1, [2, 3, 2]), null, 4)]);
   const scored = scoreCandidates(seeds);
-  equal(scored[0], { hardcover_id: 2, score: 1.95, because: [11] });
+  equal(scored[0], { hardcover_id: 2, score: 7.8, because: [11] });
   const works = new Map([[2, work("shelved", 2)], [3, work("dismissed", 3)]]);
   equal(
     excludeCandidates(

@@ -16,7 +16,7 @@ const web = read("public/js/contract.js");
 
 const tables = ["profiles", "works", "editions", "shelves", "shelf_books", "recommendations", "search_cache"];
 const functions = ["add-book", "book-details", "link-edition", "recommendations"];
-const rpcs = ["move_book", "move_shelf", "delete_shelf", "remove_book", "handle_new_user"];
+const rpcs = ["move_book", "move_shelf", "delete_shelf", "remove_book", "set_rating", "handle_new_user"];
 for (const name of [...tables, ...functions, ...rpcs]) {
   if (contract && !contract.includes(name)) failures.push(`docs/contract.md does not mention ${name}`);
 }

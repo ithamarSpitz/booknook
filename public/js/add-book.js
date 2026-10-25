@@ -2,6 +2,7 @@ import { FUNCTIONS } from "./contract.js";
 import { cloneLibrary } from "./data.js";
 import { fetchSimaniaPayload, searchBooks } from "./simania.js";
 import { notifyShelvesChanged } from "./events.js";
+import { promptRating, shouldPromptRating } from "./my-rating.js";
 
 // Simania is called from the browser (it blocks Edge Function IPs); the
 // response keeps the old search-books envelope so mapSearchResults is unchanged.
@@ -461,6 +462,8 @@ export async function addBookToShelf(hit, shelfId, options = {}) {
     ctx.setLibrary(fillBookFromAddResponse(ctx.getLibrary(), shelfId, pendingKey, book));
     notifyShelvesChanged();
     await redrawLibraryWithPending(ctx);
+    const shelf = ctx.getLibrary()?.shelves.find((s) => s.id === shelfId);
+    if (shouldPromptRating(shelf?.kind, null)) promptRating(ctx, { simania_id: hit.simania_id, title: book.title ?? hit.title });
   } catch (err) {
     ctx.setLibrary(removePendingAdd(ctx.getLibrary(), pendingKey));
     await redrawLibraryWithPending(ctx);

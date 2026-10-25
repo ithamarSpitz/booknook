@@ -1,4 +1,5 @@
 import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
+import { promptRating, shouldPromptRating } from "./my-rating.js";
 import { fetchSimaniaPayload, matchHebrewBook, simaniaIdOf } from "./simania.js";
 import { notifyShelvesChanged } from "./events.js";
 
@@ -16,16 +17,17 @@ export const ENGLISH_ONLY_NOTE = "אין מהדורה עברית זמינה לס
  */
 export function buildReasonLine(becauseTitles, sharedTags) {
   const titles = (becauseTitles ?? []).map((t) => String(t ?? "").trim()).filter(Boolean);
+  // Seeds can be rated books not yet read, so the line says "similar to", not "because you read".
   if (titles.length === 1) {
-    return `בגלל שקראת ${titles[0]}`;
+    return `דומה ל־${titles[0]}`;
   }
   if (titles.length >= 2) {
     if (titles.length === 2) {
-      return `בגלל שקראת ${titles[0]} ו${titles[1]}`;
+      return `דומה ל־${titles[0]} ו־${titles[1]}`;
     }
     const rest = titles.slice(0, -1).join(", ");
     const last = titles[titles.length - 1];
-    return `בגלל שקראת ${rest} ו${last}`;
+    return `דומה ל־${rest} ו־${last}`;
   }
   const tags = (sharedTags ?? []).filter((t) => String(t ?? "").trim());
   if (tags.length) return tags.join(", ");
@@ -469,7 +471,7 @@ export function bindRecsCardActions(session, rec, handlers) {
  *   showToast: (msg: string) => void,
  *   card: { open: (book: import('./contract.js').BookCard, shelves: unknown[]) => void, close: () => void },
  *   onDismissed: (workId: string) => void,
- *   onAdded: (workId: string) => Promise<void>,
+ *   onAdded: (workId: string, shelfId: string, rec: import('./contract.js').RecommendationCard) => Promise<void>,
  *   restorePrevious: () => void,
  *   beginSession: (session: ReturnType<typeof applyRecsCardChrome>) => void,
  *   isCurrent: () => boolean,
@@ -537,7 +539,7 @@ async function openRecommendationCard(overlay, rec, deps) {
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             deps.card.close();
           }
-          await deps.onAdded(rec.work_id);
+          await deps.onAdded(rec.work_id, shelfId, rec);
         } catch (err) {
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             revertFailedShelfPick(session.moveSelect);
@@ -701,9 +703,13 @@ export async function mount(root, ctx) {
           onDismissed: (id) => {
             excludeWork(id);
           },
-          onAdded: async (id) => {
+          onAdded: async (id, shelfId, added) => {
             excludeWork(id);
             if (ctx.reloadLibrary) await ctx.reloadLibrary();
+            const kind = ctx.getLibrary?.()?.shelves.find((s) => s.id === shelfId)?.kind;
+            if (added?.simania_id && shouldPromptRating(kind, null)) {
+              promptRating(ctx, { simania_id: added.simania_id, title: added.title });
+            }
           },
         });
       });

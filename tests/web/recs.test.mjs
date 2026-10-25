@@ -28,20 +28,20 @@ const recsCss = readFileSync(new URL("../../public/css/recs.css", import.meta.ur
 
 describe("buildReasonLine", () => {
   it("formats one seed title", () => {
-    assert.equal(buildReasonLine(["פרנהייט 451"], []), "בגלל שקראת פרנהייט 451");
+    assert.equal(buildReasonLine(["פרנהייט 451"], []), "דומה ל־פרנהייט 451");
   });
 
   it("formats two seed titles with ו", () => {
     assert.equal(
       buildReasonLine(["א", "ב"], []),
-      "בגלל שקראת א וב",
+      "דומה ל־א ו־ב",
     );
   });
 
   it("formats three or more seed titles", () => {
     assert.equal(
       buildReasonLine(["א", "ב", "ג"], []),
-      "בגלל שקראת א, ב וג",
+      "דומה ל־א, ב ו־ג",
     );
   });
 
@@ -413,7 +413,7 @@ describe("shared card chrome", () => {
     });
     assert.equal(
       overlay.querySelector(".bk-rec-reason")?.textContent,
-      "בגלל שקראת הנסיך הקטן, 1984 וחוות החיות",
+      "דומה ל־הנסיך הקטן, 1984 ו־חוות החיות",
     );
     restoreRecsCardChrome(session);
     assert.equal(overlay.querySelector(".bk-rec-reason"), null);

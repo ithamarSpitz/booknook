@@ -88,7 +88,7 @@ async function loadLibrary(
   userId: string,
 ): Promise<LibraryItem[]> {
   const { data, error } = await db.from("shelf_books").select(
-    "simania_id,position,added_at,finished_at,shelves!inner(kind),editions!inner(title,work_id,works(id,hardcover_id,original_title,original_authors,similar_ids,tags,hardcover_cover_url,refreshed_at))",
+    "simania_id,position,added_at,finished_at,rating,shelves!inner(kind),editions!inner(title,work_id,works(id,hardcover_id,original_title,original_authors,similar_ids,tags,hardcover_cover_url,refreshed_at))",
   ).eq("user_id", userId);
   if (error) fail(error);
   return (data ?? []).map((row: Record<string, unknown>) => {
@@ -105,6 +105,7 @@ async function loadLibrary(
       added_at: String(row.added_at),
       finished_at: row.finished_at ? String(row.finished_at) : null,
       shelf_kind: shelf?.kind ?? "",
+      rating: row.rating == null ? null : Number(row.rating),
       title: String(edition?.title ?? ""),
       work,
     };

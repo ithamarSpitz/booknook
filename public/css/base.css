@@ -204,6 +204,24 @@
   .bk-author{margin:0;font-size:18px;color:#7a5530;font-weight:600}
   .bk-rating{display:flex;align-items:center;gap:8px;margin:14px 0 0;font-size:15px}
   .bk-rating small{color:var(--muted);font-size:13px}
+  /* the reader's own rating (card row and the "how was it?" prompt) */
+  .bk-my-rating{display:flex;align-items:center;gap:10px;margin:10px 0 0;font-size:15px;font-weight:700;color:#5a3714}
+  .bk-my-rating[hidden]{display:none}
+  .my-stars{display:inline-flex;gap:2px}
+  .my-star{border:0;background:none;padding:2px 3px;font-size:26px;line-height:1;color:#d9ccb4;cursor:pointer;transition:color .15s,transform .15s}
+  .my-star.on{color:#c58a2c}
+  .my-star:active{transform:scale(.88)}
+  .my-star:focus-visible{outline:2px solid #8a5a26;outline-offset:1px;border-radius:4px}
+  .rate-prompt{position:fixed;inset:0;z-index:35;display:grid;place-items:end center;padding:16px;background:rgba(40,26,12,.4);opacity:0;transition:opacity .2s}
+  .rate-prompt.on{opacity:1}
+  .rate-card{width:min(380px,100%);background:#fffdf8;border-radius:14px;padding:20px 20px 16px;text-align:center;box-shadow:0 10px 40px -12px rgba(40,26,12,.5);transform:translateY(16px);transition:transform .2s ease}
+  .rate-prompt.on .rate-card{transform:none}
+  .rate-kicker{margin:0;color:var(--muted);font-size:13px}
+  .rate-card h2{margin:4px 0 2px;font:700 22px/1.25 "Frank Ruhl Libre",serif;color:#4a2a0e;overflow-wrap:anywhere}
+  .rate-q{margin:0 0 6px;color:#6b4a2a}
+  .rate-stars{display:flex;justify-content:center;gap:4px}
+  .rate-stars .my-star{font-size:38px;padding:4px}
+  .rate-later{margin-top:10px;border:0;background:none;font:inherit;color:var(--muted);text-decoration:underline;cursor:pointer;padding:6px 10px}
   .stars{position:relative;display:inline-block;color:#e6d8bb;letter-spacing:2px;font-size:18px;line-height:1}
   .stars::before,.stars .fill::before{content:"★★★★★"}
   .stars .fill{position:absolute;top:0;right:0;overflow:hidden;white-space:nowrap;color:#c8963e}

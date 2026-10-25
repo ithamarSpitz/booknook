@@ -40,6 +40,10 @@ export const RPCS = Object.freeze({
     name: "remove_book",
     params: Object.freeze(["p_simania_id"]),
   }),
+  SET_RATING: Object.freeze({
+    name: "set_rating",
+    params: Object.freeze(["p_simania_id", "p_rating"]),
+  }),
 });
 
 /**

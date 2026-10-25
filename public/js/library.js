@@ -1,4 +1,5 @@
 import { notifyShelvesChanged } from "./events.js";
+import { promptRating, shouldPromptRating } from "./my-rating.js";
 import { SHELF_KINDS } from "./contract.js";
 import {
   applyOptimisticBookMove,
@@ -606,7 +607,11 @@ function setupDrag(root, ctx) {
             }),
           );
           await moveBook(client, simaniaId, toShelfId, toPosition);
-          if (toShelfId !== from.shelfId) notifyShelvesChanged();
+          if (toShelfId !== from.shelfId) {
+            notifyShelvesChanged();
+            const book = snapshot?.shelves.flatMap((s) => s.books).find((b) => b.simania_id === simaniaId);
+            if (book && shouldPromptRating(toShelfEl?.dataset.kind, book.rating)) promptRating(ctx, book);
+          }
         }
         if (done.from) recountShelf(done.from);
         if (toShelfEl) recountShelf(toShelfEl);

@@ -160,7 +160,7 @@ Deno.test("handler excludes shelved and dismissed works and retains an English-o
   const dismissed = work("dismissed", 3);
   const kept = work("kept", 4);
   const db = new FakeDb(
-    [shelfBook(11, "reading", seed), shelfBook(22, "want", shelved)],
+    [shelfBook(11, "read", seed), shelfBook(22, "want", shelved)],
     [shelved, dismissed, kept],
     ["dismissed"],
   );
