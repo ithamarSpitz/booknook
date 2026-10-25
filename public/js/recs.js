@@ -15,7 +15,7 @@ export const ENGLISH_ONLY_NOTE = "אין מהדורה עברית זמינה לס
  * @returns {string}
  */
 export function buildReasonLine(becauseTitles, sharedTags) {
-  const titles = (becauseTitles ?? []).filter((t) => String(t ?? "").trim());
+  const titles = (becauseTitles ?? []).map((t) => String(t ?? "").trim()).filter(Boolean);
   if (titles.length === 1) {
     return `בגלל שקראת ${titles[0]}`;
   }
@@ -359,6 +359,7 @@ export function applyRecsCardChrome(overlay, rec) {
     removeBtn,
     placeholder: null,
     note: null,
+    reason: null,
     onChange: null,
     onClick: null,
     restored: false,
@@ -378,6 +379,18 @@ export function applyRecsCardChrome(overlay, rec) {
   if (moveSelect) {
     moveSelect.disabled = Boolean(rec.english_only);
     if (!rec.english_only) session.placeholder = ensureShelfPlaceholder(moveSelect);
+  }
+
+  // The grid clamps the reason to a few lines; the card always shows all of it.
+  const reasonText = buildReasonLine(rec.because_titles, rec.shared_tags);
+  if (reasonText && removeBtn?.parentElement) {
+    const reason = hostDocument(overlay)?.createElement("p");
+    if (reason) {
+      reason.className = "bk-rec-reason";
+      reason.textContent = reasonText;
+      removeBtn.parentElement.insertBefore(reason, removeBtn.parentElement.firstChild);
+      session.reason = reason;
+    }
   }
 
   if (rec.english_only && removeBtn) {
@@ -416,6 +429,7 @@ export function restoreRecsCardChrome(session) {
   }
   if (session.moveSelect) session.moveSelect.disabled = false;
   session.note?.remove?.();
+  session.reason?.remove?.();
 }
 
 /**
@@ -646,7 +660,7 @@ export async function mount(root, ctx) {
               return `<li>
                 <button type="button" class="rec-item" data-work-id="${escapeHtml(rec.work_id)}">
                   ${cover}
-                  <span class="t"><b>${title}</b>${note ? `<small>${note}</small>` : ""}<small class="recs-reason">${reason}</small></span>
+                  <span class="t"><b dir="auto">${title}</b>${note ? `<small>${note}</small>` : ""}<small class="recs-reason">${reason}</small></span>
                 </button>
               </li>`;
             })

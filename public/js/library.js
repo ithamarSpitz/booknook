@@ -70,7 +70,7 @@ function bookTile(book) {
     : `<span class="cover" aria-hidden="true"></span>`;
   return `<div class="book" tabindex="0" data-simania-id="${book.simania_id}">
     ${cover}
-    <span class="t"><b>${title}</b><small>${author}</small></span>
+    <span class="t"><b dir="auto">${title}</b><small dir="auto">${author}</small></span>
   </div>`;
 }
 

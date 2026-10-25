@@ -404,6 +404,21 @@ describe("shared card chrome", () => {
     assert.equal(overlay.querySelector(".bk-rec-note"), null);
   });
 
+  it("shows the full reason in the card and removes it on restore", () => {
+    const overlay = createFakeOverlay();
+    const session = applyRecsCardChrome(overlay, {
+      ...rec,
+      because_titles: ["הנסיך הקטן", "1984", "חוות החיות"],
+      shared_tags: [],
+    });
+    assert.equal(
+      overlay.querySelector(".bk-rec-reason")?.textContent,
+      "בגלל שקראת הנסיך הקטן, 1984 וחוות החיות",
+    );
+    restoreRecsCardChrome(session);
+    assert.equal(overlay.querySelector(".bk-rec-reason"), null);
+  });
+
   it("hides add-to-shelf for English-only and removes the note on restore", () => {
     const overlay = createFakeOverlay();
     const session = applyRecsCardChrome(overlay, {
