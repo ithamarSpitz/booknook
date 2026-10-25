@@ -9,6 +9,8 @@ export type HardcoverBook = {
   users_read_count?: number;
   cached_contributors?: Array<{ author?: { name?: string } }>;
   cached_similar_book_ids?: number[];
+  cached_tags?: unknown;
+  image?: { url?: string | null } | null;
 };
 
 export function authors(book: HardcoverBook): string[] {
@@ -53,7 +55,7 @@ export async function findHardcoverBook(originalTitle: string, authorHint = ""):
 export async function hardcoverBooks(ids: number[]): Promise<HardcoverBook[]> {
   if (!ids.length) return [];
   const data = await graphql<{ books?: HardcoverBook[] }>(
-    `query { books(where:{id:{_in:${JSON.stringify(ids)}}}) { id title slug users_read_count cached_contributors cached_similar_book_ids } }`,
+    `query { books(where:{id:{_in:${JSON.stringify(ids)}}}) { id title slug users_read_count cached_contributors cached_similar_book_ids cached_tags image { url } } }`,
   );
   return data.books ?? [];
 }
