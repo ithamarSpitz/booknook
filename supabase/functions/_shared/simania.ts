@@ -121,6 +121,49 @@ export async function bookRating(
   ]);
 }
 
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.length ? value : null;
+}
+
+function numberValue(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export async function fetchEditionDetails(
+  simaniaId: number,
+): Promise<Record<string, unknown>> {
+  const [details, rating] = await Promise.all([
+    bookDetails(simaniaId),
+    bookRating(simaniaId),
+  ]);
+  const title = stringValue(details?.title ?? details?.bookTitle);
+  if (!title) {
+    throw new HttpError(502, "Book catalog did not return book details.");
+  }
+  return {
+    simania_id: simaniaId,
+    title,
+    author: stringValue(details?.author),
+    translator: stringValue(details?.translator),
+    publisher: stringValue(details?.publisher),
+    series: stringValue(details?.series),
+    category: stringValue(details?.category),
+    year: numberValue(details?.year),
+    pages: numberValue(details?.pages),
+    description: stringValue(details?.description),
+    cover_url: stringValue(details?.coverUrl ?? details?.cover_url),
+    simania_rating: numberValue(
+      rating?.rating ?? rating?.average ?? rating?.averageRating,
+    ),
+    simania_rating_count: numberValue(
+      rating?.count ?? rating?.ratingCount ?? rating?.votes,
+    ),
+    details_at: new Date().toISOString(),
+  };
+}
+
 export async function matchHebrewBook(
   title: string,
   author = "",

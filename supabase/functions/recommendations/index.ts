@@ -10,7 +10,7 @@ import {
   type HardcoverBook,
   hardcoverBooks,
 } from "../_shared/hardcover.ts";
-import { matchHebrewBook } from "../_shared/simania.ts";
+import { fetchEditionDetails, matchHebrewBook } from "../_shared/simania.ts";
 import { nliHebrew, wikidataHebrew } from "../_shared/bridges.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type {
@@ -29,7 +29,6 @@ import {
   selectSeeds,
   sharedTags,
 } from "./logic.ts";
-import { fetchEditionDetails } from "./simania-details.ts";
 
 type DbClient = ReturnType<typeof serviceClient>;
 type Localization = {
@@ -208,22 +207,31 @@ async function materializeEdition(
   const values = !current || isStale(current.details_at)
     ? await details(simaniaId)
     : {};
-  const link: Record<string, unknown> = current?.work_id === work.id ? {} : {
-    work_id: work.id,
-    resolve_status: localized.status as ResolveStatus,
-    resolved_at: new Date().toISOString(),
-  };
   const fallback = current
     ? {}
     : { title: localized.book!.title, author: localized.book!.author ?? null };
-  const result = await db.from("editions").upsert({
-    ...fallback,
-    ...values,
-    ...link,
-    simania_id: simaniaId,
-  }, { onConflict: "simania_id" }).select("*").single();
-  if (result.error) fail(result.error);
-  return result.data as EditionRow;
+  if (!current || Object.keys(values).length) {
+    const result = await db.from("editions").upsert([{
+      ...fallback,
+      ...values,
+      simania_id: simaniaId,
+    }], { onConflict: "simania_id", defaultToNull: false });
+    if (result.error) fail(result.error);
+  }
+  // Claim only an unlinked row. PostgreSQL rechecks this predicate after
+  // waiting for a concurrent writer, including one in another request.
+  const claim = await db.from("editions").update({
+    work_id: work.id,
+    resolve_status: localized.status as ResolveStatus,
+    resolved_at: new Date().toISOString(),
+  }).eq("simania_id", simaniaId).is("work_id", null);
+  if (claim.error) fail(claim.error);
+  const stored = await db.from("editions").select("*").eq(
+    "simania_id",
+    simaniaId,
+  ).single();
+  if (stored.error) fail(stored.error);
+  return stored.data.work_id === work.id ? stored.data as EditionRow : null;
 }
 
 type Prepared = {
