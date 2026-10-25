@@ -1,0 +1,12 @@
+{
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"v\":\"1.0\",\"data\":{\"averageRating\":4.3362,\"ratingCount\":827}}"
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 3
+}
