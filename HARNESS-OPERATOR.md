@@ -13,7 +13,7 @@ For whoever drives `harness.py` (usually Claude). Read before starting, resuming
 
 - `python harness.py validate`, `graph <SPRINT>`, `run <SPRINT> --dry-run`, `doctor --full`.
 - `git status --short` must be empty.
-- **Memory.** Check free RAM. Worktree setup (`npm ci`) runs once per parallel task at the same moment, on top of Docker and Supabase. With under about 6 GB free, use `max_parallel_agents: 2`. Claude Code kills background shells under memory pressure; the run then needs `resume`.
+- **Memory.** Check free RAM. Worktree setup (`npm ci`) runs once per parallel task at the same moment, on top of Docker and Supabase. With under about 6 GB free, use `max_parallel_agents: 2`. Claude Code kills background shells under memory pressure; the run then needs `resume`. It happened again at 2 agents with about 2 GB free (Docker/WSL 3 GB plus Chrome). After a kill: check for orphaned agent processes (`Get-CimInstance Win32_Process` filtered on `worktrees`), then `resume`; the task left `RUNNING` continues in its worktree. Ask the user to start Claude Code with `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` for long runs.
 - **Quota.** Ask the user for, or check, Codex's 5-hour and weekly limits and Cursor usage. One blocked task (3 attempts plus reviews) can burn a 5-hour Codex window.
 - **Cursor ladder stays native.** `retry.sequence` and `plan_repair.planner_model_class` use only Composer and Grok classes. Opus bills as "Other Models" or on-demand spend.
 - **Stray processes.** Look for old dev servers (`supabase functions serve`, web servers) that would collide with verification ports, and stop them before a task that starts its own.
