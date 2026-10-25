@@ -26,6 +26,8 @@ For whoever drives `harness.py` (usually Claude). Read before starting, resuming
 - Codex prints quota errors with a typographic apostrophe ("You’ve hit your usage limit"). Patterns now normalize it; if a quota looks like a capacity wait again, check the raw `.harness/logs/<TASK>-attempt-N-codex.log`.
 - Provider fallback is per task: each new task tries Codex first, a task that hits a quota stays on Cursor for its own retries and review.
 
+- After an `Agent stalled` or timeout attempt, check that only one agent process works in that worktree (filter `Win32_Process` on the worktree path; compare start times). Killing processes may need the user's approval in auto mode.
+
 ## 4. Reading a failure (cheap first)
 
 1. `python harness.py status <SPRINT>` and `failure <SPRINT>`.
@@ -72,6 +74,7 @@ For whoever drives `harness.py` (usually Claude). Read before starting, resuming
 | Quota patterns used ASCII `'` | Codex quota treated as a capacity wait, retried every 5 minutes | normalize typographic apostrophes before matching |
 | Codex fallback was per sprint | one quota hit moved every later task to Cursor | per-task flag `<sprint>.<task>.provider.codex.disabled` |
 | Resumed worktree diffed against the new stage base | later integration commits reported as protected-file edits by the task | `_run_task` keeps the worktree's own `base_ref` |
+| Cursor stall/timeout killed only the cmd/PowerShell shim | the stalled agent kept running in the worktree next to the retry (two agents, one worktree) | shared `stop_process_tree` (`taskkill /T`), Cursor started in its own process group |
 | Cursor probe demanded exactly `OK` | probe failed on `OK.` | accept a trailing period |
 
 These fixes live in `torimitor/harness/`. Port them back to `dev/nyc-property-resolver` (or the standalone harness) before reusing it elsewhere.
