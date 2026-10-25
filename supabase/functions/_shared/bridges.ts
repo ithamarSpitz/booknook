@@ -2,6 +2,29 @@ import { authors, findHardcoverBook, HardcoverBook } from "./hardcover.ts";
 import { matchHebrewBook, SimaniaBook } from "./simania.ts";
 import { fetchTimeout, normalize, similarity } from "./utils.ts";
 
+// Wikimedia's API etiquette requires a descriptive User-Agent; anonymous clients are throttled hard.
+const PROVIDER_HEADERS = {
+  "User-Agent": "Torimitor/0.1 (personal Hebrew reading list; https://www.mediawiki.org/wiki/API:Etiquette)",
+};
+
+/** A provider answered with an error (after one retry), as opposed to answering "no match". */
+export class ProviderError extends Error {}
+
+async function providerFetch(url: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
+  const headers = { ...PROVIDER_HEADERS, ...(init.headers as Record<string, string> | undefined) };
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetchTimeout(url, { ...init, headers }, timeoutMs);
+    if (response.ok) return response;
+    await response.body?.cancel();
+    if (attempt === 0 && (response.status === 429 || response.status >= 500)) {
+      const retryAfter = Number(response.headers.get("retry-after"));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2000, (retryAfter > 0 ? retryAfter : 1) * 1000)));
+      continue;
+    }
+    throw new ProviderError(`${new URL(url).host} returned ${response.status}`);
+  }
+}
+
 const NLI_SRU = "https://nli.alma.exlibrisgroup.com/view/sru/972NNL_INST";
 const WORK_TYPES = new Set(["Q571", "Q8261", "Q7725634", "Q47461344", "Q49084", "Q25379"]);
 const REJECT_TYPES = new Set(["Q11424", "Q24856", "Q5398426", "Q277759", "Q7058673", "Q7889"]);
@@ -25,8 +48,7 @@ function isWrittenWork(entity?: Entity | null): boolean {
 
 async function wikidataEntity(id: string, languages = "he|en"): Promise<Entity | null> {
   const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(id)}&props=labels|descriptions|claims&languages=${languages}&format=json&origin=*`;
-  const response = await fetchTimeout(url);
-  if (!response.ok) return null;
+  const response = await providerFetch(url);
   return (await response.json()).entities?.[id] ?? null;
 }
 
@@ -38,8 +60,7 @@ async function wikidataAuthor(entity?: Entity | null, language = "en"): Promise<
 
 export async function wikidataOriginal(hebrewTitle: string): Promise<Bridge | null> {
   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(hebrewTitle)}&language=he&uselang=en&type=item&limit=8&format=json&origin=*`;
-  const response = await fetchTimeout(url);
-  if (!response.ok) return null;
+  const response = await providerFetch(url);
   const search = (await response.json()).search ?? [];
   for (const candidate of search.slice(0, 6)) {
     const entity = await wikidataEntity(candidate.id);
@@ -51,10 +72,18 @@ export async function wikidataOriginal(hebrewTitle: string): Promise<Bridge | nu
   return null;
 }
 
+/** Recommendations only: a failure means no Hebrew edition this time, so it returns null. */
 export async function wikidataHebrew(title: string, author = ""): Promise<Bridge | null> {
+  try {
+    return await wikidataHebrewLookup(title, author);
+  } catch {
+    return null;
+  }
+}
+
+async function wikidataHebrewLookup(title: string, author: string): Promise<Bridge | null> {
   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(title)}&language=en&uselang=en&type=item&limit=10&format=json&origin=*`;
-  const response = await fetchTimeout(url);
-  if (!response.ok) return null;
+  const response = await providerFetch(url);
   const candidates = ((await response.json()).search ?? [])
     .map((candidate: { id: string; label?: string; description?: string }) => ({
       candidate,
@@ -111,8 +140,7 @@ async function nliSearch(index: string, value: string, limit = 25): Promise<NliR
     maximumRecords: String(limit),
     recordSchema: "marcxml",
   });
-  const response = await fetchTimeout(`${NLI_SRU}?${params}`, { headers: { Accept: "application/xml,text/xml" } }, 18000);
-  if (!response.ok) return [];
+  const response = await providerFetch(`${NLI_SRU}?${params}`, { headers: { Accept: "application/xml,text/xml" } }, 18000);
   return parseNliRecords(await response.text());
 }
 
@@ -132,7 +160,16 @@ export async function nliOriginal(hebrewTitle: string, hebrewAuthor = ""): Promi
   return best ? { title: best.original!, author: best.record.creators[0] ?? "", source: "NLI" } : null;
 }
 
+/** Recommendations only: a failure means no Hebrew edition this time, so it returns null. */
 export async function nliHebrew(originalTitle: string, originalAuthor = ""): Promise<Bridge | null> {
+  try {
+    return await nliHebrewLookup(originalTitle, originalAuthor);
+  } catch {
+    return null;
+  }
+}
+
+async function nliHebrewLookup(originalTitle: string, originalAuthor: string): Promise<Bridge | null> {
   const seen = new Map<string, NliRecord>();
   for (const index of ["uniform_title", "title", "all_for_ui"]) {
     for (const record of await nliSearch(index, originalTitle)) {

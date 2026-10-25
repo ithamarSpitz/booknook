@@ -151,3 +151,32 @@ Deno.test("ensureResolved keeps a recent not_found result cached", async () => {
   assertEquals(calls, 0);
   assertEquals(result, current);
 });
+
+Deno.test("ensureResolved stays pending when a provider fails and nothing matched", async () => {
+  const current = edition() as EditionRow;
+  const db = new FakeDb({ editions: [current] });
+  const result = await ensureResolved(db, current, {
+    now: () => NOW,
+    wikidataOriginal: async () => {
+      throw new Error("www.wikidata.org returned 429");
+    },
+    nliOriginal: noBridge,
+    findHardcoverBook: async () => null,
+  });
+  assertEquals(result.resolve_status, "pending");
+  assertEquals(result.resolved_at, null);
+  assertEquals(result.work_id, null);
+});
+
+Deno.test("ensureResolved stores not_found only when every provider answered", async () => {
+  const current = edition() as EditionRow;
+  const db = new FakeDb({ editions: [current] });
+  const result = await ensureResolved(db, current, {
+    now: () => NOW,
+    wikidataOriginal: noBridge,
+    nliOriginal: noBridge,
+    findHardcoverBook: async () => null,
+  });
+  assertEquals(result.resolve_status, "not_found");
+  assertEquals(result.resolved_at, NOW.toISOString());
+});

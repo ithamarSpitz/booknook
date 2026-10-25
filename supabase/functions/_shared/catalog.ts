@@ -206,10 +206,12 @@ function coverUrl(book: HardcoverBook): string | null {
 
 async function tryMatch(
   operation: () => Promise<HardcoverBook | null>,
+  failures: { count: number },
 ): Promise<HardcoverBook | null> {
   try {
     return await operation();
   } catch {
+    failures.count += 1;
     return null;
   }
 }
@@ -230,37 +232,43 @@ export async function ensureResolved(
   let match: HardcoverBook | null = null;
   let status: ResolveStatus = "not_found";
   let wikidataTitle = "";
+  // A provider error is not evidence that the book is missing. If nothing matched
+  // and any request failed, stay pending so the next request retries.
+  const failures = { count: 0 };
 
   try {
     const bridge = await api.wikidataOriginal(edition.title);
     wikidataTitle = bridge?.title ?? "";
     if (bridge) {
-      match = await tryMatch(() =>
-        api.findHardcoverBook(bridge.title, bridge.author)
+      match = await tryMatch(
+        () => api.findHardcoverBook(bridge.title, bridge.author),
+        failures,
       );
     }
     if (match) status = "wikidata";
   } catch {
-    // A provider failure is the same as a missing bridge.
+    failures.count += 1;
   }
 
   if (!match) {
     try {
       const bridge = await api.nliOriginal(edition.title, edition.author ?? "");
       if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
-        match = await tryMatch(() =>
-          api.findHardcoverBook(bridge.title, bridge.author)
+        match = await tryMatch(
+          () => api.findHardcoverBook(bridge.title, bridge.author),
+          failures,
         );
         if (match) status = "nli";
       }
     } catch {
-      // Continue to the direct fallback.
+      failures.count += 1;
     }
   }
 
   if (!match) {
-    match = await tryMatch(() =>
-      api.findHardcoverBook(edition.title, edition.author ?? "")
+    match = await tryMatch(
+      () => api.findHardcoverBook(edition.title, edition.author ?? ""),
+      failures,
     );
     if (match) status = "fuzzy";
   }
@@ -284,10 +292,11 @@ export async function ensureResolved(
     workId = workResult.data.id;
   }
 
+  if (!match && failures.count > 0) status = "pending";
   const result = await db.from("editions").update({
     work_id: workId,
     resolve_status: status,
-    resolved_at: now.toISOString(),
+    resolved_at: status === "pending" ? null : now.toISOString(),
   }).eq("simania_id", edition.simania_id).select("*").single();
   if (result.error) dbFailure(result.error);
   return result.data as EditionRow;

@@ -1,4 +1,9 @@
-import { bookCard, type CatalogDb, ensureEdition } from "../_shared/catalog.ts";
+import {
+  bookCard,
+  type CatalogDb,
+  ensureEdition,
+  ensureResolved,
+} from "../_shared/catalog.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type {
   BookDetailsRequest,
@@ -17,6 +22,7 @@ type FunctionDeps = {
   serviceClient: () => CatalogDb;
   userClient: (req: Request) => CatalogDb;
   ensureEdition: typeof ensureEdition;
+  ensureResolved: typeof ensureResolved;
 };
 
 const defaults: FunctionDeps = {
@@ -24,6 +30,7 @@ const defaults: FunctionDeps = {
   serviceClient,
   userClient,
   ensureEdition,
+  ensureResolved,
 };
 
 export function createHandler(overrides: Partial<FunctionDeps> = {}) {
@@ -39,10 +46,12 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
       ) {
         throw new HttpError(400, "A valid Simania ID is required.");
       }
-      const edition = await deps.ensureEdition(
-        deps.serviceClient(),
-        input.simania_id!,
-      );
+      const catalogDb = deps.serviceClient();
+      let edition = await deps.ensureEdition(catalogDb, input.simania_id!);
+      // Pending after a provider failure in add-book: opening the card retries it.
+      if (edition.resolve_status === "pending") {
+        edition = await deps.ensureResolved(catalogDb, edition);
+      }
       const response: BookDetailsResponse = {
         book: await bookCard(deps.userClient(req), userId, edition),
       };
