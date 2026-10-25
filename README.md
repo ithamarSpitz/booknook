@@ -1,28 +1,107 @@
 # Torimitor
 
-Local Hebrew book discovery prototype backed by Supabase Edge Functions.
+Private Hebrew book library with discovery recommendations, for a small group of invited users. The web app is static HTML and ES modules; catalog and recommendation logic run in Supabase Edge Functions against a shared Postgres cache.
 
-## Architecture
+Product decisions live in `docs/assignment.md`. Technical design is in `ARCHITECTURE.md` and `docs/architecture/`.
 
-- `search-books`: live catalog suggestions.
-- `resolve-book`: Wikidata-first title resolution, verified on Hardcover, with NLI fallback.
-- `recommendations`: combines Hardcover similarity lists and maps results back to Hebrew editions.
-- `public/index.html`: browser UI with no catalog or recommendation logic and no private API key.
+## Data sources
 
-Shared integration code lives in `supabase/functions/_shared`.
+| Source | Role |
+|--------|------|
+| **Simania** (official MCP, no auth) | Hebrew catalog: search, details, covers, community rating. Shelves hold Simania books only. |
+| **Hardcover** (GraphQL, server secret) | Canonical work identity, similarity lists, genres and moods for recommendations. |
+| **Wikidata**, **NLI** (fallback) | Bridge Hebrew titles and original titles in both directions. |
 
-## Run locally
+Provider secrets (for example `HARDCOVER_API_KEY`) stay in a local env file and never reach the browser.
 
-Requirements: Docker Desktop and Node.js.
+## Architecture (summary)
 
-```powershell
-npm.cmd install
-npx.cmd supabase start
-npx.cmd supabase functions serve --env-file ..\book-discovery-plan\.env.local --no-verify-jwt
-npm.cmd run web:serve
+- **Web app** (`public/`): talks to Supabase Auth and Postgres via `supabase-js`; no direct calls to Simania, Hardcover, Wikidata or NLI.
+- **Edge Functions** (`supabase/functions/`): `search-books`, `resolve-book`, `recommendations`, plus shared code in `_shared/`.
+- **Database** (`supabase/migrations/`): shared catalog cache and per-user library tables with RLS.
+
+## Repository layout
+
+```text
+public/                    web app (static files)
+design/library.html        approved visual design (reference)
+prototype/test-page.html   earlier test page (reference)
+supabase/migrations/       SQL migrations
+supabase/tests/            pgTAP database tests
+supabase/functions/<name>/ one folder per Edge Function
+supabase/functions/_shared/ shared Deno code; types.ts is the contract
+tests/functions/           Deno unit tests (mocked fetch)
+tests/web/                 node --test for pure web modules
+scripts/                   verification and local serve helpers
+docs/contract.md           interface contract between lanes
+tasks/                     harness task briefs
+harness.py                 agent orchestrator (see README-HARNESS.md)
 ```
 
-Open `http://127.0.0.1:4175`.
+## Local setup
 
-The existing local `.env.local` is referenced only at runtime. Secrets are ignored by Git and never sent to the browser.
+Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/) and Node.js (LTS).
 
+1. Install dependencies:
+
+   ```bash
+   npm ci
+   ```
+
+2. Start the local Supabase stack once (API on port 54321, Studio on 54323). All harness worktrees share this stack:
+
+   ```bash
+   npm run supabase:start
+   ```
+
+3. Serve Edge Functions with your secrets file (must include `HARDCOVER_API_KEY`). By default the serve script looks for `../book-discovery-plan/.env.local`; override with `TORIMITOR_ENV_FILE`:
+
+   ```bash
+   # bash
+   export TORIMITOR_ENV_FILE=/path/to/.env.local
+   npm run functions:serve
+   ```
+
+   ```powershell
+   # PowerShell
+   $env:TORIMITOR_ENV_FILE = "C:\path\to\.env.local"
+   npm run functions:serve
+   ```
+
+   See `supabase/functions/.env.example` for the expected variable names.
+
+4. Serve the web app:
+
+   ```bash
+   npm run web:serve
+   ```
+
+   Open [http://127.0.0.1:4175](http://127.0.0.1:4175).
+
+Inviting users and resetting the database locally are described in `docs/setup.md`.
+
+## Tests and checks
+
+| Command | What it does |
+|---------|----------------|
+| `npm run check:functions` | Deno type-check all Edge Functions |
+| `npm run test:functions` | Deno unit tests (`tests/functions/`, stubbed `fetch`) |
+| `npm run test:web` | `node --test` for pure web modules |
+| `npm run test:db` | `supabase db reset` then pgTAP tests (needs local stack) |
+| `npm run check:contract` | Contract presence check |
+| `npm run verify:integration` | Integration gate against local stack and live APIs |
+
+Automated tests do not call Simania, Hardcover, Wikidata or NLI; only the integration gate does.
+
+## Harness workflow
+
+Development tasks are executed by `harness.py` from task briefs under `tasks/`. Typical commands:
+
+```bash
+python harness.py status
+python harness.py run <SPRINT>
+python harness.py resume <SPRINT>
+python harness.py failure <SPRINT>
+```
+
+Full orchestration details, safety rules and CLI reference: **`README-HARNESS.md`**.
