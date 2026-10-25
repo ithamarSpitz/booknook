@@ -1,15 +1,17 @@
-import * as api from "./api.js";
-import { ROUTES } from "./contract.js";
-import { createRouter } from "./router.js";
-import * as data from "./data.js";
-import * as library from "./library.js";
-import { createCard } from "./card.js";
-import * as auth from "./auth.js";
-import * as settings from "./settings.js";
-import * as recs from "./recs.js";
-import * as addBook from "./add-book.js";
+import * as api from "./api.js?v=f9b69f4";
+import { ROUTES } from "./contract.js?v=f9b69f4";
+import { createRouter } from "./router.js?v=f9b69f4";
+import * as data from "./data.js?v=f9b69f4";
+import * as library from "./library.js?v=f9b69f4";
+import { createCard } from "./card.js?v=f9b69f4";
+import * as auth from "./auth.js?v=f9b69f4";
+import * as settings from "./settings.js?v=f9b69f4";
+import * as recs from "./recs.js?v=f9b69f4";
+import * as addBook from "./add-book.js?v=f9b69f4";
+import { createRecsRefresher } from "./recs-refresh.js?v=f9b69f4";
+import { SHELVES_CHANGED } from "./events.js?v=f9b69f4";
 
-/** @type {import('./data.js').LibraryState | null} */
+/** @type {import('./data.js?v=f9b69f4').LibraryState | null} */
 let libraryState = null;
 
 const toastEl = document.getElementById("toast");
@@ -56,7 +58,11 @@ const ctx = {
     libraryState = s;
   },
   showToast,
+  recsRefresh: createRecsRefresher({ callFunction: api.callFunction }),
 };
+
+// Any book landing on a shelf regenerates recommendations quietly in the background.
+document.addEventListener(SHELVES_CHANGED, () => ctx.recsRefresh.request());
 
 async function redrawLibrary() {
   const libRoot = screens[ROUTES.LIBRARY];

@@ -1,5 +1,6 @@
-import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
-import { fetchSimaniaPayload, matchHebrewBook, simaniaIdOf } from "./simania.js";
+import { FUNCTIONS, SHELF_KINDS } from "./contract.js?v=f9b69f4";
+import { fetchSimaniaPayload, matchHebrewBook, simaniaIdOf } from "./simania.js?v=f9b69f4";
+import { notifyShelvesChanged } from "./events.js?v=f9b69f4";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
 export const LIBRARY_REMOVE_LABEL = "הסר מהספרייה";
@@ -31,7 +32,7 @@ export function buildReasonLine(becauseTitles, sharedTags) {
   return "";
 }
 
-/** @param {import('./contract.js').RecommendationCard[]} items */
+/** @param {import('./contract.js?v=f9b69f4').RecommendationCard[]} items */
 export function sortRecommendations(items) {
   return [...items].sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
@@ -39,13 +40,13 @@ export function sortRecommendations(items) {
   });
 }
 
-/** @param {import('./contract.js').RecommendationCard[]} items */
+/** @param {import('./contract.js?v=f9b69f4').RecommendationCard[]} items */
 export function visibleRecommendations(items) {
   return items.filter((r) => !r.dismissed);
 }
 
 /**
- * @param {import('./contract.js').RecommendationCard[]} items
+ * @param {import('./contract.js?v=f9b69f4').RecommendationCard[]} items
  * @param {string} workId
  */
 export function removeRecommendationByWorkId(items, workId) {
@@ -55,7 +56,7 @@ export function removeRecommendationByWorkId(items, workId) {
 /**
  * Drop dismissed rows and work IDs the user added or dismissed while a refresh
  * was in flight, so a stale function response cannot put them back on screen.
- * @param {import('./contract.js').RecommendationCard[]} incoming
+ * @param {import('./contract.js?v=f9b69f4').RecommendationCard[]} incoming
  * @param {Iterable<string> | null | undefined} excludedWorkIds
  */
 export function applyRecommendationRefresh(incoming, excludedWorkIds) {
@@ -69,7 +70,7 @@ export function applyRecommendationRefresh(incoming, excludedWorkIds) {
 
 /**
  * Empty state means "no read/reading seeds", not "library was never fetched".
- * @param {import('./data.js').LibraryState | null | undefined} libraryState
+ * @param {import('./data.js?v=f9b69f4').LibraryState | null | undefined} libraryState
  * @param {boolean} libraryChecked
  */
 export function shouldShowRecsEmptyState(libraryState, libraryChecked) {
@@ -87,7 +88,7 @@ export function shelfChoicesForAdd(shelves) {
 }
 
 /**
- * @param {import('./data.js').LibraryState | null | undefined} libraryState
+ * @param {import('./data.js?v=f9b69f4').LibraryState | null | undefined} libraryState
  * @returns {boolean}
  */
 export function hasRecommendationSeeds(libraryState) {
@@ -104,7 +105,7 @@ export function hasRecommendationSeeds(libraryState) {
 /**
  * @param {Record<string, unknown>} row
  * @param {Map<number, string>} titleBySimaniaId
- * @returns {import('./contract.js').RecommendationCard}
+ * @returns {import('./contract.js?v=f9b69f4').RecommendationCard}
  */
 export function mapStoredRecommendationRow(row, titleBySimaniaId) {
   const rawEdition = row.editions ?? row.edition ?? null;
@@ -179,7 +180,7 @@ export function recommendationFromApiCard(card) {
  * Localizes English-only cards in the browser: the server found a Hebrew title
  * (hebrew_hint) but cannot reach Simania, so match it here and ask link-edition
  * to store and link the edition. A miss or failure leaves the card English-only.
- * @param {import('./contract.js').RecommendationCard[]} items
+ * @param {import('./contract.js?v=f9b69f4').RecommendationCard[]} items
  * @param {{
  *   callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>,
  *   onLinked: (workId: string, patch: { simania_id: number, title: string, author: string | null, cover_url: string | null }) => void,
@@ -239,7 +240,7 @@ export function applyLocalizedRecommendation(items, workId, patch) {
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} client
- * @returns {Promise<import('./contract.js').RecommendationCard[]>}
+ * @returns {Promise<import('./contract.js?v=f9b69f4').RecommendationCard[]>}
  */
 export async function loadStoredRecommendations(client) {
   const { data, error } = await client
@@ -345,7 +346,7 @@ export function canCompleteRecsWrite(session, isCurrent) {
 /**
  * Restyle the shared overlay in place. Never clone or replace `.bk-move select` / `.bk-remove`.
  * @param {HTMLElement} overlay
- * @param {import('./contract.js').RecommendationCard} rec
+ * @param {import('./contract.js?v=f9b69f4').RecommendationCard} rec
  */
 export function applyRecsCardChrome(overlay, rec) {
   const moveLabel = overlay.querySelector(".bk-move");
@@ -420,7 +421,7 @@ export function restoreRecsCardChrome(session) {
 /**
  * Capture-phase intercepts so `card.js` move/remove handlers do not run.
  * @param {ReturnType<typeof applyRecsCardChrome>} session
- * @param {import('./contract.js').RecommendationCard} rec
+ * @param {import('./contract.js?v=f9b69f4').RecommendationCard} rec
  * @param {{ onPickShelf: (shelfId: string) => void, onDismiss: () => void }} handlers
  */
 export function bindRecsCardActions(session, rec, handlers) {
@@ -447,12 +448,12 @@ export function bindRecsCardActions(session, rec, handlers) {
 
 /**
  * @param {HTMLElement} overlay
- * @param {import('./contract.js').RecommendationCard} rec
+ * @param {import('./contract.js?v=f9b69f4').RecommendationCard} rec
  * @param {{
  *   api: { callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>, getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   getLibrary: () => import('./data.js').LibraryState | null,
+ *   getLibrary: () => import('./data.js?v=f9b69f4').LibraryState | null,
  *   showToast: (msg: string) => void,
- *   card: { open: (book: import('./contract.js').BookCard, shelves: unknown[]) => void, close: () => void },
+ *   card: { open: (book: import('./contract.js?v=f9b69f4').BookCard, shelves: unknown[]) => void, close: () => void },
  *   onDismissed: (workId: string) => void,
  *   onAdded: (workId: string) => Promise<void>,
  *   restorePrevious: () => void,
@@ -518,6 +519,7 @@ async function openRecommendationCard(overlay, rec, deps) {
             simania_id: rec.simania_id,
             shelf_id: shelfId,
           });
+          notifyShelvesChanged();
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             deps.card.close();
           }
@@ -564,20 +566,23 @@ async function openRecommendationCard(overlay, rec, deps) {
  * @param {HTMLElement} root
  * @param {{
  *   api: { callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>, getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data?: { loadLibrary: (client: unknown) => Promise<import('./data.js').LibraryState> },
- *   getLibrary: () => import('./data.js').LibraryState | null,
- *   setLibrary?: (s: import('./data.js').LibraryState) => void,
+ *   data?: { loadLibrary: (client: unknown) => Promise<import('./data.js?v=f9b69f4').LibraryState> },
+ *   getLibrary: () => import('./data.js?v=f9b69f4').LibraryState | null,
+ *   setLibrary?: (s: import('./data.js?v=f9b69f4').LibraryState) => void,
  *   showToast: (msg: string) => void,
- *   card: { open: (book: import('./contract.js').BookCard, shelves: unknown[]) => void, close: () => void },
+ *   card: { open: (book: import('./contract.js?v=f9b69f4').BookCard, shelves: unknown[]) => void, close: () => void },
  *   reloadLibrary?: () => Promise<void>,
+ *   recsRefresh?: { busy: () => boolean, request: () => void, subscribe: (fn: (busy: boolean) => void) => () => void },
  * }} ctx
  */
 export async function mount(root, ctx) {
   const inner = root.querySelector(".screen-inner") ?? root;
-  /** @type {import('./contract.js').RecommendationCard[]} */
+  /** @type {import('./contract.js?v=f9b69f4').RecommendationCard[]} */
   let items = [];
   let loading = false;
-  let refreshing = false;
+  // Recommendations regenerate in the background after shelf changes
+  // (recs-refresh.js); this screen shows the stored list until that finishes.
+  let refreshing = ctx.recsRefresh?.busy() ?? false;
   let alive = true;
   let libraryChecked = Boolean(ctx.getLibrary());
   let loadedLibrary = ctx.getLibrary();
@@ -647,20 +652,22 @@ export async function mount(root, ctx) {
             })
             .join("")}
         </ul>`
-      : `<p class="empty" role="status">${refreshing || loading ? "" : "עדיין אין המלצות שמורות. לחצו רענן כדי לחפש."}</p>`;
+      : refreshing || loading
+        ? ""
+        : `<p class="empty" role="status">עדיין לא מצאנו המלצות. הוסיפו עוד ספרים שקראתם ונמשיך לחפש.</p>`;
 
-    const busy = refreshing || loading;
+    const status = loading
+      ? `<p class="recs-loading" role="status">טוען…</p>`
+      : refreshing
+        ? `<p class="recs-updating" role="status"><span class="recs-spinner" aria-hidden="true"></span>מחפש המלצות חדשות…</p>`
+        : "";
     inner.innerHTML = `
       <header class="recs-head">
         <h1>המלצות בשבילי</h1>
-        <button type="button" class="recs-refresh" ${busy ? "disabled" : ""}>רענן</button>
       </header>
-      ${busy ? `<p class="recs-loading" role="status">מחפש המלצות… זה יכול לקחת כדקה.</p>` : ""}
+      ${status}
       ${listHtml}`;
 
-    inner.querySelector(".recs-refresh")?.addEventListener("click", () => {
-      void runRefresh();
-    });
     inner.querySelectorAll(".rec-item").forEach((btn) => {
       btn.addEventListener("click", () => {
         const workId = btn.getAttribute("data-work-id");
@@ -689,37 +696,25 @@ export async function mount(root, ctx) {
     });
   }
 
-  async function runRefresh() {
-    if (refreshing || !alive) return;
+  async function reloadStored() {
     const generation = ++refreshGeneration;
-    refreshing = true;
-    render();
     try {
-      const res = await ctx.api.callFunction(FUNCTIONS.RECOMMENDATIONS, {});
+      const list = await loadStoredRecommendations(ctx.api.getClient());
       if (!alive || generation !== refreshGeneration) return;
-      const list = res && typeof res === "object" && Array.isArray(res.recommendations)
-        ? res.recommendations.map(recommendationFromApiCard)
-        : [];
       items = applyRecommendationRefresh(list, excludedWorkIds);
-      void localizeRecommendations(items, {
-        callFunction: ctx.api.callFunction,
-        isCurrent: () => alive && generation === refreshGeneration,
-        onLinked: (workId, patch) => {
-          items = applyLocalizedRecommendation(items, workId, patch);
-          render();
-        },
-      });
     } catch (err) {
-      if (alive && generation === refreshGeneration) {
-        ctx.showToast(err instanceof Error ? err.message : "לא הצלחנו לרענן המלצות");
-      }
-    } finally {
-      if (generation === refreshGeneration) {
-        refreshing = false;
-        if (alive) render();
-      }
+      console.warn("Could not reload recommendations:", err);
     }
+    if (alive && generation === refreshGeneration) render();
   }
+
+  const unsubscribe = ctx.recsRefresh?.subscribe((busy) => {
+    if (!alive) return;
+    const finished = refreshing && !busy;
+    refreshing = busy;
+    if (finished) void reloadStored();
+    else render();
+  });
 
   const observer = overlay && typeof MutationObserver !== "undefined"
     ? new MutationObserver(() => {
@@ -756,9 +751,14 @@ export async function mount(root, ctx) {
 
   loading = false;
   if (alive) render();
+  // Nothing stored yet (first visit, or the library predates background refresh).
+  if (alive && !items.length && !refreshing && !shouldShowRecsEmptyState(currentLibrary(), true)) {
+    ctx.recsRefresh?.request();
+  }
 
   return () => {
     alive = false;
+    unsubscribe?.();
     refreshGeneration += 1;
     cardGeneration += 1;
     observer?.disconnect();

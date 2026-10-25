@@ -1,4 +1,4 @@
-import { RPCS, SHELF_KINDS } from "./contract.js";
+import { RPCS, SHELF_KINDS } from "./contract.js?v=f9b69f4";
 
 /** @param {Array<{ position: number }>} items */
 export function sortByPosition(items) {

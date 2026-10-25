@@ -1,4 +1,5 @@
-import { SHELF_KINDS } from "./contract.js";
+import { notifyShelvesChanged } from "./events.js?v=f9b69f4";
+import { SHELF_KINDS } from "./contract.js?v=f9b69f4";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -14,9 +15,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js";
-import * as addBook from "./add-book.js";
-import * as firstRun from "./first-run.js";
+} from "./data.js?v=f9b69f4";
+import * as addBook from "./add-book.js?v=f9b69f4";
+import * as firstRun from "./first-run.js?v=f9b69f4";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -242,6 +243,7 @@ async function onDeleteShelf(delBtn, root, ctx) {
   paint(root, ctx);
   try {
     await deleteShelf(ctx.api.getClient(), shelfId);
+    notifyShelvesChanged();
     const fresh = await ctx.data.loadLibrary(ctx.api.getClient());
     ctx.setLibrary(fresh);
     paint(root, ctx);
@@ -274,10 +276,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js'),
+ *   data: typeof import('./data.js?v=f9b69f4'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js').LibraryState | null,
- *   setLibrary: (s: import('./data.js').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=f9b69f4').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=f9b69f4').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx
@@ -523,6 +525,7 @@ function setupDrag(root, ctx) {
             }),
           );
           await moveBook(client, simaniaId, toShelfId, toPosition);
+          if (toShelfId !== dragFrom.shelfId) notifyShelvesChanged();
         }
         if (drag.from) recountShelf(drag.from);
         if (toShelfEl) recountShelf(toShelfEl);

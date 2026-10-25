@@ -1,6 +1,6 @@
-import { ROUTES } from "./contract.js";
-import { loadProfile, saveDisplayName } from "./data.js";
-import { validateDisplayName } from "./settings.js";
+import { ROUTES } from "./contract.js?v=f9b69f4";
+import { loadProfile, saveDisplayName } from "./data.js?v=f9b69f4";
+import { validateDisplayName } from "./settings.js?v=f9b69f4";
 
 /**
  * @param {{ email?: string, password?: string }} fields

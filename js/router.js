@@ -1,4 +1,4 @@
-import { ROUTES } from "./contract.js";
+import { ROUTES } from "./contract.js?v=f9b69f4";
 
 const ROUTE_SET = new Set(Object.values(ROUTES));
 

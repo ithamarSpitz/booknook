@@ -1,19 +1,20 @@
+import { notifyShelvesChanged } from "./events.js?v=f9b69f4";
 import {
   applyOptimisticBookMove,
   applyOptimisticRemoveBook,
   cloneLibrary,
   moveBook,
   removeBook,
-} from "./data.js";
+} from "./data.js?v=f9b69f4";
 
 /**
  * @param {HTMLElement} overlay `.bk` element
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js'),
+ *   data: typeof import('./data.js?v=f9b69f4'),
  *   showToast: (msg: string) => void,
- *   getLibrary?: () => import('./data.js').LibraryState | null,
- *   setLibrary?: (s: import('./data.js').LibraryState) => void,
+ *   getLibrary?: () => import('./data.js?v=f9b69f4').LibraryState | null,
+ *   setLibrary?: (s: import('./data.js?v=f9b69f4').LibraryState) => void,
  *   onLibraryChange: () => Promise<void>,
  * }} deps
  */
@@ -123,6 +124,7 @@ export function createCard(overlay, deps) {
     }
     try {
       await moveBook(client, current.simania_id, toShelf, 0);
+      notifyShelvesChanged();
       close();
     } catch (err) {
       if (snapshot && deps.setLibrary) {
@@ -145,6 +147,7 @@ export function createCard(overlay, deps) {
     }
     try {
       await removeBook(client, current.simania_id);
+      notifyShelvesChanged();
       close();
     } catch (err) {
       if (snapshot && deps.setLibrary) {
