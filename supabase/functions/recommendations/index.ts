@@ -1,70 +1,412 @@
-import { body, errorResponse, HttpError, json, options } from "../_shared/utils.ts";
-import { authors, hardcoverBooks, HardcoverBook } from "../_shared/hardcover.ts";
-import { localizeRecommendation } from "../_shared/bridges.ts";
-import { SimaniaBook } from "../_shared/simania.ts";
+import {
+  body,
+  errorResponse,
+  HttpError,
+  json,
+  options,
+} from "../_shared/utils.ts";
+import {
+  authors,
+  type HardcoverBook,
+  hardcoverBooks,
+} from "../_shared/hardcover.ts";
+import { matchHebrewBook } from "../_shared/simania.ts";
+import { nliHebrew, wikidataHebrew } from "../_shared/bridges.ts";
+import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
+import type {
+  EditionRow,
+  RecommendationCard,
+  RecommendationReplacement,
+  RecommendationRow,
+  ResolveStatus,
+  WorkRow,
+} from "../_shared/types.ts";
+import {
+  cleanCachedTags,
+  excludeCandidates,
+  type LibraryItem,
+  scoreCandidates,
+  selectSeeds,
+  sharedTags,
+} from "./logic.ts";
+import { fetchEditionDetails } from "./simania-details.ts";
 
-type Seed = { simaniaTitle: string; hardcover: HardcoverBook };
-type Candidate = { book: HardcoverBook; score: number; because: string[] };
+type DbClient = ReturnType<typeof serviceClient>;
+type Localization = {
+  book: Awaited<ReturnType<typeof matchHebrewBook>>;
+  status: "wikidata" | "nli";
+};
 
-Deno.serve(async (req) => {
-  const preflight = options(req);
-  if (preflight) return preflight;
+export type RecommendationDependencies = {
+  authenticate: (request: Request) => Promise<string>;
+  userDatabase: (request: Request) => DbClient;
+  serviceDatabase: () => DbClient;
+  fetchHardcover: (ids: number[]) => Promise<HardcoverBook[]>;
+  localize: (book: HardcoverBook) => Promise<Localization | null>;
+  editionDetails: (simaniaId: number) => Promise<Record<string, unknown>>;
+};
+
+const defaults: RecommendationDependencies = {
+  authenticate: requireUser,
+  userDatabase: userClient,
+  serviceDatabase: serviceClient,
+  fetchHardcover: hardcoverBooks,
+  localize: async (book) => {
+    const author = authors(book)[0] ?? "";
+    const wikidata = await wikidataHebrew(book.title, author);
+    if (wikidata) {
+      const match = await matchHebrewBook(wikidata.title, wikidata.author);
+      if (match) return { book: match, status: "wikidata" };
+    }
+    const nli = await nliHebrew(book.title, author);
+    if (!nli) return null;
+    const match = await matchHebrewBook(nli.title, nli.author);
+    return match ? { book: match, status: "nli" } : null;
+  },
+  editionDetails: fetchEditionDetails,
+};
+
+function fail(error: unknown): never {
+  throw new Error(
+    typeof error === "object" && error && "message" in error
+      ? String((error as { message: unknown }).message)
+      : String(error ?? "Database operation failed."),
+  );
+}
+
+function relation<T>(value: T | T[] | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+function workFromProvider(book: HardcoverBook): Omit<WorkRow, "id"> {
+  return {
+    hardcover_id: book.id,
+    original_title: book.title,
+    original_authors: authors(book),
+    similar_ids: (book.cached_similar_book_ids ?? []).filter(Number.isInteger),
+    tags: cleanCachedTags(book.cached_tags),
+    hardcover_cover_url: book.image?.url ?? null,
+    refreshed_at: new Date().toISOString(),
+  };
+}
+
+async function loadLibrary(
+  db: DbClient,
+  userId: string,
+): Promise<LibraryItem[]> {
+  const { data, error } = await db.from("shelf_books").select(
+    "simania_id,position,added_at,finished_at,shelves!inner(kind),editions!inner(title,work_id,works(id,hardcover_id,original_title,original_authors,similar_ids,tags,hardcover_cover_url,refreshed_at))",
+  ).eq("user_id", userId);
+  if (error) fail(error);
+  return (data ?? []).map((row: Record<string, unknown>) => {
+    const shelf = relation(
+      row.shelves as { kind: string } | Array<{ kind: string }>,
+    );
+    const edition = relation(
+      row.editions as Record<string, unknown> | Array<Record<string, unknown>>,
+    );
+    const work = relation(edition?.works as WorkRow | WorkRow[] | null);
+    return {
+      simania_id: Number(row.simania_id),
+      position: Number(row.position),
+      added_at: String(row.added_at),
+      finished_at: row.finished_at ? String(row.finished_at) : null,
+      shelf_kind: shelf?.kind ?? "",
+      title: String(edition?.title ?? ""),
+      work,
+    };
+  });
+}
+
+async function loadDismissed(
+  db: DbClient,
+  userId: string,
+): Promise<Set<string>> {
+  const { data, error } = await db.from("recommendations").select("work_id").eq(
+    "user_id",
+    userId,
+  ).eq("dismissed", true);
+  if (error) fail(error);
+  return new Set((data ?? []).map((row: { work_id: string }) => row.work_id));
+}
+
+async function loadWorks(
+  db: DbClient,
+  hardcoverIds: number[],
+): Promise<WorkRow[]> {
+  if (!hardcoverIds.length) return [];
+  const { data, error } = await db.from("works").select("*").in(
+    "hardcover_id",
+    hardcoverIds,
+  );
+  if (error) fail(error);
+  return (data ?? []) as WorkRow[];
+}
+
+async function loadAndStoreMissingWorks(
+  db: DbClient,
+  ids: number[],
+  existing: WorkRow[],
+  fetchBooks: RecommendationDependencies["fetchHardcover"],
+): Promise<WorkRow[]> {
+  const present = new Set(existing.map((work) => work.hardcover_id));
+  const missing = ids.filter((id) => !present.has(id));
+  const fetched: HardcoverBook[] = [];
+  for (let index = 0; index < missing.length; index += 50) {
+    fetched.push(...await fetchBooks(missing.slice(index, index + 50)));
+  }
+  if (!fetched.length) return existing;
+  const missingSet = new Set(missing);
+  const rows = fetched.filter((book) => missingSet.has(book.id)).map(
+    workFromProvider,
+  );
+  const { data, error } = await db.from("works").upsert(rows, {
+    onConflict: "hardcover_id",
+  }).select("*");
+  if (error) fail(error);
+  const stored = (data ?? []) as WorkRow[];
+  const storedIds = new Set(stored.map((work) => work.hardcover_id));
+  return [
+    ...existing.filter((work) => !storedIds.has(work.hardcover_id)),
+    ...stored,
+  ];
+}
+
+async function linkedEdition(
+  db: DbClient,
+  workId: string,
+): Promise<EditionRow | null> {
+  const { data, error } = await db.from("editions").select("*").eq(
+    "work_id",
+    workId,
+  )
+    .order("simania_id", { ascending: true }).limit(1).maybeSingle();
+  if (error) fail(error);
+  return data as EditionRow | null;
+}
+
+function isStale(value: string | null): boolean {
+  return !value ||
+    Date.now() - new Date(value).getTime() >= 30 * 24 * 60 * 60 * 1000;
+}
+
+async function materializeEdition(
+  db: DbClient,
+  work: WorkRow,
+  localized: NonNullable<Localization>,
+  details: RecommendationDependencies["editionDetails"],
+): Promise<EditionRow | null> {
+  const simaniaId = Number(localized.book?.id ?? localized.book?.bookId);
+  if (!Number.isInteger(simaniaId)) return null;
+  const lookup = await db.from("editions").select("*").eq(
+    "simania_id",
+    simaniaId,
+  ).maybeSingle();
+  if (lookup.error) fail(lookup.error);
+  const current = lookup.data as EditionRow | null;
+  if (current?.work_id && current.work_id !== work.id) return null;
+  const values = !current || isStale(current.details_at)
+    ? await details(simaniaId)
+    : {};
+  const link: Record<string, unknown> = current?.work_id === work.id ? {} : {
+    work_id: work.id,
+    resolve_status: localized.status as ResolveStatus,
+    resolved_at: new Date().toISOString(),
+  };
+  const fallback = current
+    ? {}
+    : { title: localized.book!.title, author: localized.book!.author ?? null };
+  const result = await db.from("editions").upsert({
+    ...fallback,
+    ...values,
+    ...link,
+    simania_id: simaniaId,
+  }, { onConflict: "simania_id" }).select("*").single();
+  if (result.error) fail(result.error);
+  return result.data as EditionRow;
+}
+
+type Prepared = {
+  work: WorkRow;
+  edition: EditionRow | null;
+  replacement: RecommendationReplacement;
+};
+
+async function prepareCandidate(
+  db: DbClient,
+  work: WorkRow,
+  score: number,
+  because: number[],
+  tags: string[],
+  dependencies: RecommendationDependencies,
+): Promise<Prepared> {
+  let edition: EditionRow | null = null;
   try {
-    const input = await body<{ seeds?: Seed[] }>(req);
-    const seeds = (input.seeds ?? []).filter((seed) => seed?.hardcover?.id).slice(0, 5);
-    if (!seeds.length) throw new HttpError(400, "At least one resolved book is required.");
-
-    const chosen = new Set(seeds.map((seed) => seed.hardcover.id));
-    const scores = new Map<number, { score: number; because: string[] }>();
-    for (const seed of seeds) {
-      for (const [rank, id] of (seed.hardcover.cached_similar_book_ids ?? []).slice(0, 40).entries()) {
-        if (chosen.has(id)) continue;
-        const current = scores.get(id) ?? { score: 0, because: [] };
-        current.score += 1 - rank / 40;
-        current.because.push(seed.simaniaTitle);
-        scores.set(id, current);
+    edition = await linkedEdition(db, work.id);
+    if (!edition) {
+      const localized = await dependencies.localize({
+        id: work.hardcover_id!,
+        title: work.original_title,
+        cached_contributors: work.original_authors.map((name) => ({
+          author: { name },
+        })),
+        cached_similar_book_ids: work.similar_ids,
+        cached_tags: work.tags,
+        image: { url: work.hardcover_cover_url },
+      });
+      if (localized) {
+        edition = await materializeEdition(
+          db,
+          work,
+          localized,
+          dependencies.editionDetails,
+        );
       }
     }
-    const ids = [...scores.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, 60).map(([id]) => id);
-    if (!ids.length) return json({ recommendations: [] });
+  } catch (error) {
+    console.warn(`Could not localize ${work.original_title}:`, error);
+    edition = null;
+  }
+  return {
+    work,
+    edition,
+    replacement: {
+      work_id: work.id,
+      simania_id: edition?.simania_id ?? null,
+      score,
+      because,
+      shared_tags: tags,
+    },
+  };
+}
 
-    const books: HardcoverBook[] = [];
-    for (let index = 0; index < ids.length; index += 50) books.push(...await hardcoverBooks(ids.slice(index, index + 50)));
-    const byId = new Map(books.map((book) => [book.id, book]));
-    const ranked: Candidate[] = [...scores.entries()]
-      .map(([id, meta]) => ({ book: byId.get(id)!, ...meta }))
-      .filter((candidate) => candidate.book)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 35);
-
-    const results: Array<{ simania: SimaniaBook; hardcover: HardcoverBook; score: number; because: string[] }> = [];
-    for (let index = 0; index < ranked.length && results.length < 10; index += 5) {
-      const localized = await Promise.all(ranked.slice(index, index + 5).map(async (candidate) => {
-        try {
-          return { candidate, simania: await localizeRecommendation(candidate.book) };
-        } catch (error) {
-          console.warn(`Could not localize ${candidate.book.title}:`, error);
-          return { candidate, simania: null };
-        }
-      }));
-      for (const item of localized) {
-        if (item.simania) results.push({
-          simania: item.simania,
-          hardcover: { ...item.candidate.book, cached_contributors: item.candidate.book.cached_contributors },
-          score: item.candidate.score,
-          because: [...new Set(item.candidate.because)],
-        });
-      }
+export async function handleRecommendations(
+  request: Request,
+  overrides: Partial<RecommendationDependencies> = {},
+): Promise<Response> {
+  const preflight = options(request);
+  if (preflight) return preflight;
+  const dependencies = { ...defaults, ...overrides };
+  try {
+    const userId = await dependencies.authenticate(request);
+    const input = await body<unknown>(request);
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new HttpError(400, "The request body must be a JSON object.");
+    }
+    const userDb = dependencies.userDatabase(request);
+    const serviceDb = dependencies.serviceDatabase();
+    const [library, dismissed] = await Promise.all([
+      loadLibrary(userDb, userId),
+      loadDismissed(userDb, userId),
+    ]);
+    const seeds = selectSeeds(library);
+    if (!seeds.length) {
+      const replaced = await serviceDb.rpc("replace_recommendations", {
+        p_user_id: userId,
+        p_rows: [],
+      });
+      if (replaced.error) fail(replaced.error);
+      return json({ recommendations: [] });
     }
 
-    return json({
-      recommendations: results.slice(0, 10).map((item) => ({
-        ...item,
-        authors: authors(item.hardcover),
-      })),
+    const scored = scoreCandidates(seeds);
+    const candidateIds = scored.map((item) => item.hardcover_id);
+    const known = await loadWorks(serviceDb, candidateIds);
+    const allWorks = await loadAndStoreMissingWorks(
+      serviceDb,
+      candidateIds,
+      known,
+      dependencies.fetchHardcover,
+    );
+    const byHardcover = new Map(
+      allWorks.filter((work) => work.hardcover_id !== null).map((
+        work,
+      ) => [work.hardcover_id!, work]),
+    );
+    const shelved = new Set(
+      library.flatMap((item) => item.work ? [item.work.id] : []),
+    );
+    const candidates = excludeCandidates(
+      scored,
+      byHardcover,
+      shelved,
+      dismissed,
+    )
+      .filter((candidate) => byHardcover.has(candidate.hardcover_id)).slice(
+        0,
+        40,
+      );
+    const seedById = new Map(seeds.map((seed) => [seed.simania_id, seed]));
+    const prepared: Prepared[] = [];
+    for (
+      let index = 0;
+      index < candidates.length && prepared.length < 20;
+      index += 5
+    ) {
+      const batch = candidates.slice(
+        index,
+        Math.min(index + 5, index + 20 - prepared.length),
+      );
+      prepared.push(
+        ...await Promise.all(batch.map((candidate) => {
+          const work = byHardcover.get(candidate.hardcover_id)!;
+          const contributingTags = candidate.because.flatMap((id) => {
+            const seed = seedById.get(id);
+            return seed?.work ? [seed.work.tags] : [];
+          });
+          return prepareCandidate(
+            serviceDb,
+            work,
+            candidate.score,
+            candidate.because,
+            sharedTags(work.tags, contributingTags),
+            dependencies,
+          );
+        })),
+      );
+    }
+
+    const replacement = await serviceDb.rpc("replace_recommendations", {
+      p_user_id: userId,
+      p_rows: prepared.map((item) => item.replacement),
     });
+    if (replacement.error) fail(replacement.error);
+    const preparedByWork = new Map(
+      prepared.map((item) => [item.work.id, item]),
+    );
+    const titleBySeed = new Map(
+      seeds.map((seed) => [seed.simania_id, seed.title]),
+    );
+    const cards: RecommendationCard[] =
+      ((replacement.data ?? []) as RecommendationRow[]).flatMap((row) => {
+        const item = preparedByWork.get(row.work_id);
+        if (!item) return [];
+        const edition = item.edition;
+        return [{
+          work_id: row.work_id,
+          simania_id: row.simania_id,
+          title: edition?.title ?? item.work.original_title,
+          author: edition?.author ??
+            (item.work.original_authors.length
+              ? item.work.original_authors.join(", ")
+              : null),
+          cover_url: edition?.cover_url ?? item.work.hardcover_cover_url,
+          score: row.score,
+          because: row.because,
+          because_titles: row.because.map((id) => titleBySeed.get(id)).filter((
+            title,
+          ): title is string => title !== undefined),
+          shared_tags: row.shared_tags,
+          dismissed: row.dismissed,
+          generated_at: row.generated_at,
+          english_only: row.simania_id === null,
+          can_add: row.simania_id !== null,
+        }];
+      });
+    return json({ recommendations: cards });
   } catch (error) {
     return errorResponse(error);
   }
-});
+}
 
+if (import.meta.main) Deno.serve((request) => handleRecommendations(request));
