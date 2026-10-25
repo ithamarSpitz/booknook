@@ -307,7 +307,7 @@ export async function mount(root, ctx) {
     const plus = e.target.closest(".plus");
     if (plus) {
       const shelfId = plus.dataset.shelfId;
-      if (shelfId) addBook.open(shelfId);
+      if (shelfId) void addBook.open(shelfId, ctx);
       return;
     }
     const book = e.target.closest(".book:not(.plus)");
