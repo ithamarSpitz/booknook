@@ -95,11 +95,16 @@ function updateMenuTitle() {
   });
 }
 
+const pageMenu = document.getElementById("page-menu");
+pageMenu?.addEventListener("click", () => library.openMenu());
+
 function showScreen(route) {
   for (const [hash, el] of Object.entries(screens)) {
     if (!el) continue;
     el.hidden = hash !== route;
   }
+  // The library has its own burger in the crown; the other signed-in screens need one too.
+  if (pageMenu) pageMenu.hidden = route === ROUTES.LIBRARY || route === ROUTES.LOGIN;
 }
 
 let routerCtl = null;
@@ -161,7 +166,9 @@ async function start() {
       showToast("הקישור אינו תקף או שפג תוקפו. בקשו קישור חדש בעזרת \"שכחתי סיסמה\".");
     } else if (session && auth.needsNewPassword(redirect)) {
       showScreen(ROUTES.LOGIN);
-      await new Promise((resolve) => auth.mountSetPassword(screens[ROUTES.LOGIN], ctx, resolve));
+      await new Promise((resolve) => auth.mountSetPassword(screens[ROUTES.LOGIN], ctx, resolve, {
+        askName: redirect.type === "invite",
+      }));
     }
   }
   routerCtl = router.start();

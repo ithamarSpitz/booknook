@@ -23,6 +23,7 @@
   margin: 0;
   padding: 0;
   max-height: min(52vh, 420px);
+  max-height: min(52dvh, 420px);
   overflow-y: auto;
 }
 
@@ -154,5 +155,24 @@
 @media (prefers-reduced-motion: reduce) {
   .book.pending .cover {
     filter: none;
+  }
+}
+
+/* Phones: the on-screen keyboard covers the bottom half, so the add-book
+   sheet sits at the top instead of the middle and scrolls inside itself. */
+@media (max-width: 560px) {
+  .picker {
+    place-items: start center;
+    padding: 12px 10px;
+  }
+
+  .picker .box {
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+    padding: 16px 16px 18px;
+  }
+
+  .picker .search-results {
+    max-height: min(40dvh, 420px);
   }
 }

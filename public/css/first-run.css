@@ -9,7 +9,8 @@
   top: var(--first-run-top, 50%);
   left: var(--first-run-left, 50%);
   z-index: 5;
-  max-width: min(280px, 72vw);
+  /* fixed width: near the screen edge, shrink-to-fit left one word per line */
+  width: min(280px, 72vw);
   transform: translate(-50%, -120%);
   pointer-events: none;
   text-align: center;
@@ -43,7 +44,7 @@
 .first-run::after {
   content: "";
   position: absolute;
-  left: 50%;
+  left: var(--first-run-arrow, 50%);
   bottom: -8px;
   width: 12px;
   height: 12px;

@@ -187,6 +187,18 @@ async function currentUserId(client) {
   return data?.user?.id ?? null;
 }
 
+/**
+ * PostgREST refuses an UPDATE without a filter, so target the caller's own row.
+ * @param {import('@supabase/supabase-js').SupabaseClient} client
+ * @param {string} displayName
+ */
+export async function saveDisplayName(client, displayName) {
+  const userId = await currentUserId(client);
+  if (!userId) throw new Error("נא להתחבר מחדש");
+  const { error } = await client.from("profiles").update({ display_name: displayName }).eq("id", userId);
+  if (error) throw new Error(error.message || "לא הצלחנו לשמור");
+}
+
 /** @param {import('@supabase/supabase-js').SupabaseClient} client */
 export async function loadProfile(client) {
   const { data, error } = await client.from("profiles").select("display_name").maybeSingle();

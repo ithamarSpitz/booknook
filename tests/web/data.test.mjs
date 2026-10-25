@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyOptimisticBookMove,
+  saveDisplayName,
   applyOptimisticDeleteShelf,
   applyOptimisticRemoveBook,
   applyOptimisticRename,
@@ -377,5 +378,24 @@ describe("data.js client", () => {
       ["id", "s1"],
       ["kind", "custom"],
     ]);
+  });
+});
+
+describe("saveDisplayName", () => {
+  it("updates only the caller's profile row (PostgREST rejects an unfiltered UPDATE)", async () => {
+    const calls = [];
+    const client = {
+      auth: { getUser: async () => ({ data: { user: { id: "u1" } }, error: null }) },
+      from: (table) => ({
+        update: (values) => ({
+          eq: async (column, value) => {
+            calls.push({ table, values, column, value });
+            return { error: null };
+          },
+        }),
+      }),
+    };
+    await saveDisplayName(client, "איתמר");
+    assert.deepEqual(calls, [{ table: "profiles", values: { display_name: "איתמר" }, column: "id", value: "u1" }]);
   });
 });

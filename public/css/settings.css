@@ -3,7 +3,8 @@
 .settings-wrap {
   max-width: 520px;
   margin: 0 auto;
-  padding: 8px 0 24px;
+  /* settings.js renders straight into the section, without .screen-inner's padding */
+  padding: 28px 16px 40px;
 }
 
 .settings-title {

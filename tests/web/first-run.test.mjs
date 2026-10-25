@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { plusCenterOffset, shouldShow } from "../../public/js/first-run.js";
+import { clampBubble, plusCenterOffset, shouldShow } from "../../public/js/first-run.js";
 
 describe("first-run shouldShow", () => {
   it("is true when every shelf has no books", () => {
@@ -32,5 +32,18 @@ describe("first-run plusCenterOffset", () => {
     const { top, left } = plusCenterOffset(plus, main);
     assert.equal(left, 740);
     assert.equal(top, 260);
+  });
+});
+
+describe("clampBubble", () => {
+  it("keeps the bubble inside the container and points the arrow at the plus", () => {
+    // Plus tile at the right edge of a 375px phone, bubble 270px wide.
+    const { center, arrow } = clampBubble(330, 270, 375);
+    assert.equal(center, 375 - 135 - 8);
+    assert.equal(arrow, 330 - (center - 135));
+  });
+
+  it("stays centered on the plus when there is room", () => {
+    assert.deepEqual(clampBubble(400, 270, 1000), { center: 400, arrow: 135 });
   });
 });
