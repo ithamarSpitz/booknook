@@ -2,8 +2,8 @@ const isLocal =
   location.hostname === "localhost" || location.hostname === "127.0.0.1";
 
 // --- OPERATOR: production Supabase (anon key is public by design; never put the service-role key here) ---
-const PRODUCTION_SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co";
-const PRODUCTION_SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+const PRODUCTION_SUPABASE_URL = "https://zheosjpootcwvuazwjzh.supabase.co";
+const PRODUCTION_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZW9zanBvb3Rjd3Z1YXp3anpoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5MTU4MzcsImV4cCI6MjEwODQ5MTgzN30.XFICFLqnrR5d0vYXzNefwepbjSAx2bIiwVtgAonulW0";
 
 const localSupabaseUrl = "http://127.0.0.1:54321";
 const localAnonKey =
