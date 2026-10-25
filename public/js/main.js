@@ -149,5 +149,23 @@ async function onRoute(route) {
 }
 
 const router = createRouter({ onRoute });
-routerCtl = router.start();
-ctx.router = routerCtl;
+
+async function start() {
+  // An invite or password-reset link puts the session in the URL fragment.
+  // Let supabase-js read it before the router rewrites the hash to a route.
+  const redirect = auth.parseAuthRedirect(location.hash);
+  if (redirect) {
+    const session = await api.getSession();
+    history.replaceState(null, "", location.pathname + location.search);
+    if (redirect.kind === "error") {
+      showToast("הקישור אינו תקף או שפג תוקפו. בקשו קישור חדש בעזרת \"שכחתי סיסמה\".");
+    } else if (session && auth.needsNewPassword(redirect)) {
+      showScreen(ROUTES.LOGIN);
+      await new Promise((resolve) => auth.mountSetPassword(screens[ROUTES.LOGIN], ctx, resolve));
+    }
+  }
+  routerCtl = router.start();
+  ctx.router = routerCtl;
+}
+
+void start();

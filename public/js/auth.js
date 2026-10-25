@@ -208,3 +208,98 @@ export async function requireSession(api) {
   }
   return session;
 }
+
+/**
+ * Reads the fragment Supabase appends to invite and password-reset links:
+ * `#access_token=…&type=invite|recovery` on success, `#error=…` when the link
+ * is expired or already used.
+ * @param {string} hash
+ * @returns {{ kind: "session", type: string } | { kind: "error", message: string } | null}
+ */
+export function parseAuthRedirect(hash) {
+  const params = new URLSearchParams(String(hash ?? "").replace(/^#/, ""));
+  if (params.has("access_token")) return { kind: "session", type: params.get("type") ?? "" };
+  if (params.has("error") || params.has("error_description")) {
+    return { kind: "error", message: params.get("error_description") ?? params.get("error") ?? "" };
+  }
+  return null;
+}
+
+/** Invite and recovery links sign the user in without a password; they must choose one. */
+export function needsNewPassword(redirect) {
+  return redirect?.kind === "session" && (redirect.type === "invite" || redirect.type === "recovery");
+}
+
+/**
+ * @param {{ password?: string, confirm?: string }} fields
+ */
+export function validateNewPassword(fields) {
+  const password = String(fields.password ?? "");
+  const errors = {};
+  if (password.length < 6) errors.password = "הסיסמה צריכה להכיל לפחות 6 תווים";
+  else if (password !== String(fields.confirm ?? "")) errors.confirm = "הסיסמאות אינן תואמות";
+  return { ok: Object.keys(errors).length === 0, errors, password };
+}
+
+/**
+ * Set-password form shown after an invite or password-reset link.
+ * @param {HTMLElement} root
+ * @param {{ api: { getClient: () => import('@supabase/supabase-js').SupabaseClient } }} ctx
+ * @param {() => void} onDone called after the password is saved
+ */
+export function mountSetPassword(root, ctx, onDone) {
+  root.innerHTML = `
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <h1 class="auth-title">תורימיטור</h1>
+        <p class="auth-lead">בחרו סיסמה לספרייה שלכם</p>
+        <form class="auth-form" novalidate>
+          <label class="auth-field">
+            <span>סיסמה חדשה</span>
+            <input type="password" name="password" autocomplete="new-password" required>
+          </label>
+          <p class="auth-field-error" data-for="password" hidden></p>
+          <label class="auth-field">
+            <span>אימות סיסמה</span>
+            <input type="password" name="confirm" autocomplete="new-password" required>
+          </label>
+          <p class="auth-field-error" data-for="confirm" hidden></p>
+          <p class="auth-form-error" role="alert" hidden></p>
+          <button type="submit" class="auth-submit">שמירה</button>
+        </form>
+      </div>
+    </div>
+  `;
+  const form = root.querySelector(".auth-form");
+  const submitBtn = root.querySelector(".auth-submit");
+  const formError = root.querySelector(".auth-form-error");
+  const fieldErrors = root.querySelectorAll(".auth-field-error");
+
+  form?.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const value = (name) => {
+      const el = root.querySelector(`input[name="${name}"]`);
+      return el instanceof HTMLInputElement ? el.value : "";
+    };
+    const checked = validateNewPassword({ password: value("password"), confirm: value("confirm") });
+    fieldErrors.forEach((el) => {
+      const msg = checked.errors[el.getAttribute("data-for") ?? ""] ?? "";
+      el.textContent = msg;
+      el.hidden = !msg;
+    });
+    if (formError) formError.hidden = true;
+    if (!checked.ok) return;
+    if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
+    try {
+      const { error } = await ctx.api.getClient().auth.updateUser({ password: checked.password });
+      if (error) throw error;
+      onDone();
+    } catch (err) {
+      if (formError) {
+        formError.textContent = mapLoginError(err);
+        formError.hidden = false;
+      }
+      if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
+    }
+  });
+}
