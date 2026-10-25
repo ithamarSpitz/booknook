@@ -1,0 +1,12 @@
+{
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"v\":\"1.0\",\"data\":{\"id\":96986,\"title\":\"יונה ונער\",\"author\":\"מאיר שלו\",\"publisher\":\"עם עובד\",\"year\":2006,\"pages\":365,\"series\":\"ספריה לעם\",\"category\":\"ספרות\",\"coverUrl\":\"https://cdn.simania.co.il/bookimages/covers9/96986.jpg\",\"description\":\"תיאור מדגם\",\"translator\":\"\"}}"
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "id": 2
+}

@@ -13,47 +13,133 @@ export type SimaniaBook = {
   url?: string;
 };
 
-function parseMcp(raw: string): SimaniaBook[] {
+export type SimaniaBookDetails = Record<string, unknown> & {
+  id?: string | number;
+  bookId?: string | number;
+  title?: string;
+};
+
+export type SimaniaBookRating = Record<string, unknown>;
+
+function parseMcp(raw: string): unknown {
   const line = raw.split(/\r?\n/).find((value) => value.startsWith("data:"));
   const envelope = JSON.parse(line ? line.slice(5).trim() : raw);
   const text = (envelope.result?.content ?? [])
     .filter((item: { type?: string }) => item.type === "text")
     .map((item: { text?: string }) => item.text ?? "")
     .join("");
-  const data = JSON.parse(text || "[]");
-  if (Array.isArray(data)) return data;
-  return data.books ?? data.results ?? data.items ?? data.data ?? [];
+  return JSON.parse(text || "null");
 }
 
-export async function searchBooks(query: string, limit = 8): Promise<SimaniaBook[]> {
-  const value = query.trim();
-  if (value.length < 2) return [];
+async function callTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
   const response = await fetchTimeout(SIMANIA, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: ++requestId,
       method: "tools/call",
-      params: { name: "books_search", arguments: { query: value, limit, offset: 0 } },
+      params: { name, arguments: args },
     }),
   });
-  if (!response.ok) throw new HttpError(502, `Book catalog returned HTTP ${response.status}.`);
-  return parseMcp(await response.text());
+  if (!response.ok) {
+    throw new HttpError(502, `Book catalog returned HTTP ${response.status}.`);
+  }
+  try {
+    return parseMcp(await response.text());
+  } catch {
+    throw new HttpError(502, "Book catalog returned an invalid response.");
+  }
 }
 
-export async function matchHebrewBook(title: string, author = ""): Promise<SimaniaBook | null> {
+export async function searchBooks(
+  query: string,
+  limit = 8,
+): Promise<SimaniaBook[]> {
+  const value = query.trim();
+  if (value.length < 2) return [];
+  const data = await callTool("books_search", {
+    query: value,
+    limit,
+    offset: 0,
+  }) as Record<string, unknown> | unknown[];
+  if (Array.isArray(data)) return data as SimaniaBook[];
+  return (data?.books ?? data?.results ?? data?.items ?? data?.data ??
+    []) as SimaniaBook[];
+}
+
+function objectResult(
+  value: unknown,
+  keys: string[],
+): Record<string, unknown> | null {
+  if (Array.isArray(value)) {
+    return value[0] && typeof value[0] === "object"
+      ? value[0] as Record<string, unknown>
+      : null;
+  }
+  if (typeof value === "number") return { rating: value };
+  if (!value || typeof value !== "object") return null;
+  const object = value as Record<string, unknown>;
+  for (const key of keys) {
+    const nested = object[key];
+    if (Array.isArray(nested)) {
+      return nested[0] && typeof nested[0] === "object"
+        ? nested[0] as Record<string, unknown>
+        : null;
+    }
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      return nested as Record<string, unknown>;
+    }
+  }
+  return object;
+}
+
+export async function bookDetails(
+  id: number,
+): Promise<SimaniaBookDetails | null> {
+  return objectResult(await callTool("books_get_details", { bookId: id }), [
+    "book",
+    "details",
+    "data",
+    "result",
+  ]);
+}
+
+export async function bookRating(
+  id: number,
+): Promise<SimaniaBookRating | null> {
+  return objectResult(await callTool("books_get_rating", { bookId: id }), [
+    "ratings",
+    "data",
+    "result",
+  ]);
+}
+
+export async function matchHebrewBook(
+  title: string,
+  author = "",
+): Promise<SimaniaBook | null> {
   let results = await searchBooks(`${title} ${author}`.trim(), 6);
   if (!results.length) results = await searchBooks(title, 6);
   const ranked = results.map((book) => ({
     book,
-    score: similarity(title, book.title) * 3 + (author ? similarity(author, book.author) * 2 : 0),
+    score: similarity(title, book.title) * 3 +
+      (author ? similarity(author, book.author) * 2 : 0),
   })).sort((a, b) => b.score - a.score);
-  return ranked[0] && similarity(title, ranked[0].book.title) >= 0.45 ? ranked[0].book : null;
+  return ranked[0] && similarity(title, ranked[0].book.title) >= 0.45
+    ? ranked[0].book
+    : null;
 }
 
 export function simaniaKey(book: SimaniaBook): string {
   const id = book.id ?? book.bookId;
-  return id != null ? `id:${id}` : `text:${normalize(book.title)}|${normalize(book.author)}`;
+  return id != null
+    ? `id:${id}`
+    : `text:${normalize(book.title)}|${normalize(book.author)}`;
 }
-
