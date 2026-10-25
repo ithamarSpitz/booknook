@@ -1,3 +1,4 @@
+import { notifyShelvesChanged } from "./events.js";
 import {
   applyOptimisticBookMove,
   applyOptimisticRemoveBook,
@@ -123,6 +124,7 @@ export function createCard(overlay, deps) {
     }
     try {
       await moveBook(client, current.simania_id, toShelf, 0);
+      notifyShelvesChanged();
       close();
     } catch (err) {
       if (snapshot && deps.setLibrary) {
@@ -145,6 +147,7 @@ export function createCard(overlay, deps) {
     }
     try {
       await removeBook(client, current.simania_id);
+      notifyShelvesChanged();
       close();
     } catch (err) {
       if (snapshot && deps.setLibrary) {

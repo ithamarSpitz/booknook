@@ -1,5 +1,6 @@
 import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
 import { fetchSimaniaPayload, matchHebrewBook, simaniaIdOf } from "./simania.js";
+import { notifyShelvesChanged } from "./events.js";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
 export const LIBRARY_REMOVE_LABEL = "הסר מהספרייה";
@@ -518,6 +519,7 @@ async function openRecommendationCard(overlay, rec, deps) {
             simania_id: rec.simania_id,
             shelf_id: shelfId,
           });
+          notifyShelvesChanged();
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             deps.card.close();
           }
@@ -570,6 +572,7 @@ async function openRecommendationCard(overlay, rec, deps) {
  *   showToast: (msg: string) => void,
  *   card: { open: (book: import('./contract.js').BookCard, shelves: unknown[]) => void, close: () => void },
  *   reloadLibrary?: () => Promise<void>,
+ *   recsRefresh?: { busy: () => boolean, request: () => void, subscribe: (fn: (busy: boolean) => void) => () => void },
  * }} ctx
  */
 export async function mount(root, ctx) {
@@ -577,7 +580,9 @@ export async function mount(root, ctx) {
   /** @type {import('./contract.js').RecommendationCard[]} */
   let items = [];
   let loading = false;
-  let refreshing = false;
+  // Recommendations regenerate in the background after shelf changes
+  // (recs-refresh.js); this screen shows the stored list until that finishes.
+  let refreshing = ctx.recsRefresh?.busy() ?? false;
   let alive = true;
   let libraryChecked = Boolean(ctx.getLibrary());
   let loadedLibrary = ctx.getLibrary();
@@ -647,20 +652,22 @@ export async function mount(root, ctx) {
             })
             .join("")}
         </ul>`
-      : `<p class="empty" role="status">${refreshing || loading ? "" : "עדיין אין המלצות שמורות. לחצו רענן כדי לחפש."}</p>`;
+      : refreshing || loading
+        ? ""
+        : `<p class="empty" role="status">עדיין לא מצאנו המלצות. הוסיפו עוד ספרים שקראתם ונמשיך לחפש.</p>`;
 
-    const busy = refreshing || loading;
+    const status = loading
+      ? `<p class="recs-loading" role="status">טוען…</p>`
+      : refreshing
+        ? `<p class="recs-updating" role="status"><span class="recs-spinner" aria-hidden="true"></span>מחפש המלצות חדשות…</p>`
+        : "";
     inner.innerHTML = `
       <header class="recs-head">
         <h1>המלצות בשבילי</h1>
-        <button type="button" class="recs-refresh" ${busy ? "disabled" : ""}>רענן</button>
       </header>
-      ${busy ? `<p class="recs-loading" role="status">מחפש המלצות… זה יכול לקחת כדקה.</p>` : ""}
+      ${status}
       ${listHtml}`;
 
-    inner.querySelector(".recs-refresh")?.addEventListener("click", () => {
-      void runRefresh();
-    });
     inner.querySelectorAll(".rec-item").forEach((btn) => {
       btn.addEventListener("click", () => {
         const workId = btn.getAttribute("data-work-id");
@@ -689,37 +696,25 @@ export async function mount(root, ctx) {
     });
   }
 
-  async function runRefresh() {
-    if (refreshing || !alive) return;
+  async function reloadStored() {
     const generation = ++refreshGeneration;
-    refreshing = true;
-    render();
     try {
-      const res = await ctx.api.callFunction(FUNCTIONS.RECOMMENDATIONS, {});
+      const list = await loadStoredRecommendations(ctx.api.getClient());
       if (!alive || generation !== refreshGeneration) return;
-      const list = res && typeof res === "object" && Array.isArray(res.recommendations)
-        ? res.recommendations.map(recommendationFromApiCard)
-        : [];
       items = applyRecommendationRefresh(list, excludedWorkIds);
-      void localizeRecommendations(items, {
-        callFunction: ctx.api.callFunction,
-        isCurrent: () => alive && generation === refreshGeneration,
-        onLinked: (workId, patch) => {
-          items = applyLocalizedRecommendation(items, workId, patch);
-          render();
-        },
-      });
     } catch (err) {
-      if (alive && generation === refreshGeneration) {
-        ctx.showToast(err instanceof Error ? err.message : "לא הצלחנו לרענן המלצות");
-      }
-    } finally {
-      if (generation === refreshGeneration) {
-        refreshing = false;
-        if (alive) render();
-      }
+      console.warn("Could not reload recommendations:", err);
     }
+    if (alive && generation === refreshGeneration) render();
   }
+
+  const unsubscribe = ctx.recsRefresh?.subscribe((busy) => {
+    if (!alive) return;
+    const finished = refreshing && !busy;
+    refreshing = busy;
+    if (finished) void reloadStored();
+    else render();
+  });
 
   const observer = overlay && typeof MutationObserver !== "undefined"
     ? new MutationObserver(() => {
@@ -756,9 +751,14 @@ export async function mount(root, ctx) {
 
   loading = false;
   if (alive) render();
+  // Nothing stored yet (first visit, or the library predates background refresh).
+  if (alive && !items.length && !refreshing && !shouldShowRecsEmptyState(currentLibrary(), true)) {
+    ctx.recsRefresh?.request();
+  }
 
   return () => {
     alive = false;
+    unsubscribe?.();
     refreshGeneration += 1;
     cardGeneration += 1;
     observer?.disconnect();

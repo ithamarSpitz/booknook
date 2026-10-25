@@ -8,6 +8,8 @@ import * as auth from "./auth.js";
 import * as settings from "./settings.js";
 import * as recs from "./recs.js";
 import * as addBook from "./add-book.js";
+import { createRecsRefresher } from "./recs-refresh.js";
+import { SHELVES_CHANGED } from "./events.js";
 
 /** @type {import('./data.js').LibraryState | null} */
 let libraryState = null;
@@ -56,7 +58,11 @@ const ctx = {
     libraryState = s;
   },
   showToast,
+  recsRefresh: createRecsRefresher({ callFunction: api.callFunction }),
 };
+
+// Any book landing on a shelf regenerates recommendations quietly in the background.
+document.addEventListener(SHELVES_CHANGED, () => ctx.recsRefresh.request());
 
 async function redrawLibrary() {
   const libRoot = screens[ROUTES.LIBRARY];

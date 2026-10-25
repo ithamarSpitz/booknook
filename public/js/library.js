@@ -1,3 +1,4 @@
+import { notifyShelvesChanged } from "./events.js";
 import { SHELF_KINDS } from "./contract.js";
 import {
   applyOptimisticBookMove,
@@ -242,6 +243,7 @@ async function onDeleteShelf(delBtn, root, ctx) {
   paint(root, ctx);
   try {
     await deleteShelf(ctx.api.getClient(), shelfId);
+    notifyShelvesChanged();
     const fresh = await ctx.data.loadLibrary(ctx.api.getClient());
     ctx.setLibrary(fresh);
     paint(root, ctx);
@@ -523,6 +525,7 @@ function setupDrag(root, ctx) {
             }),
           );
           await moveBook(client, simaniaId, toShelfId, toPosition);
+          if (toShelfId !== dragFrom.shelfId) notifyShelvesChanged();
         }
         if (drag.from) recountShelf(drag.from);
         if (toShelfEl) recountShelf(toShelfEl);

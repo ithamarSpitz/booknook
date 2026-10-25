@@ -15,22 +15,6 @@
   line-height: 1.1;
 }
 
-.recs-refresh {
-  border: 0;
-  border-radius: 999px;
-  padding: 10px 20px;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-  background: var(--accent, #8a5a26);
-  color: #fff;
-}
-
-.recs-refresh:disabled {
-  opacity: 0.55;
-  cursor: wait;
-}
-
 .recs-loading {
   color: var(--muted, #6b5a48);
   font-size: 15px;
@@ -184,4 +168,31 @@
   .rec-item:focus-visible .cover {
     transform: none;
   }
+}
+
+/* Background refresh: the old list stays visible under this line. */
+.recs-updating {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.recs-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(107, 74, 42, 0.25);
+  border-top-color: #6b4a2a;
+  border-radius: 50%;
+  animation: recs-spin 0.9s linear infinite;
+}
+
+@keyframes recs-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recs-spinner { animation: none; }
 }

@@ -48,7 +48,7 @@ Do not run `supabase config push`. That would copy local `site_url` (`http://127
 
 Production is live at **https://ithamarspitz.github.io/torimitor-app/**, served by GitHub Pages from the `main` branch of the public repo `ithamarSpitz/torimitor-app`, which holds only a copy of `public/` plus an empty `.nojekyll`. (Cloudflare Pages and Netlify would also work; they need an account login.) All app paths are relative, so the `/torimitor-app/` subpath needs no changes.
 
-To publish a new version, copy `public/` into a clone of that repo, commit, and push `main`; Pages redeploys in about a minute. `public/` contains only what every visitor downloads anyway: the anon key is public, and `HARDCOVER_API_KEY` and the service-role key never go there.
+To publish a new version, run `node scripts/build-site.mjs <clone of torimitor-app>` (it copies `public/` and stamps every module and stylesheet reference with `?v=<git hash>`, so a browser never mixes cached old modules with new ones), then commit and push `main` there; Pages redeploys in about a minute. `public/` contains only what every visitor downloads anyway: the anon key is public, and `HARDCOVER_API_KEY` and the service-role key never go there.
 
 ## 5. Set production Auth URLs in the cloud dashboard
 
