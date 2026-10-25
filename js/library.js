@@ -1,5 +1,5 @@
-import { notifyShelvesChanged } from "./events.js?v=1844a00";
-import { SHELF_KINDS } from "./contract.js?v=1844a00";
+import { notifyShelvesChanged } from "./events.js?v=e5e3672";
+import { SHELF_KINDS } from "./contract.js?v=e5e3672";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -15,9 +15,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js?v=1844a00";
-import * as addBook from "./add-book.js?v=1844a00";
-import * as firstRun from "./first-run.js?v=1844a00";
+} from "./data.js?v=e5e3672";
+import * as addBook from "./add-book.js?v=e5e3672";
+import * as firstRun from "./first-run.js?v=e5e3672";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -289,10 +289,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=1844a00'),
+ *   data: typeof import('./data.js?v=e5e3672'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js?v=1844a00').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=1844a00').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=e5e3672').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=e5e3672').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx
@@ -432,10 +432,8 @@ function setupDrag(root, ctx) {
     requestAnimationFrame(tick);
   };
 
-  // Neighbours glide to their new places instead of jumping (FLIP). While they
-  // glide, placement pauses so the moving targets don't flip the order back.
+  // Neighbours glide to their new places instead of jumping (FLIP).
   const SLIDE_MS = 180;
-  let settleUntil = 0;
   const slide = (nodes, mutate) => {
     const before = new Map(nodes.map((n) => [n, n.getBoundingClientRect()]));
     mutate();
@@ -454,43 +452,67 @@ function setupDrag(root, ctx) {
         if (!n.style.transform) n.style.transition = "";
       }, SLIDE_MS + 20);
     }
-    settleUntil = performance.now() + SLIDE_MS;
+  };
+
+  // Where a node sits in the layout, ignoring a slide in progress, so placement
+  // can run every frame without chasing books that are still gliding.
+  const layoutRect = (n) => {
+    const r = n.getBoundingClientRect();
+    const m = new DOMMatrixReadOnly(getComputedStyle(n).transform);
+    return { left: r.left - m.e, right: r.right - m.e, top: r.top - m.f, bottom: r.bottom - m.f, width: r.width, height: r.height };
   };
 
   const shelfAt = (y) =>
     [...caseEl.querySelectorAll(":scope > .shelf")].find((s) => {
-      const r = s.getBoundingClientRect();
+      const r = layoutRect(s);
       return y >= r.top && y < r.bottom;
     });
 
+  const center = (r) => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const nearest = (nodes, x) =>
+    nodes.reduce((best, n) => {
+      const d = Math.abs(center(layoutRect(n)).x - x);
+      return !best || d < best.d ? { n, d } : best;
+    }, null)?.n;
+
+  // Placement follows the dragged item, not the finger, so it is the same in
+  // both directions wherever the item was grabbed: a neighbour gives way once
+  // the dragged item covers half of it.
   const place = () => {
-    if (!drag || performance.now() < settleUntil) return;
-    const { el, kind, x, y } = drag;
+    if (!drag) return;
+    const { el, kind, ghost, x, y } = drag;
+    const g = ghost.getBoundingClientRect();
+    const gc = center(g);
     if (kind === "shelf") {
-      const next = [...caseEl.querySelectorAll(":scope > .shelf")].find(
-        (s) => s !== el && y < s.getBoundingClientRect().top + s.getBoundingClientRect().height / 2,
-      );
-      const before = next || caseEl.querySelector(".add-slot");
-      if (el.nextElementSibling !== before) {
+      const prev = el.previousElementSibling?.classList.contains("shelf") ? el.previousElementSibling : null;
+      const next = el.nextElementSibling?.classList.contains("shelf") ? el.nextElementSibling : null;
+      let before = null;
+      if (prev && g.top < center(layoutRect(prev)).y) before = prev;
+      else if (next && g.bottom > center(layoutRect(next)).y) before = next.nextElementSibling;
+      if (before) {
         slide([...caseEl.querySelectorAll(":scope > .shelf, :scope > .add-slot")], () => caseEl.insertBefore(el, before));
       }
       return;
     }
-    // Pick the shelf by height and the slot by x, so the spot follows the finger
-    // even when it is over the board, the shelf label or a gap between covers.
-    const wrap = shelfAt(y)?.querySelector(".rowwrap");
-    if (!wrap) return;
-    const under = document.elementFromPoint(x, y);
-    if (under?.closest(".edge")) return;
+    // The shelf is picked by the item's height, so the board, the shelf label
+    // and gaps between covers all count as that shelf.
+    const wrap = (shelfAt(gc.y) ?? shelfAt(y))?.querySelector(".rowwrap");
+    if (!wrap || document.elementFromPoint(x, y)?.closest(".edge")) return;
     const row = wrap.querySelector(".row");
-    // Rows run right to left: the slot is before the first book whose middle is left of x.
-    const before =
-      [...row.querySelectorAll(":scope > .book:not(.plus)")].find((b) => {
-        if (b === el) return false;
-        const br = b.getBoundingClientRect();
-        return x > br.left + br.width / 2;
-      }) ?? row.querySelector(".plus");
-    if (before !== el && el.nextElementSibling !== before) {
+    const plus = row.querySelector(":scope > .plus");
+    const target = nearest([...row.querySelectorAll(":scope > .book")], gc.x);
+    if (!target || target === el) return;
+    let before;
+    if (target === plus) before = plus;
+    else if (el.parentElement === row) {
+      // Same row: take the target's slot (slots are equal width).
+      const books = [...row.children];
+      before = books.indexOf(target) > books.indexOf(el) ? target.nextElementSibling : target;
+    } else {
+      // Rows run right to left: right of the target's middle goes before it.
+      before = gc.x > center(layoutRect(target)).x ? target : target.nextElementSibling;
+    }
+    if (before && before !== el && el.nextElementSibling !== before) {
       const fromRow = el.parentElement;
       const nodes = [...row.querySelectorAll(":scope > .book")];
       if (fromRow && fromRow !== row) nodes.push(...fromRow.querySelectorAll(":scope > .book"));
@@ -531,13 +553,22 @@ function setupDrag(root, ctx) {
 
   const drop = async () => {
     if (!drag) return;
-    const { el, ghost, kind, ox, oy } = drag;
+    // End the drag now, before the save: later pointer moves must not move the
+    // dropped book, and the next book can be picked up while this one saves.
+    const done = drag;
+    const snapshot = dragSnapshot;
+    const from = dragFrom;
+    drag = null;
+    dragSnapshot = null;
+    dragFrom = null;
+    const { el, ghost, kind, ox, oy } = done;
     const r = el.getBoundingClientRect();
     ghost.style.transition = "transform .18s ease";
     ghost.style.transform = `translate(${r.left - ox}px, ${r.top - oy}px)`;
     setTimeout(() => {
       ghost.remove();
-      el.classList.remove("placeholder");
+      // The same book may already be picked up again.
+      if (drag?.el !== el) el.classList.remove("placeholder");
     }, 180);
     document.body.classList.remove("dragging");
     swallowClick = true;
@@ -550,8 +581,8 @@ function setupDrag(root, ctx) {
       if (kind === "shelf") {
         const shelfId = el.dataset.shelfId;
         const toPosition = shelfPositionInCase(caseEl, el);
-        if (shelfId && dragFrom && toPosition !== dragFrom.position) {
-          ctx.setLibrary(applyOptimisticShelfMove(dragSnapshot, { shelfId, toPosition }));
+        if (shelfId && from && toPosition !== from.position) {
+          ctx.setLibrary(applyOptimisticShelfMove(snapshot, { shelfId, toPosition }));
           await moveShelf(client, shelfId, toPosition);
         }
       } else {
@@ -562,32 +593,29 @@ function setupDrag(root, ctx) {
         const toPosition = bookPositionInRow(row, el);
         if (
           simaniaId &&
-          dragFrom?.shelfId &&
+          from?.shelfId &&
           toShelfId &&
-          (toShelfId !== dragFrom.shelfId || toPosition !== dragFrom.position)
+          (toShelfId !== from.shelfId || toPosition !== from.position)
         ) {
           ctx.setLibrary(
-            applyOptimisticBookMove(dragSnapshot, {
+            applyOptimisticBookMove(snapshot, {
               simaniaId,
-              fromShelfId: dragFrom.shelfId,
+              fromShelfId: from.shelfId,
               toShelfId,
               toPosition,
             }),
           );
           await moveBook(client, simaniaId, toShelfId, toPosition);
-          if (toShelfId !== dragFrom.shelfId) notifyShelvesChanged();
+          if (toShelfId !== from.shelfId) notifyShelvesChanged();
         }
-        if (drag.from) recountShelf(drag.from);
+        if (done.from) recountShelf(done.from);
         if (toShelfEl) recountShelf(toShelfEl);
       }
     } catch (err) {
-      ctx.setLibrary(dragSnapshot);
+      ctx.setLibrary(snapshot);
       paint(root, ctx);
       ctx.showToast(err instanceof Error ? err.message : "לא הצלחנו לשמור");
     }
-    drag = null;
-    dragSnapshot = null;
-    dragFrom = null;
     root.querySelectorAll(".row").forEach((row) => row.dispatchEvent(new Event("scroll")));
   };
 

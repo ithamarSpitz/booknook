@@ -1,5 +1,5 @@
-import { ROUTES } from "./contract.js?v=1844a00";
-import { libraryTitle, saveDisplayName } from "./data.js?v=1844a00";
+import { ROUTES } from "./contract.js?v=e5e3672";
+import { libraryTitle, saveDisplayName } from "./data.js?v=e5e3672";
 
 /**
  * @param {string | null | undefined} name
