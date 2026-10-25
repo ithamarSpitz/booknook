@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import signal
 import subprocess
 import threading
 import time
@@ -12,7 +11,7 @@ from .config import HarnessConfig
 from .context import ContextResolver
 from .logging_utils import write_log
 from .models import TaskSpec
-from .process_utils import prepare_external_argv, resolve_codex_argv
+from .process_utils import prepare_external_argv, resolve_codex_argv, stop_process_tree
 from .prompts import implement_prompt, plan_change_prompt, review_prompt
 from .agent_runner import AgentResult
 from .usage import UsageRecorder
@@ -31,45 +30,7 @@ class CodexAgentRunner:
 
     @staticmethod
     def _stop_process(proc: subprocess.Popen[str]) -> None:
-        """Stop Codex and any command/tool children it spawned.
-
-        Codex can launch shells and other tools. A timeout must not leave those
-        processes running after the provider call is cancelled.
-        """
-        if proc.poll() is not None:
-            return
-        if os.name == "nt":
-            try:
-                subprocess.run(
-                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                    text=True, encoding="utf-8", errors="replace",
-                    capture_output=True, timeout=10, check=False,
-                )
-                proc.wait(timeout=5)
-                return
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-        else:
-            killpg = getattr(os, "killpg", None)
-            getpgid = getattr(os, "getpgid", None)
-            sigkill = getattr(signal, "SIGKILL", None)
-            if killpg is not None and getpgid is not None:
-                try:
-                    killpg(getpgid(proc.pid), signal.SIGTERM)
-                    proc.wait(timeout=5)
-                    return
-                except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
-                    pass
-                if sigkill is not None:
-                    try:
-                        killpg(getpgid(proc.pid), sigkill)
-                        return
-                    except (OSError, ProcessLookupError):
-                        pass
-        try:
-            proc.kill()
-        except OSError:
-            pass
+        stop_process_tree(proc)
 
     def availability(self, *, refresh: bool = False) -> tuple[bool, str]:
         if self._availability is not None and not refresh:
