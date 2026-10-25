@@ -1,4 +1,4 @@
-import { SHELF_KINDS } from "./contract.js?v=18f2175";
+import { SHELF_KINDS } from "./contract.js?v=234f94d";
 
 /**
  * @param {Array<{ books?: unknown[] }>} shelves

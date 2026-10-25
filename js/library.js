@@ -1,6 +1,6 @@
-import { notifyShelvesChanged } from "./events.js?v=18f2175";
-import { promptRating, shouldPromptRating } from "./my-rating.js?v=18f2175";
-import { SHELF_KINDS } from "./contract.js?v=18f2175";
+import { notifyShelvesChanged } from "./events.js?v=234f94d";
+import { promptRating, shouldPromptRating } from "./my-rating.js?v=234f94d";
+import { SHELF_KINDS } from "./contract.js?v=234f94d";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -16,9 +16,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js?v=18f2175";
-import * as addBook from "./add-book.js?v=18f2175";
-import * as firstRun from "./first-run.js?v=18f2175";
+} from "./data.js?v=234f94d";
+import * as addBook from "./add-book.js?v=234f94d";
+import * as firstRun from "./first-run.js?v=234f94d";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -290,10 +290,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=18f2175'),
+ *   data: typeof import('./data.js?v=234f94d'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js?v=18f2175').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=18f2175').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=234f94d').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=234f94d').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx
