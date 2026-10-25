@@ -185,3 +185,8 @@ async function start() {
 }
 
 void start();
+
+// Installable as an app (Chrome needs a service worker); offline shell fallback.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
