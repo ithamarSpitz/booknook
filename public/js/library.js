@@ -372,8 +372,9 @@ export async function mount(root, ctx) {
  * @param {object} ctx
  */
 function setupDrag(root, ctx) {
-  const HOLD = 420;
-  const SLOP = 10;
+  // Short hold that tolerates a resting thumb's wobble (touch) but not a scroll.
+  const HOLD = 260;
+  const slopFor = (e) => (e.pointerType === "mouse" ? 6 : 18);
   const caseEl = root.querySelector("#case");
   if (!caseEl) return;
 
@@ -460,10 +461,8 @@ function setupDrag(root, ctx) {
 
   const moveGhost = () => {
     if (!drag) return;
-    const { ghost, kind, x, y, dx, dy, ox, oy } = drag;
-    ghost.style.transform =
-      `translate(${x - dx - ox}px, ${y - dy - oy}px)` +
-      (kind === "book" ? " rotate(-3deg) scale(1.06)" : "");
+    const { ghost, x, y, dx, dy, ox, oy } = drag;
+    ghost.style.transform = `translate(${x - dx - ox}px, ${y - dy - oy}px)`;
   };
 
   const tick = () => {
@@ -572,6 +571,7 @@ function setupDrag(root, ctx) {
       cue,
       x: e.clientX,
       y: e.clientY,
+      slop: slopFor(e),
     };
     press.timer = setTimeout(() => {
       if (press) pickUp(press.x, press.y);
@@ -586,7 +586,7 @@ function setupDrag(root, ctx) {
       place();
       return;
     }
-    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > SLOP) cancelPress();
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > press.slop) cancelPress();
   });
   addEventListener("pointerup", () => {
     cancelPress();

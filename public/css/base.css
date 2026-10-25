@@ -177,16 +177,14 @@
 
   /* long-press drag: books between/within shelves, shelves up and down */
   .book,.shelf-head{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-  .book .cover,.shelf-head{transition:transform .42s ease}
+  .book .cover,.shelf-head{transition:transform .26s ease}
   .book.pressing .cover{transform:scale(.95)}
   .shelf-head.pressing{transform:scale(.95)}
   .placeholder.book .cover{opacity:.25;outline:2px dashed #8a5a26;outline-offset:-2px}
   .placeholder.book .t{display:none}
   .shelf.placeholder{opacity:.35}
   .ghost{position:fixed;z-index:40;margin:0;pointer-events:none;will-change:transform}
-  .ghost-book .cover{box-shadow:-8px 8px 0 rgba(70,42,14,.25)}
   .ghost-book .t{display:none}
-  .ghost-shelf{box-shadow:-12px 12px 0 rgba(70,42,14,.2)}
   body.dragging{cursor:grabbing}
   body.dragging .row{scroll-behavior:auto}
   body.dragging .book .t{opacity:0!important}
