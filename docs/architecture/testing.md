@@ -12,7 +12,7 @@
 
 ## Shared local Supabase stack
 
-There is one local Supabase stack (`project_id = "torimitor"`, API on 54321, DB on 54322), started once by the operator with `npm run supabase:start`. Harness worktrees all talk to it.
+There is one local Supabase stack (`project_id = "booknook"`, API on 54321, DB on 54322), started once by the operator with `npm run supabase:start`. Harness worktrees all talk to it.
 
 - Only tasks whose brief says so may run `supabase db reset` or `supabase test db`. The roadmap never puts two such tasks in the same stage.
 - No task starts, stops or reconfigures the stack.

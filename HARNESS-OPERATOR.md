@@ -1,6 +1,6 @@
 # Harness operator handbook
 
-For whoever drives `harness.py` (usually Claude). Read before starting, resuming or repairing a run. Every rule here came from a mistake that cost real tokens or quota on the Torimitor build (Oct 2026). `README-HARNESS.md` explains what the harness does; this file is how to operate it without wasting attempts.
+For whoever drives `harness.py` (usually Claude). Read before starting, resuming or repairing a run. Every rule here came from a mistake that cost real tokens or quota on the BookNook build (Oct 2026). `README-HARNESS.md` explains what the harness does; this file is how to operate it without wasting attempts.
 
 ## 1. Golden rules
 
@@ -61,7 +61,7 @@ For whoever drives `harness.py` (usually Claude). Read before starting, resuming
 - `--model-class escalation` forces a one-shot Cursor call on the escalation model (Opus). Avoid unless the user agrees to the cost.
 
 - **Stop review loops by deciding.** When a reviewer's findings swing between opposite demands across rounds (delete vs restore vs do not touch), the brief left a decision open. Decide it, write it into the brief's acceptance criteria, sync the worktree (rule 1), fix the code yourself, then `run-task --fresh-budget`. When findings are real product bugs, more rounds are worth it.
-- **Run the failing verification command yourself first.** A live gate failure can be the stack, an external API, or the code. One manual run in the worktree (with `TORIMITOR_ENV_FILE` set) costs seconds; an agent round costs about 10 minutes and often only reports the same blocker.
+- **Run the failing verification command yourself first.** A live gate failure can be the stack, an external API, or the code. One manual run in the worktree (with `BOOKNOOK_ENV_FILE` set) costs seconds; an agent round costs about 10 minutes and often only reports the same blocker.
 - **`harness.py verify <TASK>` on Windows:** set `PYTHONIOENCODING=utf-8` when redirecting output, or Hebrew text crashes the print with a `charmap` error.
 
 ## 6. Writing briefs and contracts

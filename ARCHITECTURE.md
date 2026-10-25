@@ -1,4 +1,4 @@
-# Torimitor architecture
+# BookNook architecture
 
 Authoritative technical design. Agents must not edit this file or `docs/architecture/**`; changes go through the harness plan-change flow.
 

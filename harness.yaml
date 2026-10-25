@@ -61,7 +61,7 @@ verification:
   stage_commands: []
   # Fallback only; a real environment value wins. Points at the secrets file outside the repo.
   env:
-    TORIMITOR_ENV_FILE: C:/Users/itas1/book-discovery-plan/.env.local
+    BOOKNOOK_ENV_FILE: C:/Users/itas1/book-discovery-plan/.env.local
 
 paths:
   protected:

@@ -1,6 +1,6 @@
-# Deploy Torimitor (manual checklist)
+# Deploy BookNook (manual checklist)
 
-Torimitor runs as static files on **GitHub Pages** and a **Supabase** cloud project (Postgres, Auth, Edge Functions). Follow these steps **in order**. The local stack (`supabase/config.toml`) stays pointed at `http://127.0.0.1:4175`; production Auth (public sign-up off, Site URL) is set in the **cloud dashboard**.
+BookNook runs as static files on **GitHub Pages** and a **Supabase** cloud project (Postgres, Auth, Edge Functions). Follow these steps **in order**. The local stack (`supabase/config.toml`) stays pointed at `http://127.0.0.1:4175`; production Auth (public sign-up off, Site URL) is set in the **cloud dashboard**.
 
 On the free plan, a project **pauses after about one week without activity**. Open the dashboard or use the app to wake it; paused projects do not serve API or functions until resumed.
 
@@ -19,7 +19,7 @@ On the free plan, a project **pauses after about one week without activity**. Op
 1. In `public/js/config.js`, fill in the **OPERATOR** block:
    - `PRODUCTION_SUPABASE_URL` — your project URL.
    - `PRODUCTION_SUPABASE_ANON_KEY` — the anon key (public by design).
-2. Prepare a local secrets file that includes `HARDCOVER_API_KEY` (see `supabase/functions/.env.example`). The deploy script reads **only** that variable. Default path is `../book-discovery-plan/.env.local` next to this repo; otherwise set `TORIMITOR_ENV_FILE`.
+2. Prepare a local secrets file that includes `HARDCOVER_API_KEY` (see `supabase/functions/.env.example`). The deploy script reads **only** that variable. Default path is `../book-discovery-plan/.env.local` next to this repo; otherwise set `BOOKNOOK_ENV_FILE`.
 3. **Ship the filled `config.js` with the static site**, or Pages will serve the `YOUR_PROJECT_REF` / `YOUR_SUPABASE_ANON_KEY` placeholders:
    - **Git-connected Pages:** commit and push `public/js/config.js` (anon key is public; do not commit the service-role key or `HARDCOVER_API_KEY`) **before** the first production Pages deploy.
    - **Direct Upload:** skip git for this file; you will upload `public/` after filling the values.
@@ -30,7 +30,7 @@ From the repository root in Windows PowerShell 5.1 or later:
 
 ```powershell
 # Optional if your secrets file is not in the default location:
-# $env:TORIMITOR_ENV_FILE = "C:\path\to\.env.local"
+# $env:BOOKNOOK_ENV_FILE = "C:\path\to\.env.local"
 
 powershell -File scripts/deploy.ps1
 ```
@@ -46,17 +46,17 @@ Do not run `supabase config push`. That would copy local `site_url` (`http://127
 
 ## 4. Publish the static site (GitHub Pages)
 
-Production is live at **https://ithamarspitz.github.io/torimitor-app/**, served by GitHub Pages from the `main` branch of the public repo `ithamarSpitz/torimitor-app`, which holds only a copy of `public/` plus an empty `.nojekyll`. (Cloudflare Pages and Netlify would also work; they need an account login.) All app paths are relative, so the `/torimitor-app/` subpath needs no changes.
+Production is live at **https://ithamarspitz.github.io/booknook/**, served by GitHub Pages from the `main` branch of the public repo `ithamarSpitz/booknook`, which holds only a copy of `public/` plus an empty `.nojekyll`. (Cloudflare Pages and Netlify would also work; they need an account login.) All app paths are relative, so the `/torimitor-app/` subpath needs no changes.
 
-To publish a new version, run `node scripts/build-site.mjs <clone of torimitor-app>` (it copies `public/` and stamps every module and stylesheet reference with `?v=<git hash>`, so a browser never mixes cached old modules with new ones), then commit and push `main` there; Pages redeploys in about a minute. `public/` contains only what every visitor downloads anyway: the anon key is public, and `HARDCOVER_API_KEY` and the service-role key never go there.
+To publish a new version, run `node scripts/build-site.mjs <clone of booknook>` (it copies `public/` and stamps every module and stylesheet reference with `?v=<git hash>`, so a browser never mixes cached old modules with new ones), then commit and push `main` there; Pages redeploys in about a minute. `public/` contains only what every visitor downloads anyway: the anon key is public, and `HARDCOVER_API_KEY` and the service-role key never go there.
 
 ## 5. Set production Auth URLs in the cloud dashboard
 
 Do this **before** inviting anyone. Invite and password-reset links use **Site URL**; the app also sends `redirectTo` from `location.origin`.
 
 1. In Supabase **Authentication → URL configuration**:
-   - Set **Site URL** to `https://ithamarspitz.github.io/torimitor-app/`.
-   - Under **Redirect URLs**, add `https://ithamarspitz.github.io/torimitor-app/**`. If you use a custom domain, add it as well (and `https://<your-domain>/**` if you need path wildcards).
+   - Set **Site URL** to `https://ithamarspitz.github.io/booknook/`.
+   - Under **Redirect URLs**, add `https://ithamarspitz.github.io/booknook/**`. If you use a custom domain, add it as well (and `https://<your-domain>/**` if you need path wildcards).
 2. Leave `supabase/config.toml` `site_url` as `http://127.0.0.1:4175`. Changing it to the Pages URL breaks local auth redirects. `additional_redirect_urls` lists the production URL for documentation; that file still only configures the **local** stack.
 
 ## 6. Invite users
@@ -73,5 +73,5 @@ Any signed-in user can invite friends from the menu (**הזמנת חברים**, 
 
 Two dashboard steps are needed once, both under **Authentication → Emails**:
 
-1. **SMTP Settings**: set up custom SMTP. Supabase's built-in sender only delivers to members of the project's team, so invites to anyone else fail until this is set. A Gmail app password works (host `smtp.gmail.com`, port `465`, username and sender = the Gmail address, sender name `תורימיטור`).
-2. **Templates → Invite user**: subject `{{ .Data.inviter_name }} מזמין/ה אותך לתורימיטור`, body = the contents of `supabase/templates/invite.html`. Template editing is unlocked only after step 1.
+1. **SMTP Settings**: set up custom SMTP. Supabase's built-in sender only delivers to members of the project's team, so invites to anyone else fail until this is set. A Gmail app password works (host `smtp.gmail.com`, port `465`, username and sender = the Gmail address, sender name `BookNook`).
+2. **Templates → Invite user**: subject `{{ .Data.inviter_name }} מזמין/ה אותך ל־BookNook`, body = the contents of `supabase/templates/invite.html`. Template editing is unlocked only after step 1.

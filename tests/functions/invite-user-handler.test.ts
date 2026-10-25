@@ -64,7 +64,7 @@ Deno.test("invite-user maps provider errors to clear Hebrew messages and records
   const exists = fakeDb({ inviteError: { code: "email_exists", message: "A user with this email address has already been registered" } });
   const response = await handlerFor(exists.db)(request({ email: "a@b.co" }));
   assertEquals(response.status, 409);
-  assertEquals((await response.json()).error, "לכתובת הזו כבר יש חשבון בתורימיטור.");
+  assertEquals((await response.json()).error, "לכתובת הזו כבר יש חשבון ב־BookNook.");
   assertEquals(exists.calls.inserted.length, 0);
 
   const blocked = fakeDb({ inviteError: { message: "Email address not authorized" } });

@@ -1,4 +1,4 @@
-# Torimitor product brief
+# BookNook product brief
 
 Owner: Itamar. This file records product decisions. Agents must not edit it.
 

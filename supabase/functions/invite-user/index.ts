@@ -39,7 +39,7 @@ const defaults: FunctionDeps = {
 function inviteFailure(error: { message?: string; status?: number; code?: string }): never {
   const message = error.message ?? "";
   if (error.code === "email_exists" || /already (been )?registered|already exists/i.test(message)) {
-    throw new HttpError(409, "לכתובת הזו כבר יש חשבון בתורימיטור.");
+    throw new HttpError(409, "לכתובת הזו כבר יש חשבון ב־BookNook.");
   }
   if (/not authorized/i.test(message)) {
     // Supabase's built-in mailer only sends to the project team; custom SMTP lifts it.

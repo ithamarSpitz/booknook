@@ -2,7 +2,7 @@ import { fetchTimeout, normalize, similarity } from "./utils.ts";
 
 // Wikimedia's API etiquette requires a descriptive User-Agent; anonymous clients are throttled hard.
 const PROVIDER_HEADERS = {
-  "User-Agent": "Torimitor/0.1 (personal Hebrew reading list; https://www.mediawiki.org/wiki/API:Etiquette)",
+  "User-Agent": "BookNook/0.1 (personal Hebrew reading list; https://www.mediawiki.org/wiki/API:Etiquette)",
 };
 
 /** A provider answered with an error (after one retry), as opposed to answering "no match". */

@@ -1,4 +1,4 @@
-# Deploy Torimitor to a linked Supabase cloud project. Run manually from the repo root:
+# Deploy BookNook to a linked Supabase cloud project. Run manually from the repo root:
 #   powershell -File scripts/deploy.ps1
 # Requires: Supabase CLI logged in, Docker not required for this script.
 # Compatible with Windows PowerShell 5.1 (the host of `powershell -File`).
@@ -7,15 +7,15 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path $PSScriptRoot -Parent
 Set-Location $repoRoot
 
-if ($env:TORIMITOR_ENV_FILE) {
-  $envFile = $env:TORIMITOR_ENV_FILE
+if ($env:BOOKNOOK_ENV_FILE) {
+  $envFile = $env:BOOKNOOK_ENV_FILE
 } else {
   # Nested Join-Path: PowerShell 5.1 accepts only one child path per call.
   $envFile = Join-Path (Join-Path (Split-Path $repoRoot -Parent) "book-discovery-plan") ".env.local"
 }
 
 if (-not (Test-Path -LiteralPath $envFile)) {
-  Write-Error "Secrets file not found: $envFile. Set TORIMITOR_ENV_FILE to the file holding HARDCOVER_API_KEY."
+  Write-Error "Secrets file not found: $envFile. Set BOOKNOOK_ENV_FILE to the file holding HARDCOVER_API_KEY."
 }
 
 function Get-HardcoverApiKey([string]$path) {

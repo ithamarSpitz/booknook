@@ -1,4 +1,4 @@
-# Torimitor
+# BookNook
 
 Private Hebrew book library with discovery recommendations, for a small group of invited users. The web app is static HTML and ES modules; catalog and recommendation logic run in Supabase Edge Functions against a shared Postgres cache.
 
@@ -54,17 +54,17 @@ Requirements: [Docker Desktop](https://www.docker.com/products/docker-desktop/) 
    npm run supabase:start
    ```
 
-3. Serve Edge Functions with your secrets file (must include `HARDCOVER_API_KEY`). By default the serve script looks for `../book-discovery-plan/.env.local`; override with `TORIMITOR_ENV_FILE`:
+3. Serve Edge Functions with your secrets file (must include `HARDCOVER_API_KEY`). By default the serve script looks for `../book-discovery-plan/.env.local`; override with `BOOKNOOK_ENV_FILE`:
 
    ```bash
    # bash
-   export TORIMITOR_ENV_FILE=/path/to/.env.local
+   export BOOKNOOK_ENV_FILE=/path/to/.env.local
    npm run functions:serve
    ```
 
    ```powershell
    # PowerShell
-   $env:TORIMITOR_ENV_FILE = "C:\path\to\.env.local"
+   $env:BOOKNOOK_ENV_FILE = "C:\path\to\.env.local"
    npm run functions:serve
    ```
 

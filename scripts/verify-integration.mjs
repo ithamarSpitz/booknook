@@ -62,7 +62,7 @@ function retainServerOutput(chunk) {
 }
 
 function functionServerEnvironment() {
-  if (process.env.TORIMITOR_ENV_FILE) return process.env;
+  if (process.env.BOOKNOOK_ENV_FILE) return process.env;
   const commonDirectory = spawnSync(
     "git",
     ["rev-parse", "--git-common-dir"],
@@ -82,7 +82,7 @@ function functionServerEnvironment() {
     ".env.local",
   );
   return existsSync(envFile)
-    ? { ...process.env, TORIMITOR_ENV_FILE: envFile }
+    ? { ...process.env, BOOKNOOK_ENV_FILE: envFile }
     : process.env;
 }
 
@@ -328,7 +328,7 @@ async function request(environment, path, {
 
 async function createUser(environment, label) {
   const nonce = `${Date.now()}-${crypto.randomUUID()}`;
-  const email = `integration-${label}-${nonce}@torimitor.invalid`;
+  const email = `integration-${label}-${nonce}@booknook.invalid`;
   const password = `Gate-${crypto.randomUUID()}-aA1!`;
   const trackedUser = { email, id: null };
   createdUsers.push(trackedUser);

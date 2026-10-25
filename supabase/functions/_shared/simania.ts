@@ -40,7 +40,7 @@ async function callTool(
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
-      "User-Agent": "Torimitor/0.1 (personal Hebrew reading list)",
+      "User-Agent": "BookNook/0.1 (personal Hebrew reading list)",
     },
     body: JSON.stringify({
       jsonrpc: "2.0",

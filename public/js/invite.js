@@ -41,7 +41,7 @@ export async function mount(root, ctx) {
   inner.innerHTML = `
     <div class="invite-wrap">
       <h1 class="invite-title">הזמנת חברים</h1>
-      <p class="invite-lead">מכירים מישהו שאוהב לקרוא? שלחו לו הזמנה לתורימיטור. הוא יקבל מייל עם השם שלכם וקישור להצטרפות, יבחר סיסמה ויקבל ספרייה משלו.</p>
+      <p class="invite-lead">מכירים מישהו שאוהב לקרוא? שלחו לו הזמנה ל־BookNook. הוא יקבל מייל עם השם שלכם וקישור להצטרפות, יבחר סיסמה ויקבל ספרייה משלו.</p>
       <form class="invite-form" novalidate>
         <label class="invite-field">
           <span>כתובת האימייל של החבר</span>

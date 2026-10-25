@@ -1,6 +1,6 @@
 # Agent Harness Starter v0.11.8
 
-## Torimitor changes: per-task provider fallback
+## BookNook changes: per-task provider fallback
 
 - A Codex quota/auth/model-unavailable result now switches only the current task to Cursor (state key `<sprint>.<task>.provider.codex.disabled`). Every new task probes Codex first, so work returns to Codex as soon as its limit resets. The task that fell back keeps Cursor for its remaining attempts and its review.
 - Quota phrases match typographic apostrophes (`You’ve hit your usage limit`), which Codex prints. Previously that message was misread as a capacity wait.

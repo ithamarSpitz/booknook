@@ -65,7 +65,7 @@ export function mount(root, ctx) {
   root.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
-        <h1 class="auth-title">תורימיטור</h1>
+        <h1 class="auth-title">BookNook</h1>
         <p class="auth-lead">התחברות לספרייה שלך</p>
         <form class="auth-form" novalidate>
           <label class="auth-field">
@@ -255,7 +255,7 @@ export function mountSetPassword(root, ctx, onDone, options = {}) {
   root.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
-        <h1 class="auth-title">תורימיטור</h1>
+        <h1 class="auth-title">BookNook</h1>
         <p class="auth-lead">בחרו סיסמה לספרייה שלכם</p>
         <form class="auth-form" novalidate>
           <label class="auth-field">
@@ -321,7 +321,7 @@ async function mountDisplayNameStep(root, ctx, onDone) {
   root.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
-        <h1 class="auth-title">תורימיטור</h1>
+        <h1 class="auth-title">BookNook</h1>
         <p class="auth-lead">איך לקרוא לכם? השם יופיע בכותרת הספרייה</p>
         <form class="auth-form" novalidate>
           <label class="auth-field">

@@ -1,6 +1,6 @@
 # Local operator setup
 
-These steps are for someone running Torimitor on the shared local Supabase stack (`npm run supabase:start`). They are not part of the harness task loop.
+These steps are for someone running BookNook on the shared local Supabase stack (`npm run supabase:start`). They are not part of the harness task loop.
 
 ## Prerequisites
 

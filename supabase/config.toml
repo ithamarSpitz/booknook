@@ -1,4 +1,4 @@
-project_id = "torimitor"
+project_id = "booknook"
 
 [api]
 enabled = true
@@ -17,7 +17,7 @@ port = 54323
 enabled = true
 # Local `npm run web:serve` origin. Production Site URL is set in the cloud dashboard.
 site_url = "http://127.0.0.1:4175"
-additional_redirect_urls = ["https://ithamarspitz.github.io/torimitor-app/**"]
+additional_redirect_urls = ["https://ithamarspitz.github.io/booknook/**"]
 enable_signup = false
 
 [auth.email]
@@ -26,7 +26,7 @@ enable_signup = true
 
 # Production uses the same subject and file, pasted into Authentication > Emails > Invite user.
 [auth.email.template.invite]
-subject = "{{ .Data.inviter_name }} מזמין/ה אותך לתורימיטור"
+subject = "{{ .Data.inviter_name }} מזמין/ה אותך ל־BookNook"
 content_path = "./supabase/templates/invite.html"
 
 [functions.link-edition]

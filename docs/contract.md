@@ -1,4 +1,4 @@
-# Torimitor binding interface contract
+# BookNook binding interface contract
 
 This is the binding interface for sprint S1. SQL, JSON, and TypeScript names are identical unless a view-model table states otherwise. UUIDs are JSON strings and `timestamptz` values are ISO-8601 strings. All tables are in `public`.
 
