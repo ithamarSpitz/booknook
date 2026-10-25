@@ -60,6 +60,10 @@ For whoever drives `harness.py` (usually Claude). Read before starting, resuming
 - **Reviewer keeps finding new edge cases on a spec-type task** (contracts, docs): after two review rounds, fix the remaining points yourself in the task worktree, then `run-task <TASK> --fresh-budget` so the independent review records the pass. Each extra round costs about 10 minutes of Codex.
 - `--model-class escalation` forces a one-shot Cursor call on the escalation model (Opus). Avoid unless the user agrees to the cost.
 
+- **Stop review loops by deciding.** When a reviewer's findings swing between opposite demands across rounds (delete vs restore vs do not touch), the brief left a decision open. Decide it, write it into the brief's acceptance criteria, sync the worktree (rule 1), fix the code yourself, then `run-task --fresh-budget`. When findings are real product bugs, more rounds are worth it.
+- **Run the failing verification command yourself first.** A live gate failure can be the stack, an external API, or the code. One manual run in the worktree (with `TORIMITOR_ENV_FILE` set) costs seconds; an agent round costs about 10 minutes and often only reports the same blocker.
+- **`harness.py verify <TASK>` on Windows:** set `PYTHONIOENCODING=utf-8` when redirecting output, or Hebrew text crashes the print with a `charmap` error.
+
 ## 6. Writing briefs and contracts
 
 - Give every file exactly one owner per stage. Before a sprint, check each brief's scope against the contract: if a parallel task needs a helper in a file another task owns, either give it a local copy (and let the integration gate consolidate) or move it to the contract task.
@@ -67,7 +71,14 @@ For whoever drives `harness.py` (usually Claude). Read before starting, resuming
 - After a contract sprint, add its files to `paths.protected` (commit that before the next sprint starts, not during it).
 - Tasks that share one stateful resource (the single local Supabase stack) must not run in the same stage.
 
-## 7. Harness bugs fixed in this copy
+## 7. Shared stack and live APIs
+
+- **A memory kill during `supabase db reset` deletes the database container and volume.** Symptom: `No such container: supabase_db_<project>` and the other containers restarting. Fix: `npx supabase stop` then `npx supabase start` (operator only; agents must not). Local data is rebuilt from migrations.
+- **Live gates are flaky by nature.** Wikidata rate-limits repeated runs (HTTP 429), worse without a `User-Agent`. A gate that failed and passed on the next run with the same code is an external cause, not a code change.
+- **Cached negative results poison later runs.** If the app caches "not found" and the gate leaves the catalog in place, one bad run makes every later run fail. Clear the affected cache rows before rerunning, and make the app cache "not found" only when every provider answered.
+- **Network outages look like RUNNING.** Codex retries transient provider errors without spending attempts, so a task can sit in RUNNING for an hour. The Monitor also reports when the newest log stops growing for 30 minutes.
+
+## 8. Harness bugs fixed in this copy
 
 | Bug | Symptom | Fix |
 |---|---|---|
