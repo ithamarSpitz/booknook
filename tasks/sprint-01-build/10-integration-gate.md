@@ -14,6 +14,7 @@ depends_on:
 allowed_paths:
   - scripts/verify-integration.mjs
   - tests/integration/**
+  - tests/functions/**
   - supabase/functions/**
   - supabase/migrations/**
   - supabase/tests/**
