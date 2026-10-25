@@ -2,6 +2,10 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// Simania blocks data-center IPs, so the app calls it from the browser; the gate
+// uses the same browser modules from this machine.
+import { fetchSimaniaPayload, searchBooks } from "../public/js/simania.js";
+import { localizeRecommendations, recommendationFromApiCard } from "../public/js/recs.js";
 
 const ROOT = process.cwd();
 const REQUEST_TIMEOUT = 30_000;
@@ -87,9 +91,9 @@ function startFunctionServer() {
     "run",
     "functions:serve",
     "--",
-    "search-books",
     "add-book",
     "book-details",
+    "link-edition",
     "recommendations",
   ], {
     cwd: ROOT,
@@ -115,7 +119,7 @@ function delay(milliseconds) {
 
 async function waitForFunctionServer(environment) {
   const deadline = Date.now() + SERVER_TIMEOUT;
-  const url = `${environment.API_URL}/functions/v1/search-books`;
+  const url = `${environment.API_URL}/functions/v1/add-book`;
   while (Date.now() < deadline) {
     if (server.exitCode !== null) {
       throw new Error(
@@ -526,20 +530,11 @@ async function runGate(environment) {
   const usedIds = new Set();
   const added = [];
   for (const { query, author } of booksToAdd) {
-    const search = await functionCall(
-      environment,
-      "search-books",
-      userA.token,
-      { query },
-    );
-    assert(
-      Array.isArray(search?.books),
-      `search-books returned an invalid response for ${query}.`,
-    );
+    const search = { books: await searchBooks(query) };
     if (query === booksToAdd[0].query) {
       assert(
         search.books.length > 0,
-        `search-books returned no results for ${query}.`,
+        `Simania search returned no results for ${query}.`,
       );
     }
     const selected = chooseSearchResult(query, author, search.books, usedIds);
@@ -548,6 +543,7 @@ async function runGate(environment) {
     const result = await functionCall(environment, "add-book", userA.token, {
       simania_id: selected.id,
       shelf_id: readShelf.id,
+      simania: await fetchSimaniaPayload(selected.id),
     });
     assert(
       result?.book?.simania_id === selected.id,
@@ -601,6 +597,34 @@ async function runGate(environment) {
     firstRecommendations.recommendations.length >= 5,
     `Expected at least 5 recommendations; received ${firstRecommendations.recommendations.length}.`,
   );
+  // Browser-side localization: match hints in Simania, link through link-edition.
+  const cards = firstRecommendations.recommendations.map(recommendationFromApiCard);
+  const linked = [];
+  await localizeRecommendations(cards, {
+    callFunction: (name, body) => functionCall(environment, name, userA.token, body),
+    isCurrent: () => true,
+    onLinked: (workId, patch) => linked.push({ workId, ...patch }),
+  });
+  console.log(
+    `Localized ${linked.length} of ${cards.filter((card) => card.hebrew_hint).length} hinted English-only recommendations in the browser path.`,
+  );
+  if (linked.length) {
+    const linkedEditions = await loadRowsByValues(
+      environment,
+      "editions",
+      "simania_id",
+      linked.map((item) => item.simania_id),
+    );
+    for (const item of linked) {
+      assert(
+        linkedEditions.some((edition) =>
+          edition.simania_id === item.simania_id && edition.work_id === item.workId
+        ),
+        `link-edition stored ${item.simania_id} without linking it to its work.`,
+      );
+    }
+  }
+
   const currentShelfBooks = await restForUser(
     environment,
     "shelf_books?select=simania_id",
@@ -690,7 +714,7 @@ function runIntegrationTests() {
       "test",
       "--allow-env",
       "--allow-read",
-      "tests/integration/recommendations-link-race.test.ts",
+      "tests/integration/link-edition-race.test.ts",
     ],
     {
       cwd: ROOT,
@@ -701,7 +725,7 @@ function runIntegrationTests() {
   );
   if (linkRaceTests.status !== 0) {
     throw new Error(
-      `Integration recommendations link-race tests failed with status ${
+      `Integration link-edition race tests failed with status ${
         linkRaceTests.status ?? "unknown"
       }.`,
     );

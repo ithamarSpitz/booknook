@@ -10,15 +10,14 @@ import {
   type HardcoverBook,
   hardcoverBooks,
 } from "../_shared/hardcover.ts";
-import { fetchEditionDetails, matchHebrewBook } from "../_shared/simania.ts";
 import { nliHebrew, wikidataHebrew } from "../_shared/bridges.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type {
   EditionRow,
+  HebrewHint,
   RecommendationCard,
   RecommendationReplacement,
   RecommendationRow,
-  ResolveStatus,
   WorkRow,
 } from "../_shared/types.ts";
 import {
@@ -31,18 +30,13 @@ import {
 } from "./logic.ts";
 
 type DbClient = ReturnType<typeof serviceClient>;
-type Localization = {
-  book: Awaited<ReturnType<typeof matchHebrewBook>>;
-  status: "wikidata" | "nli";
-};
 
 export type RecommendationDependencies = {
   authenticate: (request: Request) => Promise<string>;
   userDatabase: (request: Request) => DbClient;
   serviceDatabase: () => DbClient;
   fetchHardcover: (ids: number[]) => Promise<HardcoverBook[]>;
-  localize: (book: HardcoverBook) => Promise<Localization | null>;
-  editionDetails: (simaniaId: number) => Promise<Record<string, unknown>>;
+  hebrewHint: (book: HardcoverBook) => Promise<HebrewHint | null>;
 };
 
 const defaults: RecommendationDependencies = {
@@ -50,19 +44,19 @@ const defaults: RecommendationDependencies = {
   userDatabase: userClient,
   serviceDatabase: serviceClient,
   fetchHardcover: hardcoverBooks,
-  localize: async (book) => {
+  // Simania blocks data-center IPs, so the server only finds the Hebrew title;
+  // the browser matches it in Simania and calls link-edition.
+  hebrewHint: async (book) => {
     const author = authors(book)[0] ?? "";
     const wikidata = await wikidataHebrew(book.title, author);
     if (wikidata) {
-      const match = await matchHebrewBook(wikidata.title, wikidata.author);
-      if (match) return { book: match, status: "wikidata" };
+      return { source: "wikidata", title: wikidata.title, author: wikidata.author || null };
     }
     const nli = await nliHebrew(book.title, author);
-    if (!nli) return null;
-    const match = await matchHebrewBook(nli.title, nli.author);
-    return match ? { book: match, status: "nli" } : null;
+    return nli
+      ? { source: "nli", title: nli.title, author: nli.author || null }
+      : null;
   },
-  editionDetails: fetchEditionDetails,
 };
 
 function fail(error: unknown): never {
@@ -184,59 +178,10 @@ async function linkedEdition(
   return data as EditionRow | null;
 }
 
-function isStale(value: string | null): boolean {
-  return !value ||
-    Date.now() - new Date(value).getTime() >= 30 * 24 * 60 * 60 * 1000;
-}
-
-async function materializeEdition(
-  db: DbClient,
-  work: WorkRow,
-  localized: NonNullable<Localization>,
-  details: RecommendationDependencies["editionDetails"],
-): Promise<EditionRow | null> {
-  const simaniaId = Number(localized.book?.id ?? localized.book?.bookId);
-  if (!Number.isInteger(simaniaId)) return null;
-  const lookup = await db.from("editions").select("*").eq(
-    "simania_id",
-    simaniaId,
-  ).maybeSingle();
-  if (lookup.error) fail(lookup.error);
-  const current = lookup.data as EditionRow | null;
-  if (current?.work_id && current.work_id !== work.id) return null;
-  const values = !current || isStale(current.details_at)
-    ? await details(simaniaId)
-    : {};
-  const fallback = current
-    ? {}
-    : { title: localized.book!.title, author: localized.book!.author ?? null };
-  if (!current || Object.keys(values).length) {
-    const result = await db.from("editions").upsert([{
-      ...fallback,
-      ...values,
-      simania_id: simaniaId,
-    }], { onConflict: "simania_id", defaultToNull: false });
-    if (result.error) fail(result.error);
-  }
-  // Claim only an unlinked row. PostgreSQL rechecks this predicate after
-  // waiting for a concurrent writer, including one in another request.
-  const claim = await db.from("editions").update({
-    work_id: work.id,
-    resolve_status: localized.status as ResolveStatus,
-    resolved_at: new Date().toISOString(),
-  }).eq("simania_id", simaniaId).is("work_id", null);
-  if (claim.error) fail(claim.error);
-  const stored = await db.from("editions").select("*").eq(
-    "simania_id",
-    simaniaId,
-  ).single();
-  if (stored.error) fail(stored.error);
-  return stored.data.work_id === work.id ? stored.data as EditionRow : null;
-}
-
 type Prepared = {
   work: WorkRow;
   edition: EditionRow | null;
+  hint: HebrewHint | null;
   replacement: RecommendationReplacement;
 };
 
@@ -249,10 +194,11 @@ async function prepareCandidate(
   dependencies: RecommendationDependencies,
 ): Promise<Prepared> {
   let edition: EditionRow | null = null;
+  let hint: HebrewHint | null = null;
   try {
     edition = await linkedEdition(db, work.id);
     if (!edition) {
-      const localized = await dependencies.localize({
+      hint = await dependencies.hebrewHint({
         id: work.hardcover_id!,
         title: work.original_title,
         cached_contributors: work.original_authors.map((name) => ({
@@ -262,22 +208,16 @@ async function prepareCandidate(
         cached_tags: work.tags,
         image: { url: work.hardcover_cover_url },
       });
-      if (localized) {
-        edition = await materializeEdition(
-          db,
-          work,
-          localized,
-          dependencies.editionDetails,
-        );
-      }
     }
   } catch (error) {
     console.warn(`Could not localize ${work.original_title}:`, error);
     edition = null;
+    hint = null;
   }
   return {
     work,
     edition,
+    hint,
     replacement: {
       work_id: work.id,
       simania_id: edition?.simania_id ?? null,
@@ -409,6 +349,7 @@ export async function handleRecommendations(
           generated_at: row.generated_at,
           english_only: row.simania_id === null,
           can_add: row.simania_id !== null,
+          hebrew_hint: row.simania_id === null ? item.hint : null,
         }];
       });
     return json({ recommendations: cards });

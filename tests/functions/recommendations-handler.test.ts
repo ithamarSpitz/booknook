@@ -168,7 +168,7 @@ Deno.test("handler excludes shelved and dismissed works and retains an English-o
     authenticate: async () => "user",
     userDatabase: () => db as never,
     serviceDatabase: () => db as never,
-    localize: async () => null,
+    hebrewHint: async () => ({ source: "wikidata", title: "נשמר", author: null }),
   });
   const payload = await response.json();
   assert(response.status === 200, "expected 200");
@@ -184,6 +184,10 @@ Deno.test("handler excludes shelved and dismissed works and retains an English-o
     payload.recommendations[0].english_only === true &&
       payload.recommendations[0].can_add === false,
     "English-only flags mismatch",
+  );
+  assert(
+    payload.recommendations[0].hebrew_hint?.title === "נשמר",
+    "English-only card should carry the Hebrew hint for the browser match",
   );
 });
 

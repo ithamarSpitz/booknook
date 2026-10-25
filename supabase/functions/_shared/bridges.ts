@@ -1,5 +1,3 @@
-import { authors, findHardcoverBook, HardcoverBook } from "./hardcover.ts";
-import { matchHebrewBook, SimaniaBook } from "./simania.ts";
 import { fetchTimeout, normalize, similarity } from "./utils.ts";
 
 // Wikimedia's API etiquette requires a descriptive User-Agent; anonymous clients are throttled hard.
@@ -185,29 +183,3 @@ async function nliHebrewLookup(originalTitle: string, originalAuthor: string): P
   const best = ranked[0]?.record;
   return best ? { title: best.title.replace(/[\s/.:;]+$/g, "").trim(), author: best.creators[0] ?? "", source: "NLI" } : null;
 }
-
-export async function resolveBook(simania: SimaniaBook): Promise<{ hardcover: HardcoverBook; resolver: string } | null> {
-  const wikidata = await wikidataOriginal(simania.title);
-  if (wikidata) {
-    const hardcover = await findHardcoverBook(wikidata.title, wikidata.author);
-    if (hardcover) return { hardcover, resolver: wikidata.source };
-  }
-  const nli = await nliOriginal(simania.title, simania.author ?? "");
-  if (nli && normalize(nli.title) !== normalize(wikidata?.title)) {
-    const hardcover = await findHardcoverBook(nli.title, nli.author);
-    if (hardcover) return { hardcover, resolver: nli.source };
-  }
-  return null;
-}
-
-export async function localizeRecommendation(book: HardcoverBook): Promise<SimaniaBook | null> {
-  const author = authors(book)[0] ?? "";
-  const wikidata = await wikidataHebrew(book.title, author);
-  if (wikidata) {
-    const match = await matchHebrewBook(wikidata.title, wikidata.author);
-    if (match) return match;
-  }
-  const nli = await nliHebrew(book.title, author);
-  return nli ? await matchHebrewBook(nli.title, nli.author) : null;
-}
-

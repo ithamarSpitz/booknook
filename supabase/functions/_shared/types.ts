@@ -135,6 +135,30 @@ export interface RecommendationCard {
   generated_at: string;
   english_only: boolean;
   can_add: boolean;
+  /** English-only cards: Hebrew title from the Wikidata/NLI bridge, for the browser's Simania match. */
+  hebrew_hint: HebrewHint | null;
+}
+
+export interface HebrewHint {
+  source: "wikidata" | "nli";
+  title: string;
+  author: string | null;
+}
+
+export interface LinkEditionRequest {
+  work_id: string;
+  simania_id: number;
+  source: HebrewHint["source"];
+  simania: { details: Record<string, unknown>; rating: Record<string, unknown> | null };
+}
+
+/** The localized fields that replace the English-only ones on the card. */
+export interface LinkEditionResponse {
+  work_id: string;
+  simania_id: number;
+  title: string;
+  author: string | null;
+  cover_url: string | null;
 }
 
 export interface ErrorResponse {
@@ -152,6 +176,8 @@ export interface SearchBooksResponse {
 export interface AddBookRequest {
   simania_id: number;
   shelf_id: string;
+  /** Raw Simania `books_get_details` / `books_get_rating` results fetched by the browser. */
+  simania?: { details: Record<string, unknown>; rating: Record<string, unknown> | null };
 }
 
 export interface AddBookResponse {
@@ -161,6 +187,8 @@ export interface AddBookResponse {
 
 export interface BookDetailsRequest {
   simania_id: number;
+  /** Raw Simania `books_get_details` / `books_get_rating` results fetched by the browser. */
+  simania?: { details: Record<string, unknown>; rating: Record<string, unknown> | null };
 }
 
 export interface BookDetailsResponse {

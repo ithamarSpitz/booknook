@@ -15,7 +15,7 @@ const types = read("supabase/functions/_shared/types.ts");
 const web = read("public/js/contract.js");
 
 const tables = ["profiles", "works", "editions", "shelves", "shelf_books", "recommendations", "search_cache"];
-const functions = ["search-books", "add-book", "book-details", "recommendations"];
+const functions = ["add-book", "book-details", "link-edition", "recommendations"];
 const rpcs = ["move_book", "move_shelf", "delete_shelf", "remove_book", "handle_new_user"];
 for (const name of [...tables, ...functions, ...rpcs]) {
   if (contract && !contract.includes(name)) failures.push(`docs/contract.md does not mention ${name}`);
@@ -28,6 +28,7 @@ const typeNames = [
   "SearchBooksRequest", "SearchBooksResponse",
   "AddBookRequest", "AddBookResponse",
   "BookDetailsRequest", "BookDetailsResponse",
+  "HebrewHint", "LinkEditionRequest", "LinkEditionResponse",
   "RecommendationsRequest", "RecommendationsResponse",
   "MoveBookArgs", "MoveShelfArgs", "DeleteShelfArgs", "RemoveBookArgs",
 ];

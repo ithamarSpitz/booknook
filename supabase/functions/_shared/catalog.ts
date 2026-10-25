@@ -141,6 +141,44 @@ function editionValues(
   };
 }
 
+/** Simania details and rating fetched by the browser (see public/js/simania.js). */
+export type SuppliedSimania = {
+  details: SimaniaBookDetails;
+  rating: SimaniaBookRating | null;
+};
+
+function plainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Validates the optional `simania` request field; absent means null. */
+export function suppliedSimania(value: unknown): SuppliedSimania | null {
+  if (value === undefined || value === null) return null;
+  if (
+    !plainObject(value) || !plainObject(value.details) ||
+    !(value.rating === undefined || value.rating === null ||
+      plainObject(value.rating))
+  ) {
+    throw new HttpError(400, "simania must be {details, rating}.");
+  }
+  return {
+    details: value.details as SimaniaBookDetails,
+    rating: (value.rating ?? null) as SimaniaBookRating | null,
+  };
+}
+
+/** Provider overrides that serve supplied data instead of calling Simania. */
+export function suppliedProviders(
+  supplied: SuppliedSimania | null,
+): Partial<CatalogProviders> {
+  return supplied
+    ? {
+      bookDetails: () => Promise.resolve(supplied.details),
+      bookRating: () => Promise.resolve(supplied.rating),
+    }
+    : {};
+}
+
 export async function ensureEdition(
   db: CatalogDb,
   simaniaId: number,
@@ -156,10 +194,18 @@ export async function ensureEdition(
   const now = api.now();
   if (existing && !stale(existing.details_at, 30, now)) return existing;
 
-  const [details, rating] = await Promise.all([
-    api.bookDetails(simaniaId),
-    api.bookRating(simaniaId),
-  ]);
+  let details: SimaniaBookDetails | null;
+  let rating: SimaniaBookRating | null;
+  try {
+    [details, rating] = await Promise.all([
+      api.bookDetails(simaniaId),
+      api.bookRating(simaniaId),
+    ]);
+  } catch (error) {
+    // A stale cached row is still a valid book; only a new row needs details.
+    if (existing) return existing;
+    throw error;
+  }
   if (!details) throw new HttpError(404, "Book not found.");
   const values = {
     ...editionValues(simaniaId, details, rating, now),

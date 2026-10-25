@@ -3,6 +3,8 @@ import {
   type CatalogDb,
   ensureEdition,
   ensureResolved,
+  suppliedProviders,
+  suppliedSimania,
 } from "../_shared/catalog.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type {
@@ -47,7 +49,11 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
         throw new HttpError(400, "A valid Simania ID is required.");
       }
       const catalogDb = deps.serviceClient();
-      let edition = await deps.ensureEdition(catalogDb, input.simania_id!);
+      let edition = await deps.ensureEdition(
+        catalogDb,
+        input.simania_id!,
+        suppliedProviders(suppliedSimania(input.simania)),
+      );
       // Pending after a provider failure in add-book: opening the card retries it.
       if (edition.resolve_status === "pending") {
         edition = await deps.ensureResolved(catalogDb, edition);

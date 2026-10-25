@@ -46,7 +46,7 @@ if ([string]::IsNullOrWhiteSpace($hardcoverKey)) {
   Write-Error "HARDCOVER_API_KEY not found in $envFile."
 }
 
-$functions = @("search-books", "add-book", "book-details", "recommendations")
+$functions = @("add-book", "book-details", "link-edition", "recommendations")
 
 Write-Host "Linking Supabase project (choose the cloud project if prompted)..."
 supabase link

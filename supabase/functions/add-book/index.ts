@@ -3,6 +3,8 @@ import {
   type CatalogDb,
   ensureEdition,
   ensureResolved,
+  suppliedProviders,
+  suppliedSimania,
 } from "../_shared/catalog.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type { AddBookRequest, AddBookResponse } from "../_shared/types.ts";
@@ -65,7 +67,11 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
       if (shelfResult.error) throw new Error(shelfResult.error.message);
       if (!shelfResult.data) throw new HttpError(404, "Shelf not found.");
 
-      let edition = await deps.ensureEdition(catalogDb, input.simania_id!);
+      let edition = await deps.ensureEdition(
+        catalogDb,
+        input.simania_id!,
+        suppliedProviders(suppliedSimania(input.simania)),
+      );
       try {
         edition = await deps.ensureResolved(catalogDb, edition);
       } catch (error) {

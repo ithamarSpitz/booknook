@@ -21,6 +21,11 @@ class Query implements PromiseLike<Result> {
     return this;
   }
 
+  is(column: string, value: null): this {
+    this.filters.push([column, value]);
+    return this;
+  }
+
   upsert(
     payload: Row | Row[],
     options: { onConflict?: string; defaultToNull?: boolean } = {},

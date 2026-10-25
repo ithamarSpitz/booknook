@@ -17,13 +17,13 @@ port = 54323
 enabled = true
 # Local `npm run web:serve` origin. Production Site URL is set in the cloud dashboard.
 site_url = "http://127.0.0.1:4175"
-additional_redirect_urls = ["https://YOUR_PROJECT.pages.dev"]
+additional_redirect_urls = ["https://ithamarspitz.github.io/torimitor-app/**"]
 enable_signup = false
 
 [auth.email]
 enable_signup = false
 
-[functions.search-books]
+[functions.link-edition]
 verify_jwt = true
 
 [functions.add-book]

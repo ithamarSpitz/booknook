@@ -1,6 +1,6 @@
 # Deploy Torimitor (manual checklist)
 
-Torimitor runs as static files on **Cloudflare Pages** and a **Supabase** cloud project (Postgres, Auth, Edge Functions). Follow these steps **in order**. The local stack (`supabase/config.toml`) stays pointed at `http://127.0.0.1:4175`; production Auth (public sign-up off, Site URL) is set in the **cloud dashboard**.
+Torimitor runs as static files on **GitHub Pages** and a **Supabase** cloud project (Postgres, Auth, Edge Functions). Follow these steps **in order**. The local stack (`supabase/config.toml`) stays pointed at `http://127.0.0.1:4175`; production Auth (public sign-up off, Site URL) is set in the **cloud dashboard**.
 
 On the free plan, a project **pauses after about one week without activity**. Open the dashboard or use the app to wake it; paused projects do not serve API or functions until resumed.
 
@@ -39,27 +39,25 @@ The script stops on the first error and, in order:
 
 - `supabase link` (select your cloud project)
 - `supabase db push` (apply migrations)
-- `supabase functions deploy` for `search-books`, `add-book`, `book-details`, and `recommendations`
+- `supabase functions deploy` for `add-book`, `book-details`, `link-edition`, and `recommendations`
 - `supabase secrets set HARDCOVER_API_KEY=...` read from your secrets file (no other keys from that file)
 
 Do not run `supabase config push`. That would copy local `site_url` (`http://127.0.0.1:4175`) onto the cloud project.
 
-## 4. Create the Cloudflare Pages project
+## 4. Publish the static site (GitHub Pages)
 
-1. In [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create** → **Pages**:
-   - **Git:** connect this repository **after** the commit/push in step 2, so the deploy includes the filled `config.js`.
-   - **Direct Upload:** upload the `public/` directory (the filled `config.js` must already be in it).
-2. No build command. Set the **build output directory** to `public/` (static site only).
-3. Deploy and note the site origin (for example `https://torimitor.pages.dev`). Custom domains: note that origin too.
+Production is live at **https://ithamarspitz.github.io/torimitor-app/**, served by GitHub Pages from the `main` branch of the public repo `ithamarSpitz/torimitor-app`, which holds only a copy of `public/` plus an empty `.nojekyll`. (Cloudflare Pages and Netlify would also work; they need an account login.) All app paths are relative, so the `/torimitor-app/` subpath needs no changes.
+
+To publish a new version, copy `public/` into a clone of that repo, commit, and push `main`; Pages redeploys in about a minute. `public/` contains only what every visitor downloads anyway: the anon key is public, and `HARDCOVER_API_KEY` and the service-role key never go there.
 
 ## 5. Set production Auth URLs in the cloud dashboard
 
 Do this **before** inviting anyone. Invite and password-reset links use **Site URL**; the app also sends `redirectTo` from `location.origin`.
 
 1. In Supabase **Authentication → URL configuration**:
-   - Set **Site URL** to the Cloudflare Pages origin from step 4 (for example `https://torimitor.pages.dev`).
-   - Under **Redirect URLs**, add that origin. If you use a custom domain, add it as well (and `https://<your-domain>/**` if you need path wildcards).
-2. Leave `supabase/config.toml` `site_url` as `http://127.0.0.1:4175`. Changing it to the Pages URL breaks local auth redirects. You may replace the `YOUR_PROJECT.pages.dev` placeholder in `additional_redirect_urls` with the real Pages origin so the repo documents it; that file still only configures the **local** stack.
+   - Set **Site URL** to `https://ithamarspitz.github.io/torimitor-app/`.
+   - Under **Redirect URLs**, add `https://ithamarspitz.github.io/torimitor-app/**`. If you use a custom domain, add it as well (and `https://<your-domain>/**` if you need path wildcards).
+2. Leave `supabase/config.toml` `site_url` as `http://127.0.0.1:4175`. Changing it to the Pages URL breaks local auth redirects. `additional_redirect_urls` lists the production URL for documentation; that file still only configures the **local** stack.
 
 ## 6. Invite users
 
