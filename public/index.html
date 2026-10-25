@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>תורימיטור</title>
+  <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/auth.css">
+  <link rel="stylesheet" href="css/settings.css">
+  <link rel="stylesheet" href="css/recs.css">
+  <link rel="stylesheet" href="css/add-book.css">
+  <link rel="stylesheet" href="css/first-run.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+</head>
+<body>
+  <p id="toast" class="toast" hidden role="status"></p>
+
+  <section id="screen-library" class="screen" data-route="library">
+    <main>
+      <div class="case" id="case"></div>
+      <div class="first-run" hidden></div>
+    </main>
+  </section>
+
+  <section id="screen-recs" class="screen" data-route="recs" hidden>
+    <div class="screen-inner"></div>
+  </section>
+
+  <section id="screen-search" class="screen" data-route="search" hidden>
+    <div class="screen-inner"></div>
+  </section>
+
+  <section id="screen-settings" class="screen" data-route="settings" hidden>
+    <div class="screen-inner"></div>
+  </section>
+
+  <section id="screen-login" class="screen" data-route="login" hidden>
+    <div class="screen-inner"></div>
+  </section>
+
+  <div class="picker" id="picker"></div>
+  <div class="scrim" id="scrim"></div>
+  <aside class="door" id="drawer" aria-label="תפריט">
+    <span class="hinge a"></span><span class="hinge b"></span>
+    <button type="button" class="handle" id="door-handle" aria-label="פתח את הדלת"></button>
+    <div class="door-panel">
+      <button type="button" class="x" id="menu-close" aria-label="סגור תפריט">×</button>
+      <h2>הספרייה שלי</h2>
+      <nav>
+        <a href="#library"><svg viewBox="0 0 24 24"><path d="M4 19V5M9 19V5M14 19l-2-14M19 19l-4-13"/><path d="M3 19h18"/></svg>הספרייה שלי</a>
+        <a href="#recs"><svg viewBox="0 0 24 24"><path d="m12 3 2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>המלצות בשבילי</a>
+        <a href="#search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/></svg>חיפוש ספרים</a>
+        <a href="#settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>הגדרות</a>
+      </nav>
+    </div>
+  </aside>
+
+  <div class="bk" id="bk" role="dialog" aria-modal="true" aria-labelledby="bk-title">
+    <div class="bk-card">
+      <button type="button" class="bk-x" aria-label="סגור">×</button>
+      <img class="bk-cover" alt="" referrerpolicy="no-referrer">
+      <div class="bk-body">
+        <span class="bk-shelf"></span>
+        <h2 class="bk-title" id="bk-title"></h2>
+        <p class="bk-author"></p>
+        <div class="bk-rating"></div>
+        <dl class="bk-meta"></dl>
+        <h3>על הספר</h3>
+        <div class="bk-desc"></div>
+        <div class="bk-actions">
+          <label class="bk-move">העבר למדף
+            <select></select>
+          </label>
+          <button type="button" class="bk-remove">הסר מהספרייה</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
