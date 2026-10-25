@@ -1,17 +1,18 @@
-import * as api from "./api.js?v=a1893b7";
-import { ROUTES } from "./contract.js?v=a1893b7";
-import { createRouter } from "./router.js?v=a1893b7";
-import * as data from "./data.js?v=a1893b7";
-import * as library from "./library.js?v=a1893b7";
-import { createCard } from "./card.js?v=a1893b7";
-import * as auth from "./auth.js?v=a1893b7";
-import * as settings from "./settings.js?v=a1893b7";
-import * as recs from "./recs.js?v=a1893b7";
-import * as addBook from "./add-book.js?v=a1893b7";
-import { createRecsRefresher } from "./recs-refresh.js?v=a1893b7";
-import { SHELVES_CHANGED } from "./events.js?v=a1893b7";
+import * as api from "./api.js?v=02bfe78";
+import { ROUTES } from "./contract.js?v=02bfe78";
+import { createRouter } from "./router.js?v=02bfe78";
+import * as data from "./data.js?v=02bfe78";
+import * as library from "./library.js?v=02bfe78";
+import { createCard } from "./card.js?v=02bfe78";
+import * as auth from "./auth.js?v=02bfe78";
+import * as settings from "./settings.js?v=02bfe78";
+import * as recs from "./recs.js?v=02bfe78";
+import * as addBook from "./add-book.js?v=02bfe78";
+import * as invite from "./invite.js?v=02bfe78";
+import { createRecsRefresher } from "./recs-refresh.js?v=02bfe78";
+import { SHELVES_CHANGED } from "./events.js?v=02bfe78";
 
-/** @type {import('./data.js?v=a1893b7').LibraryState | null} */
+/** @type {import('./data.js?v=02bfe78').LibraryState | null} */
 let libraryState = null;
 
 const toastEl = document.getElementById("toast");
@@ -37,6 +38,7 @@ const screens = {
   [ROUTES.RECOMMENDATIONS]: document.getElementById("screen-recs"),
   [ROUTES.SEARCH]: document.getElementById("screen-search"),
   [ROUTES.SETTINGS]: document.getElementById("screen-settings"),
+  [ROUTES.INVITE]: document.getElementById("screen-invite"),
   [ROUTES.LOGIN]: document.getElementById("screen-login"),
 };
 
@@ -45,6 +47,7 @@ const mounts = {
   [ROUTES.RECOMMENDATIONS]: recs,
   [ROUTES.SEARCH]: addBook,
   [ROUTES.SETTINGS]: settings,
+  [ROUTES.INVITE]: invite,
   [ROUTES.LOGIN]: auth,
 };
 

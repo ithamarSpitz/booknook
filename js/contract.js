@@ -10,6 +10,7 @@ export const FUNCTIONS = Object.freeze({
   ADD_BOOK: "add-book",
   BOOK_DETAILS: "book-details",
   LINK_EDITION: "link-edition",
+  INVITE_USER: "invite-user",
   RECOMMENDATIONS: "recommendations",
 });
 
@@ -18,6 +19,7 @@ export const ROUTES = Object.freeze({
   RECOMMENDATIONS: "#recs",
   SEARCH: "#search",
   SETTINGS: "#settings",
+  INVITE: "#invite",
   LOGIN: "#login",
 });
 
