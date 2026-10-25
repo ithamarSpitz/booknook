@@ -1,18 +1,18 @@
-import * as api from "./api.js?v=5fedd1b";
-import { ROUTES } from "./contract.js?v=5fedd1b";
-import { createRouter } from "./router.js?v=5fedd1b";
-import * as data from "./data.js?v=5fedd1b";
-import * as library from "./library.js?v=5fedd1b";
-import { createCard } from "./card.js?v=5fedd1b";
-import * as auth from "./auth.js?v=5fedd1b";
-import * as settings from "./settings.js?v=5fedd1b";
-import * as recs from "./recs.js?v=5fedd1b";
-import * as addBook from "./add-book.js?v=5fedd1b";
-import * as invite from "./invite.js?v=5fedd1b";
-import { createRecsRefresher } from "./recs-refresh.js?v=5fedd1b";
-import { SHELVES_CHANGED } from "./events.js?v=5fedd1b";
+import * as api from "./api.js?v=fe4ca15";
+import { ROUTES } from "./contract.js?v=fe4ca15";
+import { createRouter } from "./router.js?v=fe4ca15";
+import * as data from "./data.js?v=fe4ca15";
+import * as library from "./library.js?v=fe4ca15";
+import { createCard } from "./card.js?v=fe4ca15";
+import * as auth from "./auth.js?v=fe4ca15";
+import * as settings from "./settings.js?v=fe4ca15";
+import * as recs from "./recs.js?v=fe4ca15";
+import * as addBook from "./add-book.js?v=fe4ca15";
+import * as invite from "./invite.js?v=fe4ca15";
+import { createRecsRefresher } from "./recs-refresh.js?v=fe4ca15";
+import { SHELVES_CHANGED } from "./events.js?v=fe4ca15";
 
-/** @type {import('./data.js?v=5fedd1b').LibraryState | null} */
+/** @type {import('./data.js?v=fe4ca15').LibraryState | null} */
 let libraryState = null;
 
 const toastEl = document.getElementById("toast");

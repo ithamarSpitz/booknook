@@ -1,5 +1,5 @@
-import { notifyShelvesChanged } from "./events.js?v=5fedd1b";
-import { SHELF_KINDS } from "./contract.js?v=5fedd1b";
+import { notifyShelvesChanged } from "./events.js?v=fe4ca15";
+import { SHELF_KINDS } from "./contract.js?v=fe4ca15";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -15,9 +15,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js?v=5fedd1b";
-import * as addBook from "./add-book.js?v=5fedd1b";
-import * as firstRun from "./first-run.js?v=5fedd1b";
+} from "./data.js?v=fe4ca15";
+import * as addBook from "./add-book.js?v=fe4ca15";
+import * as firstRun from "./first-run.js?v=fe4ca15";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -289,10 +289,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=5fedd1b'),
+ *   data: typeof import('./data.js?v=fe4ca15'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js?v=5fedd1b').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=5fedd1b').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=fe4ca15').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=fe4ca15').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx
