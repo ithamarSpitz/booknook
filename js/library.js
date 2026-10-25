@@ -1,5 +1,5 @@
-import { notifyShelvesChanged } from "./events.js?v=fe20a65";
-import { SHELF_KINDS } from "./contract.js?v=fe20a65";
+import { notifyShelvesChanged } from "./events.js?v=6697666";
+import { SHELF_KINDS } from "./contract.js?v=6697666";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -15,9 +15,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js?v=fe20a65";
-import * as addBook from "./add-book.js?v=fe20a65";
-import * as firstRun from "./first-run.js?v=fe20a65";
+} from "./data.js?v=6697666";
+import * as addBook from "./add-book.js?v=6697666";
+import * as firstRun from "./first-run.js?v=6697666";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -289,10 +289,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=fe20a65'),
+ *   data: typeof import('./data.js?v=6697666'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js?v=fe20a65').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=fe20a65').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=6697666').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=6697666').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx
@@ -432,15 +432,42 @@ function setupDrag(root, ctx) {
     requestAnimationFrame(tick);
   };
 
+  // Neighbours glide to their new places instead of jumping (FLIP). While they
+  // glide, placement pauses so the moving targets don't flip the order back.
+  const SLIDE_MS = 180;
+  let settleUntil = 0;
+  const slide = (nodes, mutate) => {
+    const before = new Map(nodes.map((n) => [n, n.getBoundingClientRect()]));
+    mutate();
+    for (const [n, r] of before) {
+      if (!n.isConnected) continue;
+      const now = n.getBoundingClientRect();
+      const dx = r.left - now.left;
+      const dy = r.top - now.top;
+      if (!dx && !dy) continue;
+      n.style.transition = "none";
+      n.style.transform = `translate(${dx}px, ${dy}px)`;
+      void n.offsetWidth;
+      n.style.transition = `transform ${SLIDE_MS}ms ease`;
+      n.style.transform = "";
+      setTimeout(() => {
+        if (!n.style.transform) n.style.transition = "";
+      }, SLIDE_MS + 20);
+    }
+    settleUntil = performance.now() + SLIDE_MS;
+  };
+
   const place = () => {
-    if (!drag) return;
+    if (!drag || performance.now() < settleUntil) return;
     const { el, kind, x, y } = drag;
     if (kind === "shelf") {
       const next = [...caseEl.querySelectorAll(":scope > .shelf")].find(
         (s) => s !== el && y < s.getBoundingClientRect().top + s.getBoundingClientRect().height / 2,
       );
       const before = next || caseEl.querySelector(".add-slot");
-      if (el.nextElementSibling !== before) caseEl.insertBefore(el, before);
+      if (el.nextElementSibling !== before) {
+        slide([...caseEl.querySelectorAll(":scope > .shelf, :scope > .add-slot")], () => caseEl.insertBefore(el, before));
+      }
       return;
     }
     const under = document.elementFromPoint(x, y);
@@ -456,7 +483,12 @@ function setupDrag(root, ctx) {
     } else {
       before = row.querySelector(".plus");
     }
-    if (before !== el && el.nextElementSibling !== before) row.insertBefore(el, before);
+    if (before !== el && el.nextElementSibling !== before) {
+      const fromRow = el.parentElement;
+      const nodes = [...row.querySelectorAll(":scope > .book")];
+      if (fromRow && fromRow !== row) nodes.push(...fromRow.querySelectorAll(":scope > .book"));
+      slide(nodes, () => row.insertBefore(el, before));
+    }
   };
 
   const moveGhost = () => {
