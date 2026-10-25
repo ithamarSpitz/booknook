@@ -1,6 +1,7 @@
-import { FUNCTIONS, SHELF_KINDS } from "./contract.js?v=e5e3672";
-import { fetchSimaniaPayload, matchHebrewBook, simaniaIdOf } from "./simania.js?v=e5e3672";
-import { notifyShelvesChanged } from "./events.js?v=e5e3672";
+import { FUNCTIONS, SHELF_KINDS } from "./contract.js?v=b90e49c";
+import { promptRating, shouldPromptRating } from "./my-rating.js?v=b90e49c";
+import { fetchSimaniaPayload, matchHebrewBook, simaniaIdOf } from "./simania.js?v=b90e49c";
+import { notifyShelvesChanged } from "./events.js?v=b90e49c";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
 export const LIBRARY_REMOVE_LABEL = "הסר מהספרייה";
@@ -16,23 +17,24 @@ export const ENGLISH_ONLY_NOTE = "אין מהדורה עברית זמינה לס
  */
 export function buildReasonLine(becauseTitles, sharedTags) {
   const titles = (becauseTitles ?? []).map((t) => String(t ?? "").trim()).filter(Boolean);
+  // Seeds can be rated books not yet read, so the line says "similar to", not "because you read".
   if (titles.length === 1) {
-    return `בגלל שקראת ${titles[0]}`;
+    return `דומה ל־${titles[0]}`;
   }
   if (titles.length >= 2) {
     if (titles.length === 2) {
-      return `בגלל שקראת ${titles[0]} ו${titles[1]}`;
+      return `דומה ל־${titles[0]} ו־${titles[1]}`;
     }
     const rest = titles.slice(0, -1).join(", ");
     const last = titles[titles.length - 1];
-    return `בגלל שקראת ${rest} ו${last}`;
+    return `דומה ל־${rest} ו־${last}`;
   }
   const tags = (sharedTags ?? []).filter((t) => String(t ?? "").trim());
   if (tags.length) return tags.join(", ");
   return "";
 }
 
-/** @param {import('./contract.js?v=e5e3672').RecommendationCard[]} items */
+/** @param {import('./contract.js?v=b90e49c').RecommendationCard[]} items */
 export function sortRecommendations(items) {
   return [...items].sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
@@ -40,13 +42,13 @@ export function sortRecommendations(items) {
   });
 }
 
-/** @param {import('./contract.js?v=e5e3672').RecommendationCard[]} items */
+/** @param {import('./contract.js?v=b90e49c').RecommendationCard[]} items */
 export function visibleRecommendations(items) {
   return items.filter((r) => !r.dismissed);
 }
 
 /**
- * @param {import('./contract.js?v=e5e3672').RecommendationCard[]} items
+ * @param {import('./contract.js?v=b90e49c').RecommendationCard[]} items
  * @param {string} workId
  */
 export function removeRecommendationByWorkId(items, workId) {
@@ -56,7 +58,7 @@ export function removeRecommendationByWorkId(items, workId) {
 /**
  * Drop dismissed rows and work IDs the user added or dismissed while a refresh
  * was in flight, so a stale function response cannot put them back on screen.
- * @param {import('./contract.js?v=e5e3672').RecommendationCard[]} incoming
+ * @param {import('./contract.js?v=b90e49c').RecommendationCard[]} incoming
  * @param {Iterable<string> | null | undefined} excludedWorkIds
  */
 export function applyRecommendationRefresh(incoming, excludedWorkIds) {
@@ -70,7 +72,7 @@ export function applyRecommendationRefresh(incoming, excludedWorkIds) {
 
 /**
  * Empty state means "no read/reading seeds", not "library was never fetched".
- * @param {import('./data.js?v=e5e3672').LibraryState | null | undefined} libraryState
+ * @param {import('./data.js?v=b90e49c').LibraryState | null | undefined} libraryState
  * @param {boolean} libraryChecked
  */
 export function shouldShowRecsEmptyState(libraryState, libraryChecked) {
@@ -88,7 +90,7 @@ export function shelfChoicesForAdd(shelves) {
 }
 
 /**
- * @param {import('./data.js?v=e5e3672').LibraryState | null | undefined} libraryState
+ * @param {import('./data.js?v=b90e49c').LibraryState | null | undefined} libraryState
  * @returns {boolean}
  */
 export function hasRecommendationSeeds(libraryState) {
@@ -105,7 +107,7 @@ export function hasRecommendationSeeds(libraryState) {
 /**
  * @param {Record<string, unknown>} row
  * @param {Map<number, string>} titleBySimaniaId
- * @returns {import('./contract.js?v=e5e3672').RecommendationCard}
+ * @returns {import('./contract.js?v=b90e49c').RecommendationCard}
  */
 export function mapStoredRecommendationRow(row, titleBySimaniaId) {
   const rawEdition = row.editions ?? row.edition ?? null;
@@ -180,7 +182,7 @@ export function recommendationFromApiCard(card) {
  * Localizes English-only cards in the browser: the server found a Hebrew title
  * (hebrew_hint) but cannot reach Simania, so match it here and ask link-edition
  * to store and link the edition. A miss or failure leaves the card English-only.
- * @param {import('./contract.js?v=e5e3672').RecommendationCard[]} items
+ * @param {import('./contract.js?v=b90e49c').RecommendationCard[]} items
  * @param {{
  *   callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>,
  *   onLinked: (workId: string, patch: { simania_id: number, title: string, author: string | null, cover_url: string | null }) => void,
@@ -240,7 +242,7 @@ export function applyLocalizedRecommendation(items, workId, patch) {
 
 /**
  * @param {import('@supabase/supabase-js').SupabaseClient} client
- * @returns {Promise<import('./contract.js?v=e5e3672').RecommendationCard[]>}
+ * @returns {Promise<import('./contract.js?v=b90e49c').RecommendationCard[]>}
  */
 export async function loadStoredRecommendations(client) {
   const { data, error } = await client
@@ -346,7 +348,7 @@ export function canCompleteRecsWrite(session, isCurrent) {
 /**
  * Restyle the shared overlay in place. Never clone or replace `.bk-move select` / `.bk-remove`.
  * @param {HTMLElement} overlay
- * @param {import('./contract.js?v=e5e3672').RecommendationCard} rec
+ * @param {import('./contract.js?v=b90e49c').RecommendationCard} rec
  */
 export function applyRecsCardChrome(overlay, rec) {
   const moveLabel = overlay.querySelector(".bk-move");
@@ -435,7 +437,7 @@ export function restoreRecsCardChrome(session) {
 /**
  * Capture-phase intercepts so `card.js` move/remove handlers do not run.
  * @param {ReturnType<typeof applyRecsCardChrome>} session
- * @param {import('./contract.js?v=e5e3672').RecommendationCard} rec
+ * @param {import('./contract.js?v=b90e49c').RecommendationCard} rec
  * @param {{ onPickShelf: (shelfId: string) => void, onDismiss: () => void }} handlers
  */
 export function bindRecsCardActions(session, rec, handlers) {
@@ -462,14 +464,14 @@ export function bindRecsCardActions(session, rec, handlers) {
 
 /**
  * @param {HTMLElement} overlay
- * @param {import('./contract.js?v=e5e3672').RecommendationCard} rec
+ * @param {import('./contract.js?v=b90e49c').RecommendationCard} rec
  * @param {{
  *   api: { callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>, getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   getLibrary: () => import('./data.js?v=e5e3672').LibraryState | null,
+ *   getLibrary: () => import('./data.js?v=b90e49c').LibraryState | null,
  *   showToast: (msg: string) => void,
- *   card: { open: (book: import('./contract.js?v=e5e3672').BookCard, shelves: unknown[]) => void, close: () => void },
+ *   card: { open: (book: import('./contract.js?v=b90e49c').BookCard, shelves: unknown[]) => void, close: () => void },
  *   onDismissed: (workId: string) => void,
- *   onAdded: (workId: string) => Promise<void>,
+ *   onAdded: (workId: string, shelfId: string, rec: import('./contract.js?v=b90e49c').RecommendationCard) => Promise<void>,
  *   restorePrevious: () => void,
  *   beginSession: (session: ReturnType<typeof applyRecsCardChrome>) => void,
  *   isCurrent: () => boolean,
@@ -537,7 +539,7 @@ async function openRecommendationCard(overlay, rec, deps) {
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             deps.card.close();
           }
-          await deps.onAdded(rec.work_id);
+          await deps.onAdded(rec.work_id, shelfId, rec);
         } catch (err) {
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             revertFailedShelfPick(session.moveSelect);
@@ -580,18 +582,18 @@ async function openRecommendationCard(overlay, rec, deps) {
  * @param {HTMLElement} root
  * @param {{
  *   api: { callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>, getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data?: { loadLibrary: (client: unknown) => Promise<import('./data.js?v=e5e3672').LibraryState> },
- *   getLibrary: () => import('./data.js?v=e5e3672').LibraryState | null,
- *   setLibrary?: (s: import('./data.js?v=e5e3672').LibraryState) => void,
+ *   data?: { loadLibrary: (client: unknown) => Promise<import('./data.js?v=b90e49c').LibraryState> },
+ *   getLibrary: () => import('./data.js?v=b90e49c').LibraryState | null,
+ *   setLibrary?: (s: import('./data.js?v=b90e49c').LibraryState) => void,
  *   showToast: (msg: string) => void,
- *   card: { open: (book: import('./contract.js?v=e5e3672').BookCard, shelves: unknown[]) => void, close: () => void },
+ *   card: { open: (book: import('./contract.js?v=b90e49c').BookCard, shelves: unknown[]) => void, close: () => void },
  *   reloadLibrary?: () => Promise<void>,
  *   recsRefresh?: { busy: () => boolean, request: () => void, subscribe: (fn: (busy: boolean) => void) => () => void },
  * }} ctx
  */
 export async function mount(root, ctx) {
   const inner = root.querySelector(".screen-inner") ?? root;
-  /** @type {import('./contract.js?v=e5e3672').RecommendationCard[]} */
+  /** @type {import('./contract.js?v=b90e49c').RecommendationCard[]} */
   let items = [];
   let loading = false;
   // Recommendations regenerate in the background after shelf changes
@@ -701,9 +703,13 @@ export async function mount(root, ctx) {
           onDismissed: (id) => {
             excludeWork(id);
           },
-          onAdded: async (id) => {
+          onAdded: async (id, shelfId, added) => {
             excludeWork(id);
             if (ctx.reloadLibrary) await ctx.reloadLibrary();
+            const kind = ctx.getLibrary?.()?.shelves.find((s) => s.id === shelfId)?.kind;
+            if (added?.simania_id && shouldPromptRating(kind, null)) {
+              promptRating(ctx, { simania_id: added.simania_id, title: added.title });
+            }
           },
         });
       });

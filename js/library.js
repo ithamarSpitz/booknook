@@ -1,5 +1,6 @@
-import { notifyShelvesChanged } from "./events.js?v=e5e3672";
-import { SHELF_KINDS } from "./contract.js?v=e5e3672";
+import { notifyShelvesChanged } from "./events.js?v=b90e49c";
+import { promptRating, shouldPromptRating } from "./my-rating.js?v=b90e49c";
+import { SHELF_KINDS } from "./contract.js?v=b90e49c";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -15,9 +16,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js?v=e5e3672";
-import * as addBook from "./add-book.js?v=e5e3672";
-import * as firstRun from "./first-run.js?v=e5e3672";
+} from "./data.js?v=b90e49c";
+import * as addBook from "./add-book.js?v=b90e49c";
+import * as firstRun from "./first-run.js?v=b90e49c";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -289,10 +290,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=e5e3672'),
+ *   data: typeof import('./data.js?v=b90e49c'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js?v=e5e3672').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=e5e3672').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=b90e49c').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=b90e49c').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx
@@ -606,7 +607,11 @@ function setupDrag(root, ctx) {
             }),
           );
           await moveBook(client, simaniaId, toShelfId, toPosition);
-          if (toShelfId !== from.shelfId) notifyShelvesChanged();
+          if (toShelfId !== from.shelfId) {
+            notifyShelvesChanged();
+            const book = snapshot?.shelves.flatMap((s) => s.books).find((b) => b.simania_id === simaniaId);
+            if (book && shouldPromptRating(toShelfEl?.dataset.kind, book.rating)) promptRating(ctx, book);
+          }
         }
         if (done.from) recountShelf(done.from);
         if (toShelfEl) recountShelf(toShelfEl);

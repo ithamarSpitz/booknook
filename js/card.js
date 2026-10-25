@@ -1,20 +1,21 @@
-import { notifyShelvesChanged } from "./events.js?v=e5e3672";
+import { notifyShelvesChanged } from "./events.js?v=b90e49c";
+import { promptRating, renderStars, saveRating, shouldPromptRating } from "./my-rating.js?v=b90e49c";
 import {
   applyOptimisticBookMove,
   applyOptimisticRemoveBook,
   cloneLibrary,
   moveBook,
   removeBook,
-} from "./data.js?v=e5e3672";
+} from "./data.js?v=b90e49c";
 
 /**
  * @param {HTMLElement} overlay `.bk` element
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=e5e3672'),
+ *   data: typeof import('./data.js?v=b90e49c'),
  *   showToast: (msg: string) => void,
- *   getLibrary?: () => import('./data.js?v=e5e3672').LibraryState | null,
- *   setLibrary?: (s: import('./data.js?v=e5e3672').LibraryState) => void,
+ *   getLibrary?: () => import('./data.js?v=b90e49c').LibraryState | null,
+ *   setLibrary?: (s: import('./data.js?v=b90e49c').LibraryState) => void,
  *   onLibraryChange: () => Promise<void>,
  * }} deps
  */
@@ -25,6 +26,8 @@ export function createCard(overlay, deps) {
   const authorEl = $(".bk-author");
   const shelfEl = $(".bk-shelf");
   const ratingEl = $(".bk-rating");
+  const myRatingEl = $(".bk-my-rating");
+  const myStarsEl = $(".bk-my-rating .my-stars");
   const metaEl = $(".bk-meta");
   const descEl = $(".bk-desc");
   const moveSelect = overlay.querySelector(".bk-move select");
@@ -42,6 +45,22 @@ export function createCard(overlay, deps) {
     }
     const width = (rating / 5) * 100;
     ratingEl.innerHTML = `<span class="stars"><span class="fill" style="width:${width}%"></span></span><b>${rating}</b><small>(${count.toLocaleString("he-IL")} דירוגים בסימניה)</small>`;
+  }
+
+  // The reader's own rating, only for books on their shelves (not recommendations).
+  function renderMyRating(book) {
+    if (!myRatingEl || !myStarsEl) return;
+    myRatingEl.hidden = !book.shelf_id;
+    if (!book.shelf_id) return;
+    renderStars(myStarsEl, book.rating ?? null, async (rating) => {
+      const previous = book.rating ?? null;
+      book.rating = rating;
+      renderMyRating(book);
+      if (!(await saveRating(deps, book.simania_id, rating))) {
+        book.rating = previous;
+        if (current === book) renderMyRating(book);
+      }
+    });
   }
 
   function renderMeta(book) {
@@ -80,6 +99,7 @@ export function createCard(overlay, deps) {
     titleEl.textContent = book.title;
     authorEl.textContent = book.author || "";
     renderRating(book);
+    renderMyRating(book);
     renderMeta(book);
     descEl.textContent = book.description || "אין תקציר לספר הזה בסימניה.";
     descEl.classList.toggle("none", !book.description);
@@ -123,9 +143,12 @@ export function createCard(overlay, deps) {
       await deps.onLibraryChange();
     }
     try {
-      await moveBook(client, current.simania_id, toShelf, 0);
+      const moved = current;
+      await moveBook(client, moved.simania_id, toShelf, 0);
       notifyShelvesChanged();
       close();
+      const kind = shelves.find((s) => s.id === toShelf)?.kind;
+      if (shouldPromptRating(kind, moved.rating)) promptRating(deps, moved);
     } catch (err) {
       if (snapshot && deps.setLibrary) {
         deps.setLibrary(snapshot);

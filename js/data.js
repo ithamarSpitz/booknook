@@ -1,4 +1,4 @@
-import { RPCS, SHELF_KINDS } from "./contract.js?v=e5e3672";
+import { RPCS, SHELF_KINDS } from "./contract.js?v=b90e49c";
 
 /** @param {Array<{ position: number }>} items */
 export function sortByPosition(items) {
@@ -138,6 +138,19 @@ export function applyOptimisticRemoveBook(state, simaniaId) {
       b.position = j;
     });
     break;
+  }
+  return next;
+}
+
+/** @param {LibraryState} state @param {number} simaniaId @param {number|null} rating */
+export function applyOptimisticRating(state, simaniaId, rating) {
+  const next = cloneLibrary(state);
+  for (const shelf of next.shelves) {
+    const book = shelf.books.find((b) => b.simania_id === simaniaId);
+    if (book) {
+      book.rating = rating;
+      break;
+    }
   }
   return next;
 }
@@ -292,6 +305,18 @@ export async function moveShelf(client, shelfId, toPosition) {
 export async function deleteShelf(client, shelfId) {
   const { error } = await client.rpc(RPCS.DELETE_SHELF.name, {
     p_shelf_id: shelfId,
+  });
+  if (error) throw error;
+}
+
+/**
+ * The reader's own 1-5 rating; null clears it.
+ * @param {import('@supabase/supabase-js').SupabaseClient} client
+ */
+export async function setRating(client, simaniaId, rating) {
+  const { error } = await client.rpc(RPCS.SET_RATING.name, {
+    p_simania_id: simaniaId,
+    p_rating: rating,
   });
   if (error) throw error;
 }
