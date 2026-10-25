@@ -136,9 +136,23 @@ function hangDoor() {
   if (!door || !caseEl) return;
   const r = caseEl.getBoundingClientRect();
   const vw = document.documentElement.clientWidth;
+  if (!r.width) {
+    // Opened from another screen: the cabinet is hidden, hang the door on the window edge.
+    door.style.right = "0px";
+    door.style.top = "0px";
+    door.style.width = `${Math.min(340, vw * 0.86)}px`;
+    return;
+  }
   door.style.right = `${Math.max(0, vw - r.right)}px`;
   door.style.top = `${Math.max(0, r.top)}px`;
   door.style.width = `${Math.min(Math.max(340, r.width / 2), vw * 0.86, 640)}px`;
+}
+
+/** Opens the menu door from any screen (the other screens use the page burger). */
+export function openMenu() {
+  wireChrome();
+  hangDoor();
+  setMenu(true);
 }
 
 function paint(root, ctx) {

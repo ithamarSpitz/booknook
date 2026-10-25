@@ -1,5 +1,5 @@
 import { ROUTES } from "./contract.js";
-import { libraryTitle } from "./data.js";
+import { libraryTitle, saveDisplayName } from "./data.js";
 
 /**
  * @param {string | null | undefined} name
@@ -87,8 +87,7 @@ export async function mount(root, ctx) {
     syncLibraryTitle(displayName);
 
     try {
-      const { error } = await client.from("profiles").update({ display_name: checked.value });
-      if (error) throw error;
+      await saveDisplayName(client, checked.value);
       ctx.showToast?.("השם נשמר");
     } catch (err) {
       displayName = previous;

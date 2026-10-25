@@ -38,12 +38,29 @@ export function plusCenterOffset(plusRect, mainRect) {
   };
 }
 
+/**
+ * Keeps a bubble of `width` centered as close to `left` as fits inside
+ * `containerWidth` (8px margin), and returns where its arrow must sit so it
+ * still points at `left`. On phones the plus tile is at the screen edge.
+ * @param {number} left @param {number} width @param {number} containerWidth
+ */
+export function clampBubble(left, width, containerWidth) {
+  const margin = 8;
+  const min = width / 2 + margin;
+  const max = containerWidth - width / 2 - margin;
+  const center = max < min ? containerWidth / 2 : Math.min(Math.max(left, min), max);
+  const arrow = Math.min(Math.max(left - (center - width / 2), 14), width - 14);
+  return { center, arrow };
+}
+
 /** @param {HTMLElement} root */
 function placeNearReadPlus(root) {
   const plus = document.querySelector(`.shelf[data-kind="${SHELF_KINDS.READ}"] .plus`);
   const main = root.closest("main");
   if (!plus || !main) return;
   const { top, left } = plusCenterOffset(plus.getBoundingClientRect(), main.getBoundingClientRect());
+  const { center, arrow } = clampBubble(left, root.offsetWidth, main.clientWidth);
   root.style.setProperty("--first-run-top", `${top}px`);
-  root.style.setProperty("--first-run-left", `${left}px`);
+  root.style.setProperty("--first-run-left", `${center}px`);
+  root.style.setProperty("--first-run-arrow", `${arrow}px`);
 }

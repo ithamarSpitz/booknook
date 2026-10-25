@@ -1,4 +1,6 @@
 import { ROUTES } from "./contract.js";
+import { loadProfile, saveDisplayName } from "./data.js";
+import { validateDisplayName } from "./settings.js";
 
 /**
  * @param {{ email?: string, password?: string }} fields
@@ -242,12 +244,14 @@ export function validateNewPassword(fields) {
 }
 
 /**
- * Set-password form shown after an invite or password-reset link.
+ * Set-password form shown after an invite or password-reset link. After an
+ * invite it then asks for the display name shown in the library title.
  * @param {HTMLElement} root
  * @param {{ api: { getClient: () => import('@supabase/supabase-js').SupabaseClient } }} ctx
- * @param {() => void} onDone called after the password is saved
+ * @param {() => void} onDone called after the password (and name) are saved
+ * @param {{ askName?: boolean }} [options]
  */
-export function mountSetPassword(root, ctx, onDone) {
+export function mountSetPassword(root, ctx, onDone, options = {}) {
   root.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-card">
@@ -293,10 +297,69 @@ export function mountSetPassword(root, ctx, onDone) {
     try {
       const { error } = await ctx.api.getClient().auth.updateUser({ password: checked.password });
       if (error) throw error;
-      onDone();
+      if (options.askName) void mountDisplayNameStep(root, ctx, onDone);
+      else onDone();
     } catch (err) {
       if (formError) {
         formError.textContent = mapLoginError(err);
+        formError.hidden = false;
+      }
+      if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
+    }
+  });
+}
+
+/**
+ * Second invite step: choose the display name ("הספרייה של …").
+ * @param {HTMLElement} root
+ * @param {{ api: { getClient: () => import('@supabase/supabase-js').SupabaseClient } }} ctx
+ * @param {() => void} onDone
+ */
+async function mountDisplayNameStep(root, ctx, onDone) {
+  const client = ctx.api.getClient();
+  const current = await loadProfile(client).catch(() => "");
+  root.innerHTML = `
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <h1 class="auth-title">תורימיטור</h1>
+        <p class="auth-lead">איך לקרוא לכם? השם יופיע בכותרת הספרייה</p>
+        <form class="auth-form" novalidate>
+          <label class="auth-field">
+            <span>שם תצוגה</span>
+            <input type="text" name="display_name" autocomplete="nickname" required>
+          </label>
+          <p class="auth-field-error" data-for="display_name" hidden></p>
+          <p class="auth-form-error" role="alert" hidden></p>
+          <button type="submit" class="auth-submit">המשך לספרייה</button>
+        </form>
+      </div>
+    </div>
+  `;
+  const input = root.querySelector('input[name="display_name"]');
+  const fieldError = root.querySelector(".auth-field-error");
+  const formError = root.querySelector(".auth-form-error");
+  const submitBtn = root.querySelector(".auth-submit");
+  if (input instanceof HTMLInputElement) {
+    input.value = current;
+    input.focus();
+    input.select();
+  }
+  root.querySelector(".auth-form")?.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const checked = validateDisplayName(input instanceof HTMLInputElement ? input.value : "");
+    if (fieldError) {
+      fieldError.textContent = checked.ok ? "" : checked.error;
+      fieldError.hidden = checked.ok;
+    }
+    if (formError) formError.hidden = true;
+    if (!checked.ok) return;
+    if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true;
+    try {
+      await saveDisplayName(client, checked.value);
+      onDone();
+    } catch (err) {
+      if (formError) {
+        formError.textContent = err instanceof Error ? err.message : "לא הצלחנו לשמור";
         formError.hidden = false;
       }
       if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false;
