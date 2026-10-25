@@ -1,0 +1,187 @@
+/* Recommendations screen — lane D2 */
+
+.recs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.recs-head h1 {
+  margin: 0;
+  font-size: clamp(28px, 5vw, 40px);
+  line-height: 1.1;
+}
+
+.recs-refresh {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 20px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--accent, #8a5a26);
+  color: #fff;
+}
+
+.recs-refresh:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.recs-loading {
+  color: var(--muted, #6b5a48);
+  font-size: 15px;
+  margin: 12px 0 20px;
+  animation: recs-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes recs-pulse {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.recs-grid {
+  --per: 6.5;
+  --gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  max-width: 1180px;
+}
+
+.recs-grid > li {
+  flex: 0 0 calc((100% - var(--gap) * (var(--per) - .5)) / var(--per));
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .recs-grid {
+    --per: 4.5;
+  }
+}
+
+@media (max-width: 560px) {
+  .recs-grid {
+    --per: 3.5;
+    --gap: 8px;
+  }
+}
+
+.rec-item {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: inherit;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.rec-item .cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2/3;
+  object-fit: cover;
+  background: #e8e2d6;
+  box-shadow: -4px 3px 0 rgba(90, 55, 20, 0.2);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.rec-item .t {
+  display: block;
+  margin-top: 9px;
+  font-size: 13px;
+}
+
+.rec-item .t b {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rec-item .t small {
+  display: block;
+  color: var(--muted, #6b5a48);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recs-reason {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.recs-en {
+  font-style: italic;
+}
+
+.rec-item:hover .cover,
+.rec-item:focus-visible .cover {
+  transform: translateY(-4px) scale(1.04);
+}
+
+.rec-item:focus-visible {
+  outline: none;
+}
+
+.rec-item:focus-visible .cover {
+  outline: 2px solid var(--accent, #8a5a26);
+  outline-offset: 3px;
+}
+
+.recs-to-library {
+  text-align: center;
+  margin-top: 16px;
+}
+
+.recs-to-library a {
+  color: var(--accent, #8a5a26);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.recs-to-library a:hover {
+  text-decoration: underline;
+}
+
+.bk-rec-note {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  background: #f7ecd4;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #5a3714;
+}
+
+/* Author `.bk-move { display:flex }` beats the UA `[hidden]` rule. */
+.bk-move[hidden] {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recs-loading {
+    animation: none;
+  }
+  .rec-item .cover {
+    transition: none;
+  }
+  .rec-item:hover .cover,
+  .rec-item:focus-visible .cover {
+    transform: none;
+  }
+}

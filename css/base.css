@@ -1,0 +1,244 @@
+/* Pine library shell — from design/library.html */
+
+  *{box-sizing:border-box}
+  body{margin:0;color:var(--ink);-webkit-font-smoothing:antialiased}
+  header{text-align:center;padding:30px 16px 20px}
+  h1{font-size:clamp(34px,6vw,54px);margin:0;line-height:1.05}
+  header p{margin:8px 0 0}
+  .search{display:flex;max-width:520px;margin:24px auto 0;border-radius:999px;overflow:hidden}
+  .search input{flex:1;min-width:0;border:0;padding:12px 20px;font:inherit;outline:0;background:transparent;color:var(--ink)}
+  .search input::placeholder{color:var(--muted)}
+  .search button{border:0;color:#fff;font:inherit;font-weight:600;cursor:pointer}
+  main{max-width:1180px;margin:0 auto;padding:10px 16px 40px}
+  .shelf-head{display:flex;align-items:center;gap:10px}
+  .shelf-head h2{margin:0;line-height:1.2}
+
+  /* Netflix-style row: fixed-size covers, last one cut in half, faded edges with arrows */
+  .rowwrap{position:relative;--per:6.5;--gap:16px}
+  .row{display:flex;gap:var(--gap);overflow-x:auto;scroll-behavior:smooth;scrollbar-width:none;padding:14px 0 12px}
+  .row::-webkit-scrollbar{display:none}
+  .book{flex:0 0 calc((100% - var(--gap) * (var(--per) - .5)) / var(--per));min-width:0}
+  .cover{display:block;width:100%;aspect-ratio:2/3;object-fit:cover;background:#e8e2d6;transition:transform .25s ease,box-shadow .25s ease}
+  .book:hover .cover{transform:translateY(-4px) scale(1.04)}
+  .book .t{display:block;margin-top:9px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .edge{position:absolute;top:0;bottom:0;width:72px;border:0;padding:0;cursor:pointer;z-index:2;opacity:0;pointer-events:none;transition:opacity .3s;
+    background:transparent;display:flex;align-items:center;direction:ltr}
+  .edge::before{content:"";position:absolute;inset:0;backdrop-filter:blur(2.5px);-webkit-backdrop-filter:blur(2.5px)}
+  .edge.next{left:0;justify-content:flex-start;padding-left:8px}
+  .edge.prev{right:0;justify-content:flex-end;padding-right:8px}
+  .edge.next::before{background:linear-gradient(to right,var(--fade) 10%,transparent);-webkit-mask:linear-gradient(to right,#000 45%,transparent);mask:linear-gradient(to right,#000 45%,transparent)}
+  .edge.prev::before{background:linear-gradient(to left,var(--fade) 10%,transparent);-webkit-mask:linear-gradient(to left,#000 45%,transparent);mask:linear-gradient(to left,#000 45%,transparent)}
+  .edge.on{opacity:1;pointer-events:auto}
+  .knob{position:relative;display:grid;place-items:center;color:var(--ink);opacity:.75;transition:opacity .2s,transform .2s;filter:drop-shadow(0 0 2px var(--fade)) drop-shadow(0 0 6px var(--fade))}
+  .knob svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+  .edge.prev .knob svg{transform:scaleX(-1)}
+  .rowwrap:hover .knob{opacity:.9}
+  .edge:hover .knob{opacity:1;transform:scale(1.15)}
+  .edge:focus-visible{outline:none}.edge:focus-visible .knob{opacity:1;outline:2px solid var(--accent);outline-offset:4px;border-radius:4px}
+  .empty{color:var(--muted);font-size:14px;padding:40px 10px}
+  .add{display:block;margin:22px auto 0;padding:11px 26px;border:1.5px dashed;border-radius:999px;font:inherit;font-weight:600;cursor:pointer}
+  nav.designs{text-align:center;padding:18px;font-size:14px}nav.designs a{color:var(--ink);margin:0 8px}
+  @media(max-width:900px){.rowwrap{--per:4.5}}
+  @media(max-width:560px){.rowwrap{--per:2.5;--gap:12px}.edge{width:52px}}
+
+  /* Flat 2D: no soft shadows or gradients; parts separated by tone only (light boards/posts, darker back). */
+  :root{--wall:#ffffff;--ink:#33261a;--muted:#8a7a6a;--accent:#9a6a3a;--fade:#e6c890}
+  body{font-family:"Assistant",sans-serif;background:var(--wall)}
+  h1{font-family:"Frank Ruhl Libre",serif;font-weight:500;color:var(--ink)}
+  header{padding:40px 16px 28px}
+  header p{color:var(--muted);opacity:1}
+  .search{border:1.5px solid #d6cfc2;background:#fff}
+  .search button{background:var(--ink);border-radius:999px;margin:4px;padding:0 22px}
+
+  .case{position:relative;padding:22px 24px 24px;background:url("../assets/design-1.svg") 0 0/180px 760px;border-radius:2px}
+  .shelf{position:relative;padding:0 14px;background:url("../assets/design-2.svg") 0 0/1200px 1100px}
+  .shelf:nth-child(2){background-position:-150px -260px}.shelf:nth-child(3){background-position:-300px -520px}.shelf:nth-child(4){background-position:-450px -780px}.shelf:nth-child(5){background-position:-75px -830px}
+  .board{position:relative;height:30px;margin:0 -38px;background:url("../assets/design-3.svg") 0 0/1300px 30px;border-bottom:3px solid #dcbf8a;box-sizing:content-box}
+  .shelf:nth-child(2) .board{background-position:-420px 0}.shelf:nth-child(3) .board{background-position:-830px 0}
+  .shelf:nth-child(4) .board{background-position:-210px 0}.shelf:nth-child(5) .board{background-position:-640px 0}
+  .shelf-head{position:absolute;right:38px;bottom:7px;z-index:3;gap:8px;padding:2px 12px;background:rgba(255,255,255,.88);border-radius:3px}
+  .shelf-head h2{font:700 14px "Assistant",sans-serif;color:var(--ink)}
+  .shelf-head span{font-size:12px;font-weight:600;color:var(--muted);opacity:1}
+  .rowwrap{--gap:12px}
+  .row{padding:30px 0 0;align-items:flex-end}
+  .cover{border-radius:0}
+  .book:hover .cover{transform:translateY(-6px)}
+  .knob{color:#3b2a1b}
+  .add{border-color:#b9ab95;color:var(--ink);background:transparent}
+  .book{position:relative}
+  .book .t{position:absolute;top:8px;right:6px;left:6px;z-index:2;display:block;margin:0;padding:6px 9px;white-space:normal;
+     background:#fffdf8;border-radius:3px;box-shadow:-3px 3px 0 rgba(90,55,20,.22);opacity:0;transform:translateY(-4px);transition:opacity .18s,transform .18s;pointer-events:none}
+  .book .t b{display:block;font-size:13px;line-height:1.25;color:var(--ink)}
+  .book .t small{display:block;margin-top:2px;font-size:11.5px;color:var(--muted)}
+  .book.show .t{opacity:1;transform:none}
+  @media(hover:hover){.book:hover .t{opacity:1;transform:none}}
+  .book:focus-visible{outline:none}.book:focus-visible .cover{outline:2px solid var(--accent);outline-offset:3px}
+  .plus{padding:0;border:0;background:none;cursor:pointer;font:inherit}
+  .plus .cover{display:grid;place-items:center;background:#fbf7ee;box-shadow:inset 0 0 0 1px rgba(107,61,20,.14);color:#6b4a2a;font:300 48px/1 "Assistant",sans-serif}
+  .plus:hover .cover{background:#fff;color:var(--ink)}
+  .picker{position:fixed;inset:0;z-index:10;display:none;place-items:center;padding:16px;background:rgba(51,38,26,.45)}
+  .picker.on{display:grid}
+  .picker .box{width:min(520px,100%);background:#fff;border-radius:14px;padding:22px 22px 26px;box-shadow:0 30px 60px -20px rgba(0,0,0,.45)}
+  .picker h3{margin:0 0 4px;font:500 22px "Frank Ruhl Libre",serif;color:var(--ink)}
+  .picker p{margin:0;color:var(--muted);font-size:14px}
+  .picker .search{margin:18px 0 0;max-width:none}
+  .picker .x{float:left;border:0;background:none;font-size:26px;line-height:1;color:var(--muted);cursor:pointer}
+  /* phones: cabinet goes edge to edge so more covers fit */
+  @media(max-width:560px){
+    header{padding:26px 16px 18px}
+    main{padding:4px 0 30px}
+    .case{padding:10px 8px 12px;border-radius:0}
+    .shelf{padding:0 4px}
+    .board{margin:0 -12px;height:24px}
+    .shelf-head{right:12px;bottom:5px}
+    .rowwrap{--per:3.5;--gap:8px}
+    .row{padding-top:24px}
+    .plus .cover{font-size:36px}
+  }
+
+  /* v2 overrides */
+  main{padding-top:28px}
+  .case{padding-top:0}
+  .crown{position:relative;height:64px;margin:0 -24px;background:url("../assets/design-4.svg") 0 0/2600px 64px;border-bottom:3px solid #dcbf8a;display:grid;place-items:center}
+  .crown h1{margin:0;font-size:32px;font-weight:700;color:#5a3714;text-shadow:0 1px 0 rgba(255,255,255,.55)}
+  .board{height:34px;background:url("../assets/design-5.svg") 0 0/2600px 34px}
+  .shelf:nth-child(2) .board{background-position:-420px 0}.shelf:nth-child(3) .board{background-position:-830px 0}
+  .shelf:nth-child(4) .board{background-position:-210px 0}.shelf:nth-child(5) .board{background-position:-640px 0}.shelf:nth-child(6) .board{background-position:-1010px 0}
+  /* big label pinned to the board, overlapping the bottom of the first covers so it reads as this shelf's name */
+  .shelf-head{right:22px;bottom:8px;padding:7px 18px 8px;gap:12px;background:#fffdf8;border-radius:4px;box-shadow:-4px 3px 0 rgba(90,55,20,.22)}
+  .shelf-head h2{font-size:21px}
+  .shelf-head h2[contenteditable=true]{outline:none;border-bottom:1.5px dashed #b98a4e}
+  .edit{display:grid;place-items:center;width:24px;height:24px;margin:0 -6px;padding:0;border:0;background:none;color:#9a6a3a;cursor:pointer;opacity:0;transition:opacity .15s}
+  .edit svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
+  .shelf-head:hover .edit,.shelf-head:focus-within .edit,.shelf-head.tapped .edit{opacity:1}
+  .shelf-head span{font-size:14px}
+  .cover{box-shadow:-4px 3px 0 rgba(90,55,20,.2)}
+  .plus .cover{background:#f1e2c2;box-shadow:-4px 3px 0 rgba(90,55,20,.2),inset 0 0 0 1px rgba(107,61,20,.16);color:#7a5530}
+  .plus:hover .cover{background:#f7ecd4;color:#5a3714}
+  .add-slot{display:block;width:100%;height:86px;border:0;cursor:pointer;font:600 16px "Assistant",sans-serif;color:#6b4a2a;
+     background:url("../assets/design-6.svg") -150px -600px/1200px 1100px;position:relative}
+  .add-slot span{background:rgba(255,255,255,.7);padding:6px 16px;border-radius:999px;transition:background .2s}
+  .add-slot:hover span{background:#fff}
+  .add-slot + .board{margin:0 -24px;background-position:-1500px 0}
+  @media(hover:none){.knob{display:none}}
+  .burger{position:absolute;right:22px;top:50%;width:40px;height:40px;margin-top:-20px;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:#5a3714;cursor:pointer}
+  .burger:hover{background:rgba(255,255,255,.45)}
+  .burger svg{width:24px;height:24px;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+  .scrim{position:fixed;inset:0;z-index:20;background:rgba(51,38,26,.35);opacity:0;pointer-events:none;transition:opacity .25s}
+  .drawer{position:fixed;top:0;bottom:0;right:0;z-index:21;width:min(300px,82vw);background:#fffdf8;transform:translateX(100%);transition:transform .28s ease;display:flex;flex-direction:column;box-shadow:-12px 0 30px -18px rgba(51,38,26,.5)}
+  body.menu-open .scrim{opacity:1;pointer-events:auto}
+  body.menu-open .drawer{transform:none}
+  .drawer-top{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 18px 0 10px;background:url("../assets/design-7.svg") -900px 0/2600px 64px;border-bottom:3px solid #dcbf8a}
+  .drawer-top b{font:700 22px "Frank Ruhl Libre",serif;color:#5a3714}
+  .drawer-top button{border:0;background:none;font-size:28px;line-height:1;color:#5a3714;cursor:pointer;padding:4px 8px}
+  .drawer nav{display:flex;flex-direction:column;padding:12px 0}
+  .drawer nav a{display:flex;align-items:center;gap:14px;padding:13px 22px;color:var(--ink);text-decoration:none;font-size:17px;font-weight:600;border-right:4px solid transparent}
+  .drawer nav a:hover{background:#f7efdf}
+  .drawer nav a[aria-current]{border-right-color:#b98a4e;background:#f7efdf}
+  .drawer nav svg{width:20px;height:20px;flex:none;fill:none;stroke:#9a6a3a;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .drawer .foot{margin-top:auto;padding:16px 22px;border-top:1px solid #eee4d2;color:var(--muted);font-size:14px}
+  @media(max-width:560px){
+    main{padding-top:0}
+    .burger{right:8px}
+    .crown{margin:0 -8px;height:54px}
+    .crown h1{font-size:26px}
+    .board{margin:0 -12px;height:30px}
+    .shelf-head{right:12px;bottom:6px;padding:5px 12px 6px;gap:8px}
+    .shelf-head h2{font-size:17px}
+    .shelf-head span{font-size:12px}
+    .add-slot{height:64px}
+    .add-slot + .board{margin:0 -8px}
+  }
+
+  .scrim{background:transparent}
+  .door{position:fixed;top:0;bottom:0;right:0;z-index:21;width:min(340px,86vw);display:flex;padding:20px 20px 20px 26px;
+     background:url("../assets/design-8.svg") 0 0/640px 900px;box-shadow:inset -3px 0 0 #d9bb84,inset 3px 0 0 #c9a46a,-12px 0 0 rgba(70,42,14,.16);
+     transform-origin:right center;transform:perspective(1300px) rotateY(96deg);backface-visibility:hidden;visibility:hidden;
+     transition:transform .55s cubic-bezier(.25,.8,.25,1),visibility 0s linear .55s}
+  body.menu-open .door{transform:perspective(1300px) rotateY(0);visibility:visible;transition:transform .55s cubic-bezier(.25,.8,.25,1),visibility 0s}
+  .door-panel{flex:1;display:flex;flex-direction:column;padding:22px 20px;border:2px solid #b88c52;box-shadow:inset 0 0 0 6px rgba(255,250,235,.38),inset 0 0 0 8px rgba(184,140,82,.45)}
+  .door-panel .x{align-self:flex-end;border:0;background:none;font-size:34px;font-weight:700;line-height:1;color:#5a3714;cursor:pointer;padding:2px 6px;margin:-8px -8px 0 0}
+  .door-panel h2{margin:0 0 22px;font:700 34px/1.15 "Frank Ruhl Libre",serif;color:#4a2a0e;text-shadow:0 1px 0 rgba(255,255,255,.55)}
+  .door-panel nav{display:flex;flex-direction:column;max-width:340px}
+  .door-panel nav a{display:flex;align-items:center;gap:14px;padding:17px 4px;color:#3a220c;text-decoration:none;font:800 23px "Assistant",sans-serif;
+     text-shadow:0 1px 0 rgba(255,255,255,.5);border-bottom:1px solid rgba(138,90,38,.28)}
+  .door-panel nav a:hover{color:#2e1c0a}
+  .door-panel nav a[aria-current]::after{content:"";width:9px;height:9px;border-radius:50%;background:#b9735a;margin-right:2px}
+  .door-panel nav svg{width:26px;height:26px;flex:none;fill:none;stroke:#6b4a2a;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+  .handle{position:absolute;left:6px;top:50%;width:22px;height:22px;margin-top:-11px;border:0;padding:0;border-radius:50%;cursor:pointer;
+     background:#a8783f;box-shadow:inset 0 0 0 2px #6b3d14,inset 0 0 0 6px #8a5a26,-2px 2px 0 rgba(70,42,14,.25)}
+  .handle::after{content:"";position:absolute;left:7px;top:6px;width:4px;height:4px;border-radius:50%;background:#d9b47a}
+  .hinge{position:absolute;right:0;width:7px;height:44px;background:#a98b5c;box-shadow:inset 0 0 0 1px #7d6440}
+  .hinge.a{top:70px}.hinge.b{bottom:70px}
+
+  /* long-press drag: books between/within shelves, shelves up and down */
+  .book,.shelf-head{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  .book .cover,.shelf-head{transition:transform .42s ease}
+  .book.pressing .cover{transform:scale(.95)}
+  .shelf-head.pressing{transform:scale(.95)}
+  .placeholder.book .cover{opacity:.25;outline:2px dashed #8a5a26;outline-offset:-2px}
+  .placeholder.book .t{display:none}
+  .shelf.placeholder{opacity:.35}
+  .ghost{position:fixed;z-index:40;margin:0;pointer-events:none;will-change:transform}
+  .ghost-book .cover{box-shadow:-8px 8px 0 rgba(70,42,14,.25)}
+  .ghost-book .t{display:none}
+  .ghost-shelf{box-shadow:-12px 12px 0 rgba(70,42,14,.2)}
+  body.dragging{cursor:grabbing}
+  body.dragging .row{scroll-behavior:auto}
+  body.dragging .book .t{opacity:0!important}
+
+  /* book card */
+  .bk{position:fixed;inset:0;z-index:30;display:grid;place-items:center;padding:4vh 16px;background:rgba(40,26,12,.55);opacity:0;pointer-events:none;transition:opacity .2s}
+  .bk.on{opacity:1;pointer-events:auto}
+  .bk-card{position:relative;width:min(920px,100%);max-height:88vh;display:grid;grid-template-columns:270px minmax(0,1fr);gap:34px;padding:44px 36px 32px;
+     background:#fffdf8;border-radius:8px;overflow:hidden;transform:translateY(14px) scale(.98);transition:transform .25s cubic-bezier(.25,.8,.25,1)}
+  .bk.on .bk-card{transform:none}
+  .bk-card::before{content:"";position:absolute;top:0;left:0;right:0;height:14px;background:url("../assets/design-9.svg") -300px 0/2600px 34px;border-bottom:2px solid #dcbf8a}
+  .bk-x{position:absolute;top:22px;left:18px;z-index:2;border:0;background:none;font-size:30px;line-height:1;color:#7a5530;cursor:pointer;padding:4px 8px}
+  .bk-cover{width:100%;aspect-ratio:2/3;object-fit:cover;background:#efe2c6;box-shadow:-6px 5px 0 rgba(90,55,20,.2)}
+  .bk-body{max-height:calc(88vh - 76px);overflow:auto;padding-left:8px;overscroll-behavior:contain}
+  .bk-shelf{display:inline-block;padding:3px 12px;border-radius:999px;background:#f3e6c8;color:#6b4a2a;font-size:13px;font-weight:700}
+  .bk-title{margin:12px 0 4px;font:700 34px/1.15 "Frank Ruhl Libre",serif;color:var(--ink)}
+  .bk-author{margin:0;font-size:18px;color:#7a5530;font-weight:600}
+  .bk-rating{display:flex;align-items:center;gap:8px;margin:14px 0 0;font-size:15px}
+  .bk-rating small{color:var(--muted);font-size:13px}
+  .stars{position:relative;display:inline-block;color:#e6d8bb;letter-spacing:2px;font-size:18px;line-height:1}
+  .stars::before,.stars .fill::before{content:"★★★★★"}
+  .stars .fill{position:absolute;top:0;right:0;overflow:hidden;white-space:nowrap;color:#c8963e}
+  .bk-meta{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:20px 0 0;padding:16px 0;border-top:1px solid #eee2cc;border-bottom:1px solid #eee2cc;font-size:14.5px}
+  .bk-meta[hidden]{display:none}
+  .bk-meta dt{color:var(--muted)}.bk-meta dd{margin:0;color:var(--ink);font-weight:600}
+  .bk-body h3{margin:22px 0 8px;font:700 17px "Assistant",sans-serif;color:#7a5530}
+  .bk-desc{white-space:pre-line;font-size:16px;line-height:1.75;color:#3d2e20}
+  .bk-desc.none{color:var(--muted);font-style:italic}
+  @media(max-width:640px){
+    .bk{padding:0;place-items:end center}
+    .bk-card{grid-template-columns:minmax(0,1fr);gap:0;max-height:92vh;border-radius:14px 14px 0 0;padding:34px 20px 24px;overflow:auto;transform:translateY(40px)}
+    .bk-cover{width:132px;justify-self:center;margin-bottom:18px}
+    .bk-body{max-height:none;overflow:visible;padding:0}
+    .bk-title{font-size:27px}
+    .bk-x{top:16px;left:10px}
+  }
+
+  .screen[hidden]{display:none!important}
+  .screen-inner{padding:28px 16px 40px;max-width:1180px;margin:0 auto}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:50;padding:12px 20px;border-radius:8px;background:#3a220c;color:#fffdf8;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:min(92vw,420px);text-align:center}
+  .toast[hidden]{display:none}
+  .bk-actions{margin-top:22px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+  .bk-move{display:flex;flex-direction:column;gap:6px;font-weight:700;color:#6b4a2a}
+  .bk-move select{font:inherit;padding:8px 12px;border:1.5px solid #d6cfc2;border-radius:8px;background:#fff}
+  .bk-remove{border:0;border-radius:999px;padding:10px 18px;font:inherit;font-weight:700;cursor:pointer;background:#f3e6c8;color:#6b3d14}
+  .bk-remove:hover{background:#e8d4b0}
+  .shelf-delete{display:grid;place-items:center;width:24px;height:24px;margin:0;padding:0;border:0;background:none;color:#a05040;font-size:22px;line-height:1;cursor:pointer;opacity:0;transition:opacity .15s}
+  .shelf-head:hover .shelf-delete,.shelf-head:focus-within .shelf-delete,.shelf-head.tapped .shelf-delete{opacity:1}
+  .add-slot:disabled{opacity:.6;cursor:wait}
+
+  @media (prefers-reduced-motion: reduce) {
+    html{scroll-behavior:auto}
+    .row{scroll-behavior:auto}
+    .cover,.book .cover,.shelf-head,.book .t,.edge,.knob,.scrim,.door,.bk,.bk-card,.add-slot span{transition:none}
+    .book:hover .cover,.book.pressing .cover,.shelf-head.pressing{transform:none}
+    .door{transform:none;visibility:hidden}
+    body.menu-open .door{visibility:visible}
+    .bk-card,.bk.on .bk-card{transform:none}
+  }

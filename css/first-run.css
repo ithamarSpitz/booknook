@@ -1,0 +1,59 @@
+/* First-run prompt — lane D4 */
+
+#screen-library main {
+  position: relative;
+}
+
+.first-run {
+  position: absolute;
+  top: var(--first-run-top, 50%);
+  left: var(--first-run-left, 50%);
+  z-index: 5;
+  max-width: min(280px, 72vw);
+  transform: translate(-50%, -120%);
+  pointer-events: none;
+  text-align: center;
+}
+
+.first-run__text {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 600;
+  color: var(--ink);
+  background: #fffdf8;
+  border-radius: 6px;
+  box-shadow: -4px 4px 0 rgba(90, 55, 20, 0.18);
+}
+
+.first-run__plus {
+  display: inline-grid;
+  place-items: center;
+  width: 1.35em;
+  height: 1.35em;
+  vertical-align: -0.15em;
+  margin-inline: 2px;
+  font: 300 1.1em/1 "Assistant", sans-serif;
+  color: #7a5530;
+  background: #f1e2c2;
+  box-shadow: -2px 2px 0 rgba(90, 55, 20, 0.2), inset 0 0 0 1px rgba(107, 61, 20, 0.16);
+}
+
+.first-run::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  width: 12px;
+  height: 12px;
+  background: #fffdf8;
+  transform: translateX(-50%) rotate(45deg);
+  box-shadow: 2px 2px 0 rgba(90, 55, 20, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .first-run {
+    transform: translate(-50%, -120%);
+  }
+}
