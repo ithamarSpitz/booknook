@@ -14,11 +14,14 @@ enabled = true
 port = 54323
 
 [functions.search-books]
-verify_jwt = false
+verify_jwt = true
 
-[functions.resolve-book]
-verify_jwt = false
+[functions.add-book]
+verify_jwt = true
+
+[functions.book-details]
+verify_jwt = true
 
 [functions.recommendations]
-verify_jwt = false
+verify_jwt = true
 
