@@ -159,7 +159,20 @@ export function openMenu() {
 function paint(root, ctx) {
   const state = ctx.getLibrary();
   if (!state) return;
+  // Redraws rebuild every row; keep each shelf where the reader had scrolled it.
+  const rowScroll = new Map();
+  root.querySelectorAll(".shelf[data-shelf-id]").forEach((shelf) => {
+    const row = shelf.querySelector(".row");
+    if (row) rowScroll.set(shelf.getAttribute("data-shelf-id"), row.scrollLeft);
+  });
+  const pageY = window.scrollY;
   renderCase(root, state);
+  root.querySelectorAll(".shelf[data-shelf-id]").forEach((shelf) => {
+    const row = shelf.querySelector(".row");
+    const left = rowScroll.get(shelf.getAttribute("data-shelf-id"));
+    if (row && left) row.scrollLeft = left;
+  });
+  if (pageY) window.scrollTo(0, pageY);
   const doorTitle = document.querySelector(".door-panel h2");
   if (doorTitle) doorTitle.textContent = libraryTitle(state.displayName);
   const firstRunHost = root.querySelector(".first-run");
