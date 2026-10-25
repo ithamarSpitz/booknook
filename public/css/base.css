@@ -46,7 +46,7 @@
   /* Flat 2D: no soft shadows or gradients; parts separated by tone only (light boards/posts, darker back). */
   :root{--wall:#ffffff;--ink:#33261a;--muted:#8a7a6a;--accent:#9a6a3a;--fade:#e6c890}
   body{font-family:"Assistant",sans-serif;background:var(--wall)}
-  h1{font-family:"Frank Ruhl Libre",serif;font-weight:500;color:var(--ink)}
+  h1{font-family:"Assistant",sans-serif;font-weight:500;color:var(--ink)}
   header{padding:40px 16px 28px}
   header p{color:var(--muted);opacity:1}
   .search{border:1.5px solid #d6cfc2;background:#fff}
@@ -81,7 +81,7 @@
   .picker{position:fixed;inset:0;z-index:10;display:none;place-items:center;padding:16px;background:rgba(51,38,26,.45)}
   .picker.on{display:grid}
   .picker .box{width:min(520px,100%);background:#fff;border-radius:14px;padding:22px 22px 26px;box-shadow:0 30px 60px -20px rgba(0,0,0,.45)}
-  .picker h3{margin:0 0 4px;font:500 22px "Frank Ruhl Libre",serif;color:var(--ink)}
+  .picker h3{margin:0 0 4px;font:500 22px "Assistant",sans-serif;color:var(--ink)}
   .picker p{margin:0;color:var(--muted);font-size:14px}
   .picker .search{margin:18px 0 0;max-width:none}
   .picker .x{float:left;border:0;background:none;font-size:26px;line-height:1;color:var(--muted);cursor:pointer}
@@ -133,7 +133,7 @@
   body.menu-open .scrim{opacity:1;pointer-events:auto}
   body.menu-open .drawer{transform:none}
   .drawer-top{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 18px 0 10px;background:url("../assets/design-7.svg") -900px 0/2600px 64px;border-bottom:3px solid #dcbf8a}
-  .drawer-top b{font:700 22px "Frank Ruhl Libre",serif;color:#5a3714}
+  .drawer-top b{font:700 22px "Assistant",sans-serif;color:#5a3714}
   .drawer-top button{border:0;background:none;font-size:28px;line-height:1;color:#5a3714;cursor:pointer;padding:4px 8px}
   .drawer nav{display:flex;flex-direction:column;padding:12px 0}
   .drawer nav a{display:flex;align-items:center;gap:14px;padding:13px 22px;color:var(--ink);text-decoration:none;font-size:17px;font-weight:600;border-right:4px solid transparent}
@@ -162,7 +162,7 @@
   body.menu-open .door{transform:perspective(1300px) rotateY(0);visibility:visible;transition:transform .55s cubic-bezier(.25,.8,.25,1),visibility 0s}
   .door-panel{flex:1;display:flex;flex-direction:column;padding:22px 20px;border:2px solid #b88c52;box-shadow:inset 0 0 0 6px rgba(255,250,235,.38),inset 0 0 0 8px rgba(184,140,82,.45)}
   .door-panel .x{align-self:flex-end;border:0;background:none;font-size:34px;font-weight:700;line-height:1;color:#5a3714;cursor:pointer;padding:2px 6px;margin:-8px -8px 0 0}
-  .door-panel h2{margin:0 0 22px;font:700 34px/1.15 "Frank Ruhl Libre",serif;color:#4a2a0e;text-shadow:0 1px 0 rgba(255,255,255,.55);overflow-wrap:anywhere}
+  .door-panel h2{margin:0 0 22px;font:700 34px/1.15 "Assistant",sans-serif;color:#4a2a0e;text-shadow:0 1px 0 rgba(255,255,255,.55);overflow-wrap:anywhere}
   .door-panel nav{display:flex;flex-direction:column;max-width:340px}
   .door-panel nav a{display:flex;align-items:center;gap:14px;padding:17px 4px;color:#3a220c;text-decoration:none;font:800 23px "Assistant",sans-serif;
      text-shadow:0 1px 0 rgba(255,255,255,.5);border-bottom:1px solid rgba(138,90,38,.28)}
@@ -200,7 +200,7 @@
   .bk-cover{width:100%;aspect-ratio:2/3;object-fit:cover;background:#efe2c6;box-shadow:-6px 5px 0 rgba(90,55,20,.2)}
   .bk-body{max-height:calc(88vh - 76px);overflow:auto;padding-left:8px;overscroll-behavior:contain}
   .bk-shelf{display:inline-block;padding:3px 12px;border-radius:999px;background:#f3e6c8;color:#6b4a2a;font-size:13px;font-weight:700}
-  .bk-title{margin:12px 0 4px;font:700 34px/1.15 "Frank Ruhl Libre",serif;color:var(--ink)}
+  .bk-title{margin:12px 0 4px;font:700 34px/1.15 "Assistant",sans-serif;color:var(--ink)}
   .bk-author{margin:0;font-size:18px;color:#7a5530;font-weight:600}
   .bk-rating{display:flex;align-items:center;gap:8px;margin:14px 0 0;font-size:15px}
   .bk-rating small{color:var(--muted);font-size:13px}
@@ -217,7 +217,7 @@
   .rate-card{width:min(380px,100%);background:#fffdf8;border-radius:14px;padding:20px 20px 16px;text-align:center;box-shadow:0 10px 40px -12px rgba(40,26,12,.5);transform:translateY(16px);transition:transform .2s ease}
   .rate-prompt.on .rate-card{transform:none}
   .rate-kicker{margin:0;color:var(--muted);font-size:13px}
-  .rate-card h2{margin:4px 0 2px;font:700 22px/1.25 "Frank Ruhl Libre",serif;color:#4a2a0e;overflow-wrap:anywhere}
+  .rate-card h2{margin:4px 0 2px;font:700 22px/1.25 "Assistant",sans-serif;color:#4a2a0e;overflow-wrap:anywhere}
   .rate-q{margin:0 0 6px;color:#6b4a2a}
   .rate-stars{display:flex;justify-content:center;gap:4px}
   .rate-stars .my-star{font-size:38px;padding:4px}
