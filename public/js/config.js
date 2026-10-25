@@ -1,5 +1,18 @@
-/** Local Supabase defaults (`npx supabase status -o env`). */
-export const SUPABASE_URL = "http://127.0.0.1:54321";
-export const SUPABASE_ANON_KEY =
+const isLocal =
+  location.hostname === "localhost" || location.hostname === "127.0.0.1";
+
+// --- OPERATOR: production Supabase (anon key is public by design; never put the service-role key here) ---
+const PRODUCTION_SUPABASE_URL = "https://YOUR_PROJECT_REF.supabase.co";
+const PRODUCTION_SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+const localSupabaseUrl = "http://127.0.0.1:54321";
+const localAnonKey =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0";
-export const FUNCTIONS_URL = "http://127.0.0.1:54321/functions/v1";
+
+const supabaseUrl = isLocal ? localSupabaseUrl : PRODUCTION_SUPABASE_URL;
+const supabaseAnonKey = isLocal ? localAnonKey : PRODUCTION_SUPABASE_ANON_KEY;
+
+/** Supabase project URL (`npx supabase status -o env` when developing locally). */
+export const SUPABASE_URL = supabaseUrl;
+export const SUPABASE_ANON_KEY = supabaseAnonKey;
+export const FUNCTIONS_URL = `${supabaseUrl}/functions/v1`;
