@@ -10,6 +10,7 @@ depends_on:
   - S1-T4
 allowed_paths:
   - public/js/add-book.js
+  - public/js/library.js
   - public/css/add-book.css
   - tests/web/add-book*.test.mjs
 context:
@@ -39,7 +40,12 @@ The add-book flow from the "+" tile and the "חיפוש ספרים" screen.
 
 # Out of scope
 
-Any file not listed. If `library.js` lacks a hook you need, stop and report.
+Any file not listed. In `library.js` change only the "+" call site so it passes the app `ctx`: `addBook.open(shelfId, ctx)`.
+
+# Rules
+
+- Use the app `ctx` passed to `open` or `mount`. Never load or keep a second copy of the library.
+- Several adds can be in flight at once. A failed add removes only its own pending row; a successful add fills its own row, or inserts the book if that row is gone.
 
 # Acceptance criteria
 
