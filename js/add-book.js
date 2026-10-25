@@ -1,8 +1,8 @@
-import { FUNCTIONS } from "./contract.js?v=b90e49c";
-import { cloneLibrary } from "./data.js?v=b90e49c";
-import { fetchSimaniaPayload, searchBooks } from "./simania.js?v=b90e49c";
-import { notifyShelvesChanged } from "./events.js?v=b90e49c";
-import { promptRating, shouldPromptRating } from "./my-rating.js?v=b90e49c";
+import { FUNCTIONS } from "./contract.js?v=18f2175";
+import { cloneLibrary } from "./data.js?v=18f2175";
+import { fetchSimaniaPayload, searchBooks } from "./simania.js?v=18f2175";
+import { notifyShelvesChanged } from "./events.js?v=18f2175";
+import { promptRating, shouldPromptRating } from "./my-rating.js?v=18f2175";
 
 // Simania is called from the browser (it blocks Edge Function IPs); the
 // response keeps the old search-books envelope so mapSearchResults is unchanged.
@@ -15,9 +15,9 @@ export const DUPLICATE_MSG = "הספר כבר בספרייה שלך";
 
 /** @typedef {{
  *   api?: { callFunction: Function, getClient?: Function, getSession?: Function },
- *   data?: typeof import('./data.js?v=b90e49c'),
- *   getLibrary: () => import('./data.js?v=b90e49c').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=b90e49c').LibraryState) => void,
+ *   data?: typeof import('./data.js?v=18f2175'),
+ *   getLibrary: () => import('./data.js?v=18f2175').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=18f2175').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   redrawLibrary?: () => Promise<void>,
  *   reloadLibrary?: () => Promise<void>,
@@ -128,7 +128,7 @@ function escapeHtml(s) {
 }
 
 /**
- * @param {import('./data.js?v=b90e49c').LibraryState} state
+ * @param {import('./data.js?v=18f2175').LibraryState} state
  * @param {string} shelfId
  * @param {ReturnType<typeof mapSearchBook>} hit
  */
@@ -176,7 +176,7 @@ function nextPendingKey() {
  * Remove only the pending row this add created. Never restore a snapshot (that would
  * drop other adds still in flight) and never match by simania_id (on 409 the real copy
  * of that edition is already on a shelf).
- * @param {import('./data.js?v=b90e49c').LibraryState} state
+ * @param {import('./data.js?v=18f2175').LibraryState} state
  * @param {string} pendingKey
  */
 export function removePendingAdd(state, pendingKey) {
@@ -194,7 +194,7 @@ export function addErrorMessage(err) {
 }
 
 /**
- * @param {import('./data.js?v=b90e49c').LibraryState} state
+ * @param {import('./data.js?v=18f2175').LibraryState} state
  * @param {string} shelfId
  * @param {string} pendingKey
  * @param {Record<string, unknown>} book
@@ -226,7 +226,7 @@ function shelfSelector(shelfId) {
  * Dim the pending row that this add created. Match by shelf + index so a 409
  * duplicate does not paint `.pending` onto the copy that must stay.
  * @param {HTMLElement} libRoot
- * @param {import('./data.js?v=b90e49c').LibraryState} state
+ * @param {import('./data.js?v=18f2175').LibraryState} state
  */
 export function markPendingBooks(libRoot, state) {
   if (!libRoot || !state) return;
@@ -245,8 +245,8 @@ export function markPendingBooks(libRoot, state) {
  * @param {string} shelfId
  */
 async function callAddBook(simaniaId, shelfId) {
-  const api = await import("./api.js?v=b90e49c");
-  const { FUNCTIONS_URL, SUPABASE_ANON_KEY } = await import("./config.js?v=b90e49c");
+  const api = await import("./api.js?v=18f2175");
+  const { FUNCTIONS_URL, SUPABASE_ANON_KEY } = await import("./config.js?v=18f2175");
   const [session, simania] = await Promise.all([api.getSession(), fetchSimaniaPayload(simaniaId)]);
   const token = session?.access_token || SUPABASE_ANON_KEY;
   const res = await fetch(`${FUNCTIONS_URL}/${FUNCTIONS.ADD_BOOK}`, {

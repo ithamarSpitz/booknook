@@ -1,6 +1,6 @@
-import { notifyShelvesChanged } from "./events.js?v=b90e49c";
-import { applyOptimisticRating, cloneLibrary, setRating } from "./data.js?v=b90e49c";
-import { SHELF_KINDS } from "./contract.js?v=b90e49c";
+import { notifyShelvesChanged } from "./events.js?v=18f2175";
+import { applyOptimisticRating, cloneLibrary, setRating } from "./data.js?v=18f2175";
+import { SHELF_KINDS } from "./contract.js?v=18f2175";
 
 /**
  * Five tappable stars for the reader's own 1-5 rating. Tapping the current

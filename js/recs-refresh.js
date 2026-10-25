@@ -1,5 +1,5 @@
-import { FUNCTIONS } from "./contract.js?v=b90e49c";
-import { localizeRecommendations, recommendationFromApiCard } from "./recs.js?v=b90e49c";
+import { FUNCTIONS } from "./contract.js?v=18f2175";
+import { localizeRecommendations, recommendationFromApiCard } from "./recs.js?v=18f2175";
 
 /**
  * Regenerates recommendations in the background: the recommendations function
