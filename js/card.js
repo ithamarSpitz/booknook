@@ -1,20 +1,20 @@
-import { notifyShelvesChanged } from "./events.js?v=4dfdb63";
+import { notifyShelvesChanged } from "./events.js?v=fe20a65";
 import {
   applyOptimisticBookMove,
   applyOptimisticRemoveBook,
   cloneLibrary,
   moveBook,
   removeBook,
-} from "./data.js?v=4dfdb63";
+} from "./data.js?v=fe20a65";
 
 /**
  * @param {HTMLElement} overlay `.bk` element
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=4dfdb63'),
+ *   data: typeof import('./data.js?v=fe20a65'),
  *   showToast: (msg: string) => void,
- *   getLibrary?: () => import('./data.js?v=4dfdb63').LibraryState | null,
- *   setLibrary?: (s: import('./data.js?v=4dfdb63').LibraryState) => void,
+ *   getLibrary?: () => import('./data.js?v=fe20a65').LibraryState | null,
+ *   setLibrary?: (s: import('./data.js?v=fe20a65').LibraryState) => void,
  *   onLibraryChange: () => Promise<void>,
  * }} deps
  */

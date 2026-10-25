@@ -1,4 +1,4 @@
-import { FUNCTIONS } from "./contract.js?v=4dfdb63";
+import { FUNCTIONS } from "./contract.js?v=fe20a65";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

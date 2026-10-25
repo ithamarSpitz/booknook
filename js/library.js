@@ -1,5 +1,5 @@
-import { notifyShelvesChanged } from "./events.js?v=4dfdb63";
-import { SHELF_KINDS } from "./contract.js?v=4dfdb63";
+import { notifyShelvesChanged } from "./events.js?v=fe20a65";
+import { SHELF_KINDS } from "./contract.js?v=fe20a65";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -15,9 +15,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js?v=4dfdb63";
-import * as addBook from "./add-book.js?v=4dfdb63";
-import * as firstRun from "./first-run.js?v=4dfdb63";
+} from "./data.js?v=fe20a65";
+import * as addBook from "./add-book.js?v=fe20a65";
+import * as firstRun from "./first-run.js?v=fe20a65";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -289,10 +289,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=4dfdb63'),
+ *   data: typeof import('./data.js?v=fe20a65'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js?v=4dfdb63').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=4dfdb63').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=fe20a65').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=fe20a65').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx
@@ -372,8 +372,9 @@ export async function mount(root, ctx) {
  * @param {object} ctx
  */
 function setupDrag(root, ctx) {
-  const HOLD = 420;
-  const SLOP = 10;
+  // Short hold that tolerates a resting thumb's wobble (touch) but not a scroll.
+  const HOLD = 260;
+  const slopFor = (e) => (e.pointerType === "mouse" ? 6 : 18);
   const caseEl = root.querySelector("#case");
   if (!caseEl) return;
 
@@ -460,10 +461,8 @@ function setupDrag(root, ctx) {
 
   const moveGhost = () => {
     if (!drag) return;
-    const { ghost, kind, x, y, dx, dy, ox, oy } = drag;
-    ghost.style.transform =
-      `translate(${x - dx - ox}px, ${y - dy - oy}px)` +
-      (kind === "book" ? " rotate(-3deg) scale(1.06)" : "");
+    const { ghost, x, y, dx, dy, ox, oy } = drag;
+    ghost.style.transform = `translate(${x - dx - ox}px, ${y - dy - oy}px)`;
   };
 
   const tick = () => {
@@ -572,6 +571,7 @@ function setupDrag(root, ctx) {
       cue,
       x: e.clientX,
       y: e.clientY,
+      slop: slopFor(e),
     };
     press.timer = setTimeout(() => {
       if (press) pickUp(press.x, press.y);
@@ -586,7 +586,7 @@ function setupDrag(root, ctx) {
       place();
       return;
     }
-    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > SLOP) cancelPress();
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > press.slop) cancelPress();
   });
   addEventListener("pointerup", () => {
     cancelPress();
