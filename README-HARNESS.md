@@ -725,3 +725,7 @@ Codex CLI became the primary provider when ChatGPT authentication is available. 
 ### Windows Codex sandbox note (v0.12.4)
 
 On native Windows, Codex implementation calls can opt into `codex.windows_implementation_sandbox`. The NYC project sets this to `danger-full-access` because current native-Windows `workspace-write` runs can leave generated files unreadable to the parent Harness process via ACL/sandbox regressions. This override applies only to implementation calls inside Harness-owned task worktrees. Review and plan-repair calls remain `read-only`, and the Harness still enforces allowed/protected paths, verification, review, and atomic rollback. Non-Windows implementation calls continue to use `codex.sandbox` (`workspace-write`).
+
+## Operating the harness
+
+Read `HARNESS-OPERATOR.md` before starting, resuming or repairing a run.
