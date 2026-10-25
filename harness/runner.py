@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 import time
@@ -11,7 +12,7 @@ from .context import ContextResolver
 from .logging_utils import write_log
 from .models import TaskSpec
 from .prompts import implement_prompt, review_prompt
-from .process_utils import cursor_prompt_via_stdin, prepare_external_argv
+from .process_utils import cursor_prompt_via_stdin, prepare_external_argv, stop_process_tree
 from .usage import UsageRecorder
 
 
@@ -120,16 +121,8 @@ class CursorAgentRunner:
 
     @staticmethod
     def _stop_process(proc: subprocess.Popen[str]) -> None:
-        if proc.poll() is not None:
-            return
-        try:
-            proc.terminate()
-            proc.wait(timeout=5)
-        except (OSError, subprocess.TimeoutExpired):
-            try:
-                proc.kill()
-            except OSError:
-                pass
+        # proc is the cmd/PowerShell shim on Windows; terminating it alone orphans the agent.
+        stop_process_tree(proc)
 
     def _invoke(
         self,
@@ -198,6 +191,9 @@ class CursorAgentRunner:
                 stderr=subprocess.STDOUT,
                 bufsize=1,
                 env=env,
+                # Own process group, so stop_process_tree can never reach the harness itself.
+                start_new_session=(os.name != "nt"),
+                creationflags=(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0),
             )
             if pipe_prompt:
                 assert proc.stdin is not None

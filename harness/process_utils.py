@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import shlex
 import shutil
 import subprocess
@@ -134,3 +135,46 @@ def prepare_external_argv(argv: Sequence[str], *, windows: bool | None = None) -
         ]
 
     return [resolved, *rest]
+
+
+def stop_process_tree(proc: subprocess.Popen[str]) -> None:
+    """Stop an agent CLI and every child it spawned.
+
+    Agent CLIs launch shells, Node processes and other tools (on Windows behind a .cmd or
+    PowerShell shim). A timeout or stall must not leave those processes running after the
+    provider call is cancelled.
+    """
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                text=True, encoding="utf-8", errors="replace",
+                capture_output=True, timeout=10, check=False,
+            )
+            proc.wait(timeout=5)
+            return
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    else:
+        killpg = getattr(os, "killpg", None)
+        getpgid = getattr(os, "getpgid", None)
+        sigkill = getattr(signal, "SIGKILL", None)
+        if killpg is not None and getpgid is not None:
+            try:
+                killpg(getpgid(proc.pid), signal.SIGTERM)
+                proc.wait(timeout=5)
+                return
+            except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+                pass
+            if sigkill is not None:
+                try:
+                    killpg(getpgid(proc.pid), sigkill)
+                    return
+                except (OSError, ProcessLookupError):
+                    pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
