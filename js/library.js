@@ -1,5 +1,5 @@
-import { notifyShelvesChanged } from "./events.js?v=02bfe78";
-import { SHELF_KINDS } from "./contract.js?v=02bfe78";
+import { notifyShelvesChanged } from "./events.js?v=5fedd1b";
+import { SHELF_KINDS } from "./contract.js?v=5fedd1b";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -15,9 +15,9 @@ import {
   moveShelf,
   renameShelf,
   shelfIndexById,
-} from "./data.js?v=02bfe78";
-import * as addBook from "./add-book.js?v=02bfe78";
-import * as firstRun from "./first-run.js?v=02bfe78";
+} from "./data.js?v=5fedd1b";
+import * as addBook from "./add-book.js?v=5fedd1b";
+import * as firstRun from "./first-run.js?v=5fedd1b";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -159,7 +159,20 @@ export function openMenu() {
 function paint(root, ctx) {
   const state = ctx.getLibrary();
   if (!state) return;
+  // Redraws rebuild every row; keep each shelf where the reader had scrolled it.
+  const rowScroll = new Map();
+  root.querySelectorAll(".shelf[data-shelf-id]").forEach((shelf) => {
+    const row = shelf.querySelector(".row");
+    if (row) rowScroll.set(shelf.getAttribute("data-shelf-id"), row.scrollLeft);
+  });
+  const pageY = window.scrollY;
   renderCase(root, state);
+  root.querySelectorAll(".shelf[data-shelf-id]").forEach((shelf) => {
+    const row = shelf.querySelector(".row");
+    const left = rowScroll.get(shelf.getAttribute("data-shelf-id"));
+    if (row && left) row.scrollLeft = left;
+  });
+  if (pageY) window.scrollTo(0, pageY);
   const doorTitle = document.querySelector(".door-panel h2");
   if (doorTitle) doorTitle.textContent = libraryTitle(state.displayName);
   const firstRunHost = root.querySelector(".first-run");
@@ -276,10 +289,10 @@ function wireChrome() {
  * @param {HTMLElement} root
  * @param {{
  *   api: { getClient: () => import('@supabase/supabase-js').SupabaseClient },
- *   data: typeof import('./data.js?v=02bfe78'),
+ *   data: typeof import('./data.js?v=5fedd1b'),
  *   card: { open: Function },
- *   getLibrary: () => import('./data.js?v=02bfe78').LibraryState | null,
- *   setLibrary: (s: import('./data.js?v=02bfe78').LibraryState) => void,
+ *   getLibrary: () => import('./data.js?v=5fedd1b').LibraryState | null,
+ *   setLibrary: (s: import('./data.js?v=5fedd1b').LibraryState) => void,
  *   showToast: (msg: string) => void,
  *   router: { go: (r: string) => void },
  * }} ctx
