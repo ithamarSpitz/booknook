@@ -1,18 +1,18 @@
-import * as api from "./api.js?v=fe4ca15";
-import { ROUTES } from "./contract.js?v=fe4ca15";
-import { createRouter } from "./router.js?v=fe4ca15";
-import * as data from "./data.js?v=fe4ca15";
-import * as library from "./library.js?v=fe4ca15";
-import { createCard } from "./card.js?v=fe4ca15";
-import * as auth from "./auth.js?v=fe4ca15";
-import * as settings from "./settings.js?v=fe4ca15";
-import * as recs from "./recs.js?v=fe4ca15";
-import * as addBook from "./add-book.js?v=fe4ca15";
-import * as invite from "./invite.js?v=fe4ca15";
-import { createRecsRefresher } from "./recs-refresh.js?v=fe4ca15";
-import { SHELVES_CHANGED } from "./events.js?v=fe4ca15";
+import * as api from "./api.js?v=4dfdb63";
+import { ROUTES } from "./contract.js?v=4dfdb63";
+import { createRouter } from "./router.js?v=4dfdb63";
+import * as data from "./data.js?v=4dfdb63";
+import * as library from "./library.js?v=4dfdb63";
+import { createCard } from "./card.js?v=4dfdb63";
+import * as auth from "./auth.js?v=4dfdb63";
+import * as settings from "./settings.js?v=4dfdb63";
+import * as recs from "./recs.js?v=4dfdb63";
+import * as addBook from "./add-book.js?v=4dfdb63";
+import * as invite from "./invite.js?v=4dfdb63";
+import { createRecsRefresher } from "./recs-refresh.js?v=4dfdb63";
+import { SHELVES_CHANGED } from "./events.js?v=4dfdb63";
 
-/** @type {import('./data.js?v=fe4ca15').LibraryState | null} */
+/** @type {import('./data.js?v=4dfdb63').LibraryState | null} */
 let libraryState = null;
 
 const toastEl = document.getElementById("toast");
@@ -185,3 +185,8 @@ async function start() {
 }
 
 void start();
+
+// Installable as an app (Chrome needs a service worker); offline shell fallback.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
+}

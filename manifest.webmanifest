@@ -4,6 +4,8 @@
   "lang": "he",
   "dir": "rtl",
   "display": "standalone",
+  "id": "./",
+  "scope": "./",
   "start_url": "./#library",
   "theme_color": "#33261a",
   "background_color": "#ffffff",
