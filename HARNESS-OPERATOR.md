@@ -4,7 +4,7 @@ For whoever drives `harness.py` (usually Claude). Read before starting, resuming
 
 ## 1. Golden rules
 
-1. **The integration checkout stays clean and still while a sprint is in progress.** No edits, no untracked files, no commits on the integration branch between creating a sprint's worktrees and its last stage barrier. Make harness, doc or config changes in a separate `git worktree` on its own branch and fast-forward them in only when no `harness.py` process is running and no stage barrier is pending.
+1. **The integration checkout stays clean, and changes to it happen only while no `harness.py` process runs.** No untracked files ever. Commit (brief fixes, harness fixes) only when the harness is idle, for example after it stopped on a blocked task. Since the base-ref fix, existing worktrees are diffed against their own base, so such commits no longer show up as task changes. A task worktree keeps its old copy of `tasks/` and docs: to give a kept worktree a changed brief, fast-forward it (`git -C <worktree> merge --ff-only build`) and set that task's `base_ref` in `.harness/state.json` to the new head.
 2. **Logs go outside the repo.** Redirect `run`/`resume` output to the scratchpad, never to `.harness/` or anywhere tracked. An untracked log made the first S0 run refuse to start.
 3. **Never pay for the same diagnosis twice.** When a task fails, read the evidence (section 4) before any retry. A retry without a changed input repeats the failure.
 4. **Operator mistakes look like agent failures.** A scope or protected-path violation on a file the task never touches (for example `harness.yaml`) is almost always caused by the operator, not the agent. Check what you changed first.
