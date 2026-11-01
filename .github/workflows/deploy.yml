@@ -5,7 +5,7 @@
 #
 # Repository secrets (Settings > Secrets and variables > Actions):
 #   SUPABASE_ACCESS_TOKEN  personal token from supabase.com/dashboard/account/tokens
-#   SUPABASE_DB_PASSWORD   the cloud database password
+#   SUPABASE_DB_PASSWORD   optional; the CLI connects with the token alone
 # HARDCOVER_API_KEY is already stored in Supabase itself and is not needed here.
 name: Deploy
 
