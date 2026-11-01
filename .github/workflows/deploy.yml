@@ -1,3 +1,4 @@
+# BookNook deploy pipeline.
 # Every push to master: run the tests, update Supabase (database + functions),
 # then publish public/ to GitHub Pages. Supabase goes first so the new site never
 # calls a database function or endpoint that is not live yet.
