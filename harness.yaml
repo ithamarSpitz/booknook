@@ -131,11 +131,6 @@ doctor:
   minimum_versions:
     node: "22.0.0"
 
-# Code map (Graphify): built only for tasks with `code_map: true`, rebuilt only when the base commit changes.
-code_map:
-  enabled: true
-  default_for_tasks: false
-
 # The reviewer decides itself whether a change affects the UI; if so it starts the app and tries it with Playwright.
 ui_review:
   enabled: true
