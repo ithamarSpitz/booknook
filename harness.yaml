@@ -70,8 +70,6 @@ paths:
     - docs/architecture/**
     - design/**
     - prototype/**
-    - harness/**
-    - harness.py
     - harness.yaml
     - tasks/**
     - docs/contract.md

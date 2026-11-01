@@ -1,6 +1,6 @@
 # Agent Operating Contract
 
-This repository is executed by a task-oriented coding harness (see `README-HARNESS.md`). This file is a router plus global rules.
+This repository is executed by a task-oriented coding harness (the `harness` command from the agent-harness repo). This file is a router plus global rules.
 
 ## Source-of-truth order
 

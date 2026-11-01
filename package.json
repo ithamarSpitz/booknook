@@ -11,7 +11,7 @@
     "test:web": "node --test \"tests/web/**/*.test.mjs\"",
     "test:db": "supabase db reset && supabase test db",
     "check:contract": "node scripts/check-contract.mjs",
-    "check:harness": "python harness.py validate",
+    "check:harness": "harness validate",
     "verify:integration": "node scripts/verify-integration.mjs"
   },
   "devDependencies": {

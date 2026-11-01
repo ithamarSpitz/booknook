@@ -35,7 +35,7 @@ tests/web/                 node --test for pure web modules
 scripts/                   verification and local serve helpers
 docs/contract.md           interface contract between lanes
 tasks/                     harness task briefs
-harness.py                 agent orchestrator (see README-HARNESS.md)
+harness.yaml               settings for the agent harness (installed separately)
 ```
 
 ## Local setup
@@ -95,13 +95,13 @@ Automated tests do not call Simania, Hardcover, Wikidata or NLI; only the integr
 
 ## Harness workflow
 
-Development tasks are executed by `harness.py` from task briefs under `tasks/`. Typical commands:
+Development tasks are executed by the agent harness (the `harness` command, from the private `agent-harness` repo) from task briefs under `tasks/`. Typical commands:
 
 ```bash
-python harness.py status
-python harness.py run <SPRINT>
-python harness.py resume <SPRINT>
-python harness.py failure <SPRINT>
+harness status
+harness run <SPRINT>
+harness resume <SPRINT>
+harness failure <SPRINT>
 ```
 
-Full orchestration details, safety rules and CLI reference: **`README-HARNESS.md`**.
+Full orchestration details, safety rules and CLI reference: `README.md` and `HARNESS-OPERATOR.md` in the agent-harness repo.
