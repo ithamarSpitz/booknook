@@ -1,0 +1,87 @@
+# Every push to master: run the tests, update Supabase (database + functions),
+# then publish public/ to GitHub Pages. Supabase goes first so the new site never
+# calls a database function or endpoint that is not live yet.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   SUPABASE_ACCESS_TOKEN  personal token from supabase.com/dashboard/account/tokens
+#   SUPABASE_DB_PASSWORD   the cloud database password
+# HARDCOVER_API_KEY is already stored in Supabase itself and is not needed here.
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  SUPABASE_PROJECT_REF: zheosjpootcwvuazwjzh
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check:contract
+      - run: npm run test:web
+      - run: npm run check:functions
+      - run: npm run test:functions
+
+  test-db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx supabase db start
+      - run: npx supabase test db
+
+  supabase:
+    needs: [test, test-db]
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
+      - run: npx supabase db push --linked --yes
+      # Deploys every function under supabase/functions; --use-api bundles on Supabase's side (no Docker).
+      - run: npx supabase functions deploy --project-ref "$SUPABASE_PROJECT_REF" --use-api
+
+  pages:
+    needs: supabase
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: mkdir -p _site && node scripts/build-site.mjs _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
