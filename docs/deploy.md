@@ -2,7 +2,7 @@
 
 BookNook runs as static files on **GitHub Pages** and a **Supabase** cloud project (Postgres, Auth, Edge Functions). Follow these steps **in order**. The local stack (`supabase/config.toml`) stays pointed at `http://127.0.0.1:4175`; production Auth (public sign-up off, Site URL) is set in the **cloud dashboard**.
 
-**Day to day you do not run anything below.** Every push to `master` on GitHub runs `.github/workflows/release.yml`: tests, then `supabase db push` and every Edge Function, then the site on Pages. It needs one repository secret, `SUPABASE_ACCESS_TOKEN` (Settings → Secrets and variables → Actions); `SUPABASE_DB_PASSWORD` is optional. The steps below are for a fresh project or a manual deploy. Dashboard-only settings (Auth URLs, sign-up off, email templates, `HARDCOVER_API_KEY`) are not part of the push.
+**Day to day you do not run anything below.** Every push to `main` on GitHub runs `.github/workflows/release.yml`: tests, then `supabase db push` and every Edge Function, then the site on Pages. It needs one repository secret, `SUPABASE_ACCESS_TOKEN` (Settings → Secrets and variables → Actions); `SUPABASE_DB_PASSWORD` is optional. The steps below are for a fresh project or a manual deploy. Dashboard-only settings (Auth URLs, sign-up off, email templates, `HARDCOVER_API_KEY`) are not part of the push.
 
 On the free plan, a project **pauses after about one week without activity**. Open the dashboard or use the app to wake it; paused projects do not serve API or functions until resumed.
 
