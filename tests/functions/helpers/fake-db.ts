@@ -7,7 +7,8 @@ type Filter =
   | [string, unknown]
   | ["__in__", string, unknown[]]
   | ["__neq__", string, unknown]
-  | ["__notnull__", string];
+  | ["__notnull__", string]
+  | ["__contains__", string, unknown[]];
 
 class Query implements PromiseLike<Result> {
   private action: "select" | "upsert" | "update" | "insert" | "delete" =
@@ -59,6 +60,11 @@ class Query implements PromiseLike<Result> {
 
   in(column: string, values: unknown[]): this {
     this.filters.push(["__in__", column, values]);
+    return this;
+  }
+
+  contains(column: string, values: unknown[]): this {
+    this.filters.push(["__contains__", column, values]);
     return this;
   }
 
@@ -128,6 +134,13 @@ class Query implements PromiseLike<Result> {
       if (filter[0] === "__notnull__") {
         const column = filter[1] as string;
         return row[column] !== null && row[column] !== undefined;
+      }
+      if (filter[0] === "__contains__") {
+        const column = filter[1] as string;
+        const values = filter[2] as unknown[];
+        const field = row[column];
+        if (!Array.isArray(field)) return false;
+        return values.every((value) => field.includes(value));
       }
       const [column, value] = filter;
       return row[column] === value;

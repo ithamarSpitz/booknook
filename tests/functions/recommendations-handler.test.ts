@@ -10,7 +10,9 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
-  #filters: Record<string, unknown> = {};
+  #filters: Filter[] = [];
+  #order: { column: string; ascending: boolean } | null = null;
+  #limit: number | null = null;
   constructor(
     private db: FakeDb,
     private table: string,
@@ -21,20 +23,89 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
     return this;
   }
   eq(name: string, value: unknown): this {
-    this.#filters[name] = value;
+    this.#filters.push([name, value]);
     return this;
   }
-  in(): this {
+  in(name: string, values: unknown[]): this {
+    this.#filters.push(["__in__", name, values]);
     return this;
   }
-  order(): this {
+  contains(name: string, values: unknown[]): this {
+    this.#filters.push(["__contains__", name, values]);
     return this;
   }
-  limit(): this {
+  not(name: string, operator: string, value: unknown): this {
+    if (operator === "is" && value === null) {
+      this.#filters.push(["__notnull__", name]);
+    }
     return this;
+  }
+  order(name: string, options: { ascending?: boolean } = {}): this {
+    this.#order = { column: name, ascending: options.ascending ?? true };
+    return this;
+  }
+  limit(count: number): this {
+    this.#limit = count;
+    return this;
+  }
+  #matches(row: Record<string, unknown>): boolean {
+    return this.#filters.every((filter) => {
+      if (filter[0] === "__in__") {
+        const column = filter[1] as string;
+        const values = filter[2] as unknown[];
+        return values.includes(row[column]);
+      }
+      if (filter[0] === "__contains__") {
+        const column = filter[1] as string;
+        const values = filter[2] as unknown[];
+        const field = row[column];
+        if (!Array.isArray(field)) return false;
+        return values.every((value) => field.includes(value));
+      }
+      if (filter[0] === "__notnull__") {
+        const column = filter[1] as string;
+        return row[column] !== null && row[column] !== undefined;
+      }
+      const [column, value] = filter;
+      return row[column] === value;
+    });
+  }
+  #selectRows(): unknown[] {
+    let rows: Record<string, unknown>[] = [];
+    if (this.table === "shelf_books") rows = this.db.library as Record<string, unknown>[];
+    if (this.table === "recommendations") {
+      const dismissedOnly = this.#filters.some((filter) =>
+        filter[0] === "dismissed" && filter[1] === true
+      );
+      return dismissedOnly
+        ? this.db.dismissed.map((work_id) => ({ work_id }))
+        : [];
+    }
+    if (this.table === "works") {
+      rows = this.db.works as unknown as Record<string, unknown>[];
+    }
+    if (this.table === "editions") {
+      rows = this.db.editions as unknown as Record<string, unknown>[];
+    }
+    let matched = rows.filter((row) => this.#matches(row));
+    if (this.#order) {
+      const { column, ascending } = this.#order;
+      matched = [...matched].sort((left, right) => {
+        const a = left[column];
+        const b = right[column];
+        if (a === b) return 0;
+        if (a === null || a === undefined) return 1;
+        if (b === null || b === undefined) return -1;
+        const cmp = a < b ? -1 : 1;
+        return ascending ? cmp : -cmp;
+      });
+    }
+    if (this.#limit !== null) matched = matched.slice(0, this.#limit);
+    return matched;
   }
   maybeSingle(): Promise<{ data: unknown; error: null }> {
-    return Promise.resolve({ data: null, error: null });
+    const rows = this.#selectRows();
+    return Promise.resolve({ data: rows[0] ?? null, error: null });
   }
   single(): Promise<{ data: unknown; error: null }> {
     return Promise.resolve({ data: this.payload, error: null });
@@ -53,14 +124,10 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
       | null,
   ): PromiseLike<TResult1 | TResult2> {
     let data: unknown = [];
-    if (this.table === "shelf_books") data = this.db.library;
-    if (this.table === "recommendations") {
-      data = this.#filters.dismissed
-        ? this.db.dismissed.map((work_id) => ({ work_id }))
-        : [];
-    }
-    if (this.table === "works") {
-      data = this.operation === "upsert" ? this.payload : this.db.works;
+    if (this.table === "works" && this.operation === "upsert") {
+      data = this.payload;
+    } else if (this.operation === "select") {
+      data = this.#selectRows();
     }
     return Promise.resolve({ data, error: null }).then(
       onfulfilled ?? undefined,
@@ -68,12 +135,19 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   }
 }
 
+type Filter =
+  | [string, unknown]
+  | ["__in__", string, unknown[]]
+  | ["__contains__", string, unknown[]]
+  | ["__notnull__", string];
+
 class FakeDb {
   replacement: Record<string, unknown>[] | null = null;
   constructor(
     public library: unknown[],
     public works: WorkRow[],
     public dismissed: string[] = [],
+    public editions: EditionRow[] = [],
   ) {}
   from(table: string): FakeQuery {
     return new FakeQuery(this, table);
@@ -144,6 +218,7 @@ function shelfBook(
     ...options.edition,
   };
   return {
+    user_id: "user",
     simania_id: simaniaId,
     position: 0,
     added_at: options.added_at ?? "2026-01-01T00:00:00Z",
@@ -387,4 +462,166 @@ Deno.test("self-heal skips when every shelved edition is linked", async () => {
   });
   assert(response.status === 200, "expected 200");
   assert(resolveCalls.length === 0, "resolver should not run without unlinked editions");
+});
+
+Deno.test("English-only card uses catalog Hebrew author without Wikidata", async () => {
+  const seed = work("seed", 1, [100]);
+  const candidate = work("candidate", 100);
+  candidate.original_authors = ["Freida McFadden"];
+  const catalogWork = work("catalog", 9999);
+  catalogWork.original_authors = ["Freida McFadden"];
+  const db = new FakeDb(
+    [shelfBook(11, "read", seed, { rating: 5 })],
+    [seed, candidate, catalogWork],
+    [],
+    [{
+      simania_id: 555,
+      work_id: "catalog",
+      title: "משרתת",
+      author: "פרידה מקפדן",
+      resolve_status: "wikidata",
+      resolved_at: "2026-10-01T00:00:00Z",
+      translator: null,
+      publisher: null,
+      series: null,
+      category: null,
+      year: null,
+      pages: null,
+      description: null,
+      cover_url: null,
+      simania_rating: null,
+      simania_rating_count: null,
+      details_at: null,
+    }],
+  );
+  let wikidataCalled = false;
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => {
+      wikidataCalled = true;
+      return "לא";
+    },
+  });
+  const payload = await response.json();
+  assert(response.status === 200, "expected 200");
+  assert(payload.recommendations.length === 1, "expected one card");
+  assert(
+    payload.recommendations[0].hebrew_author === "פרידה מקפדן",
+    "catalog Hebrew author should be returned",
+  );
+  assert(!wikidataCalled, "Wikidata author bridge should not run");
+});
+
+Deno.test("English-only card uses Wikidata Hebrew author when catalog misses", async () => {
+  const seed = work("seed", 1, [100]);
+  const candidate = work("candidate", 100);
+  candidate.original_authors = ["Freida McFadden"];
+  const db = new FakeDb(
+    [shelfBook(11, "read", seed, { rating: 5 })],
+    [seed, candidate],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => "פרדריק בקמן",
+  });
+  const payload = await response.json();
+  assert(
+    payload.recommendations[0].hebrew_author === "פרדריק בקמן",
+    "Wikidata author should be used",
+  );
+});
+
+Deno.test("English-only card leaves hebrew_author null when Wikidata misses", async () => {
+  const seed = work("seed", 1, [100]);
+  const candidate = work("candidate", 100);
+  candidate.original_authors = ["Freida McFadden"];
+  const db = new FakeDb(
+    [shelfBook(11, "read", seed, { rating: 5 })],
+    [seed, candidate],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => null,
+  });
+  const payload = await response.json();
+  assert(payload.recommendations[0].hebrew_author === null, "expected null author");
+});
+
+Deno.test("localized recommendation card has null hebrew_author", async () => {
+  const seed = work("seed", 1, [100]);
+  const candidate = work("candidate", 100);
+  candidate.original_authors = ["Freida McFadden"];
+  const linkedEdition: EditionRow = {
+    simania_id: 777,
+    work_id: "candidate",
+    title: "משרתת",
+    author: "פרידה מקפדן",
+    resolve_status: "wikidata",
+    resolved_at: "2026-10-01T00:00:00Z",
+    translator: null,
+    publisher: null,
+    series: null,
+    category: null,
+    year: null,
+    pages: null,
+    description: null,
+    cover_url: "https://cover",
+    simania_rating: null,
+    simania_rating_count: null,
+    details_at: null,
+  };
+  const db = new FakeDb(
+    [shelfBook(11, "read", seed, { rating: 5 })],
+    [seed, candidate],
+    [],
+    [linkedEdition],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    wikidataHebrewAuthor: async () => "לא",
+  });
+  const payload = await response.json();
+  assert(payload.recommendations[0].simania_id === 777, "expected localized card");
+  assert(
+    payload.recommendations[0].hebrew_author === null,
+    "localized card should not carry hebrew_author",
+  );
+});
+
+Deno.test("same English author on two cards triggers one Hebrew author lookup", async () => {
+  const seed = work("seed", 1, [100, 101]);
+  const first = work("first", 100);
+  first.original_authors = ["Freida McFadden"];
+  const second = work("second", 101);
+  second.original_authors = ["Freida McFadden"];
+  const db = new FakeDb(
+    [shelfBook(11, "read", seed, { rating: 5 })],
+    [seed, first, second],
+  );
+  let lookupCount = 0;
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => {
+      lookupCount += 1;
+      return "פרידה מקפדן";
+    },
+  });
+  const payload = await response.json();
+  assert(response.status === 200, "expected 200");
+  assert(payload.recommendations.length === 2, "expected two cards");
+  assert(lookupCount === 1, "author lookup should be cached per request");
 });
