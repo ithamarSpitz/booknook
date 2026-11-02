@@ -14,7 +14,7 @@ allowed_paths:
 context:
   - contract
   - architecture.functions
-  - architecture.data-model
+  - architecture.data_model
   - architecture.testing
 environment: null
 verification:

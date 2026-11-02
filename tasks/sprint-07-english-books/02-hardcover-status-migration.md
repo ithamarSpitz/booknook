@@ -11,7 +11,7 @@ allowed_paths:
   - supabase/tests/05_english_editions.sql
 context:
   - contract
-  - architecture.data-model
+  - architecture.data_model
   - architecture.testing
 environment: null
 verification:
