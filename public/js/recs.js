@@ -1,6 +1,12 @@
 import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
 import { promptRating, shouldPromptRating } from "./my-rating.js";
-import { fetchSimaniaPayload, matchHebrewBook, searchByAuthor, simaniaIdOf } from "./simania.js";
+import {
+  fetchSimaniaPayload,
+  matchHebrewBook,
+  searchByAuthor,
+  similarity,
+  simaniaIdOf,
+} from "./simania.js";
 import { notifyShelvesChanged } from "./events.js";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
@@ -187,6 +193,49 @@ function linkSourceFromAuthorMatch(resolveStatus) {
 }
 
 /**
+ * @param {{
+ *   work_id: string,
+ *   hebrew_author?: string|null,
+ *   hebrew_hint?: { source?: string }|null,
+ * }} rec
+ * @param {{ id?: number|string, bookId?: number|string, title: string, author?: string }} book
+ * @param {{
+ *   callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>,
+ *   similarity?: typeof similarity,
+ * }} deps
+ * @returns {Promise<{ simania_id: number, resolve_status: "wikidata" | "nli" } | null>}
+ */
+export async function verifyTitleMatch(rec, book, deps) {
+  const sim = deps.similarity ?? similarity;
+  const simaniaId = simaniaIdOf(book);
+  if (simaniaId == null) return null;
+
+  const hebrewAuthor = rec.hebrew_author;
+  if (hebrewAuthor && sim(hebrewAuthor, book.author ?? "") >= 0.6) {
+    const resolve_status = rec.hebrew_hint?.source === "nli" ? "nli" : "wikidata";
+    return { simania_id: simaniaId, resolve_status };
+  }
+
+  try {
+    const matched = await deps.callFunction(FUNCTIONS.MATCH_BY_AUTHOR, {
+      work_id: rec.work_id,
+      candidates: [{
+        simania_id: simaniaId,
+        title: book.title,
+        author: book.author ?? null,
+      }],
+    });
+    if (!matched || typeof matched !== "object") return null;
+    const resolvedId = Number(matched.simania_id);
+    const linkSource = linkSourceFromAuthorMatch(String(matched.resolve_status ?? ""));
+    if (!Number.isSafeInteger(resolvedId) || resolvedId <= 0 || !linkSource) return null;
+    return { simania_id: resolvedId, resolve_status: linkSource };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Localizes English-only cards in the browser: the server found a Hebrew title
  * (hebrew_hint) but cannot reach Simania, so match it here and ask link-edition
  * to store and link the edition. A miss or failure leaves the card English-only.
@@ -215,8 +264,13 @@ export async function localizeRecommendations(items, deps) {
     let source = null;
     if (hint?.title) {
       const book = await match(hint.title, hint.author ?? "");
-      simaniaId = simaniaIdOf(book);
-      if (simaniaId != null) source = hint.source;
+      if (book && deps.isCurrent()) {
+        const verified = await verifyTitleMatch(rec, book, deps);
+        if (verified) {
+          simaniaId = verified.simania_id;
+          source = verified.resolve_status;
+        }
+      }
     }
     if (simaniaId == null && rec.hebrew_author) {
       const candidates = await searchByAuthorFn(rec.hebrew_author);
