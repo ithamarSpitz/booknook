@@ -14,7 +14,7 @@ environment: null
 verification:
   - npm run test:web
   - >-
-    node -e "const t=require('fs').readFileSync('public/css/base.css','utf8');if(t.includes('#3e2a17'))throw new Error('walnut plaque color #3e2a17 must be gone');if(!/\.shelf-head h2\{[^}]*#5a3714/.test(t))throw new Error('shelf name must use #5a3714');if(!/\.shelf-head h2\{[^}]*font-size:19px/.test(t))throw new Error('shelf name must be 19px');if(!/\.shelf-head span\{[^}]*font-size:14px[^}]*font-weight:700|\.shelf-head span\{[^}]*font-weight:700[^}]*font-size:14px/.test(t))throw new Error('count must be 14px bold')"
+    node -e "const t=require('fs').readFileSync('public/css/base.css','utf8');if(t.includes('#3e2a17'))throw new Error('walnut plaque color #3e2a17 must be gone');if(!/\.shelf-head h2\{[^}]*#5a3714/.test(t))throw new Error('shelf name must use #5a3714');if(!/\.shelf-head h2\{[^}]*font-size:19px/.test(t))throw new Error('shelf name must be 19px');if(!/\.shelf-head span\{[^}]*font-size:14px[^}]*font-weight:700|\.shelf-head span\{[^}]*font-weight:700[^}]*font-size:14px/.test(t))throw new Error('count must be 14px bold');if(!/\.shelf-head h2\{font-size:17px;font-weight:700\}/.test(t))throw new Error('phone shelf name must be 17px bold');if(!/\.shelf-head span\{font-size:13px;font-weight:700\}/.test(t))throw new Error('phone count must be 13px bold');if(!t.includes('.shelf-head{right:12px;bottom:5px;padding:1px 11px 3px;gap:8px}'))throw new Error('phone label position')"
 ---
 
 # Goal
@@ -48,7 +48,39 @@ Change only the v2 override rules for the shelf label, exactly:
 6. Replace the plaque comment with a short comment saying the label is carved into the board like the burger and title. Keep the existing note about the extra bottom padding (Hebrew has no ascenders).
 7. Remove the color `#3e2a17` from the file (it is only used by the plaque).
 
-The phone media query that sets `.shelf-head{right:12px;bottom:5px}` stays as it is.
+Phones: the second `@media(max-width:560px)` block (the one with `.crown h1{font-size:22px...}` and `.board{...height:30px}`) has its own shelf label sizes. Today they are:
+
+```css
+    .shelf-head{right:12px;bottom:8px;padding:1px 11px 4px;gap:8px}
+    .shelf-head h2{font-size:15px}
+    .shelf-head span{font-size:11px}
+```
+
+Keep these three rules (do not delete them) and change them to exactly:
+
+```css
+    .shelf-head{right:12px;bottom:5px;padding:1px 11px 3px;gap:8px}
+    .shelf-head h2{font-size:17px;font-weight:700}
+    .shelf-head span{font-size:13px;font-weight:700}
+```
+
+so on phones the label is a little bigger, bold, and still inside the 30px board. The first `@media(max-width:560px)` block (`.shelf-head{right:12px;bottom:5px}`) stays unchanged.
+
+# Target result (desktop, v2 overrides)
+
+A previous attempt produced this, which is correct for desktop. Use it as the target:
+
+```css
+  /* label carved into the board like the burger and title.
+     Hebrew has no ascenders, so the extra padding goes below the text to center it optically. */
+  .shelf-head{right:22px;bottom:5px;padding:1px 14px 4px;gap:10px;background:transparent;border-radius:0;box-shadow:none}
+  .shelf-head h2{font-size:19px;font-weight:700;color:#5a3714;text-shadow:0 1px 0 rgba(255,255,255,.55)}
+  .shelf-head h2[contenteditable=true]{outline:none;border-bottom:1.5px dashed rgba(90,55,20,.55);caret-color:#5a3714}
+  .edit{display:grid;place-items:center;width:24px;height:24px;margin:0 -6px;padding:0;border:0;background:none;color:#5a3714;cursor:pointer;opacity:0;transition:opacity .15s}
+  .shelf-head span{font-size:14px;font-weight:700;color:#5a3714;text-shadow:0 1px 0 rgba(255,255,255,.55)}
+```
+
+Do not open the user's own browser. For a visual check use only a headless browser, or leave it to the reviewer.
 
 # Out of scope
 
@@ -56,7 +88,7 @@ Any HTML or JS change. Any other element (covers, board, crown, burger, menu, ca
 
 # Acceptance criteria
 
-1. Shelf names on every shelf render bold 19px, dark brown `#5a3714`, with the light carved shadow, directly on the wood with no plaque behind them, on desktop and phone widths.
-2. The book count is bold 14px in the same color and clearly readable; the rename pencil matches (colors above), and renaming a custom shelf still works and shows the dashed underline.
-3. The labels still sit inside the board (34px tall) and do not overflow above it or cover book covers, on desktop and at phone width (the phone media query keeps `right:12px;bottom:5px`).
+1. Shelf names on every shelf render bold 19px, dark brown `#5a3714`, with the light carved shadow, directly on the wood with no plaque behind them, on desktop; on phones bold 17px.
+2. The book count is bold 14px (13px on phones) in the same color and clearly readable; the rename pencil matches (colors above), and renaming a custom shelf still works and shows the dashed underline.
+3. The labels still sit inside the board (34px tall) and do not overflow above it or cover book covers, on desktop (34px board) and at phone width (30px board).
 4. `npm run test:web` passes.
