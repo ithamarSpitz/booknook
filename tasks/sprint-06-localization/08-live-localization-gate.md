@@ -1,13 +1,12 @@
 ---
 id: S6-T8
-stage: 5
+stage: 6
 model_class: worker
 timeout_minutes: 40
 review: true
 allow_protected: false
 depends_on:
-  - S6-T5
-  - S6-T7
+  - S6-T9
 allowed_paths:
   - scripts/verify-localization.ts
   - scripts/verify-resolution.ts
@@ -54,3 +53,7 @@ Live calls are allowed only in these gate scripts. Do not change application cod
 # Acceptance criteria
 
 1. Both gates pass all cases against the merged code of this sprint.
+
+# Previous attempt (start here)
+
+A previous attempt wrote nearly complete work; it was blocked only by a Wikidata error-handling bug and a FakeDb id bug, both fixed by S6-T9. Start from `tasks/sprint-06-localization/draft/verify-localization.ts.txt` (copy to `scripts/verify-localization.ts`) and apply `tasks/sprint-06-localization/draft/T8-changes.diff.txt` (the `verify-resolution.ts` cases and the `package.json` script). With S6-T9's unique FakeDb ids, remove any workaround for the shared `work-1` id. Then run the verification commands. Do not edit the draft files.

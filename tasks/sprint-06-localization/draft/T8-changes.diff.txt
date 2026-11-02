@@ -1,0 +1,77 @@
+diff --git a/package.json b/package.json
+index f36eccc..2b00444 100644
+--- a/package.json
++++ b/package.json
+@@ -13,7 +13,8 @@
+     "check:contract": "node scripts/check-contract.mjs",
+     "check:harness": "harness validate",
+     "verify:integration": "node scripts/verify-integration.mjs",
+-    "verify:resolution": "deno run --allow-net --allow-env --allow-read scripts/verify-resolution.ts"
++    "verify:resolution": "deno run --allow-net --allow-env --allow-read scripts/verify-resolution.ts",
++    "verify:localization": "deno run --allow-net --allow-env --allow-read scripts/verify-localization.ts"
+   },
+   "devDependencies": {
+     "deno": "^2.9.6",
+diff --git a/scripts/verify-resolution.ts b/scripts/verify-resolution.ts
+index b3594f2..17254c6 100644
+--- a/scripts/verify-resolution.ts
++++ b/scripts/verify-resolution.ts
+@@ -211,6 +211,58 @@ const CASES: CaseSpec[] = [
+       return { ok: true, detail: "" };
+     },
+   },
++  {
++    simania_id: 34027,
++    title: "נערה בנוף",
++    author: "ג'ונתן לת'ם",
++    buildDb: () => ({
++      editions: [edition({
++        simania_id: 34027,
++        title: "נערה בנוף",
++        author: "ג'ונתן לת'ם",
++      })],
++    }),
++    check: (row, work) => {
++      if (row.resolve_status === "not_found" && row.work_id === null) {
++        return { ok: true, detail: "" };
++      }
++      const hardcoverId = work?.hardcover_id;
++      if (hardcoverId === 473787) return { ok: true, detail: "" };
++      if (hardcoverId === 483014) {
++        return { ok: false, detail: "wrong book 483014" };
++      }
++      return {
++        ok: false,
++        detail: `expected not_found or 473787, got ${row.resolve_status} ${hardcoverId ?? "null"}`,
++      };
++    },
++  },
++  {
++    simania_id: 1013521,
++    title: "כיבוי אורות",
++    author: "דיוויד קופ",
++    buildDb: () => ({
++      editions: [edition({
++        simania_id: 1013521,
++        title: "כיבוי אורות",
++        author: "דיוויד קופ",
++      })],
++    }),
++    check: (row, work) => {
++      if (row.resolve_status === "not_found" && row.work_id === null) {
++        return { ok: true, detail: "" };
++      }
++      const hardcoverId = work?.hardcover_id;
++      if (hardcoverId === 559469) return { ok: true, detail: "" };
++      if (hardcoverId === 372879) {
++        return { ok: false, detail: "wrong book 372879" };
++      }
++      return {
++        ok: false,
++        detail: `expected not_found or 559469, got ${row.resolve_status} ${hardcoverId ?? "null"}`,
++      };
++    },
++  },
+ ];
+ 
+ function workForEdition(
