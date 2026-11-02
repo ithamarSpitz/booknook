@@ -14,7 +14,7 @@ environment: null
 verification:
   - npm run test:web
   - >-
-    node -e "const t=require('fs').readFileSync('public/css/base.css','utf8');if(t.includes('#3e2a17'))throw new Error('walnut plaque color #3e2a17 must be gone');if(!/\.shelf-head h2\{[^}]*#5a3714/.test(t))throw new Error('shelf name must use #5a3714')"
+    node -e "const t=require('fs').readFileSync('public/css/base.css','utf8');if(t.includes('#3e2a17'))throw new Error('walnut plaque color #3e2a17 must be gone');if(!/\.shelf-head h2\{[^}]*#5a3714/.test(t))throw new Error('shelf name must use #5a3714');if(!/\.shelf-head h2\{[^}]*font-size:19px/.test(t))throw new Error('shelf name must be 19px');if(!/\.shelf-head span\{[^}]*font-size:14px[^}]*font-weight:700|\.shelf-head span\{[^}]*font-weight:700[^}]*font-size:14px/.test(t))throw new Error('count must be 14px bold')"
 ---
 
 # Goal
@@ -40,9 +40,9 @@ The look to copy, already in the same file:
 
 Change only the v2 override rules for the shelf label, exactly:
 
-1. `.shelf-head`: no background (`transparent`), no `box-shadow`, no border radius. Keep its position (`right`, `bottom`), `gap` and padding, so it stays inside the board's height and the covers stay fully visible.
-2. `.shelf-head h2`: `font-weight:700`, `color:#5a3714`, `text-shadow:0 1px 0 rgba(255,255,255,.55)`. Keep `font-size:17px` and the Assistant font.
-3. `.shelf-head span` (book count): `color:#6b4a2a`, `font-weight:600`, same `text-shadow`. Keep `font-size:12px`.
+1. `.shelf-head`: no background (`transparent`), no `box-shadow`, no border radius. Keep `right:22px` and `gap:10px`; set `bottom:5px` and `padding:1px 14px 4px`, so the larger text below still fits inside the 34px board and the covers stay fully visible.
+2. `.shelf-head h2`: `font-size:19px`, `font-weight:700`, `color:#5a3714`, `text-shadow:0 1px 0 rgba(255,255,255,.55)`. Keep the Assistant font.
+3. `.shelf-head span` (book count, e.g. "ספר אחד"): `font-size:14px`, `font-weight:700`, `color:#5a3714`, same `text-shadow`. It must be as easy to read as the name: bold, same color, a little smaller.
 4. `.edit` (rename pencil): `color:#5a3714`. Keep its show-on-hover/tap behavior.
 5. `.shelf-head h2[contenteditable=true]` (renaming): `border-bottom:1.5px dashed rgba(90,55,20,.55)`, `caret-color:#5a3714`.
 6. Replace the plaque comment with a short comment saying the label is carved into the board like the burger and title. Keep the existing note about the extra bottom padding (Hebrew has no ascenders).
@@ -56,7 +56,7 @@ Any HTML or JS change. Any other element (covers, board, crown, burger, menu, ca
 
 # Acceptance criteria
 
-1. Shelf names on every shelf render bold, dark brown `#5a3714`, with the light carved shadow, directly on the wood with no plaque behind them, on desktop and phone widths.
-2. The book count and rename pencil match (colors above), and renaming a custom shelf still works and shows the dashed underline.
-3. The labels still sit inside the board and do not cover book covers.
+1. Shelf names on every shelf render bold 19px, dark brown `#5a3714`, with the light carved shadow, directly on the wood with no plaque behind them, on desktop and phone widths.
+2. The book count is bold 14px in the same color and clearly readable; the rename pencil matches (colors above), and renaming a custom shelf still works and shows the dashed underline.
+3. The labels still sit inside the board (34px tall) and do not overflow above it or cover book covers, on desktop and at phone width (the phone media query keeps `right:12px;bottom:5px`).
 4. `npm run test:web` passes.
