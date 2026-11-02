@@ -38,3 +38,7 @@ New Edge Function `search-english`: the browser's search for English books on Ha
 # Acceptance criteria
 
 1. The behavior above; all tests pass.
+
+# Previous attempt (start here)
+
+A previous attempt wrote this task's work and stopped only because the agent quota ran out. Apply `tasks/sprint-07-english-books/draft/S7-T4-changes.diff.txt` (for example `git apply`), review it against this brief, then fix the reviewer's finding: a valid JSON body that is not an object (for example `null`, an array or a string) must return `400`, not throw (`input.query` on `null` currently gives a 500). Add a test that posts a raw `null` body (extend the test's request helper to accept any JSON value). Then run the verification commands. Do not edit the draft files.

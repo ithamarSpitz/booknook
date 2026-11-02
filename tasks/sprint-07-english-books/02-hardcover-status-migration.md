@@ -37,6 +37,3 @@ The pgTAP test runs in CI (`npm run test:db` needs Docker, so it is not in this 
 
 1. The migration and test above; nothing else changed.
 
-# Previous attempt (start here)
-
-A previous attempt wrote this task's work and stopped only because the agent quota ran out. Apply `tasks/sprint-07-english-books/draft/S7-T2-changes.diff.txt` (for example `git apply`), review it against this brief, finish anything missing, then run the verification commands. Do not edit the draft files.

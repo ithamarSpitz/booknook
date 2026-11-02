@@ -1,0 +1,344 @@
+diff --git a/supabase/functions/add-book/index.ts b/supabase/functions/add-book/index.ts
+index 0e23c04..8b300da 100644
+--- a/supabase/functions/add-book/index.ts
++++ b/supabase/functions/add-book/index.ts
+@@ -7,6 +7,7 @@ import {
+   suppliedSimania,
+ } from "../_shared/catalog.ts";
+ import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
++import { ensureEnglishEdition } from "../_shared/english.ts";
+ import type { AddBookRequest, AddBookResponse } from "../_shared/types.ts";
+ import {
+   body,
+@@ -21,6 +22,7 @@ type FunctionDeps = {
+   serviceClient: () => CatalogDb;
+   userClient: (req: Request) => CatalogDb;
+   ensureEdition: typeof ensureEdition;
++  ensureEnglishEdition: typeof ensureEnglishEdition;
+   ensureResolved: typeof ensureResolved;
+ };
+ 
+@@ -29,6 +31,7 @@ const defaults: FunctionDeps = {
+   serviceClient,
+   userClient,
+   ensureEdition,
++  ensureEnglishEdition,
+   ensureResolved,
+ };
+ 
+@@ -49,14 +52,21 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
+     try {
+       const userId = await deps.requireUser(req);
+       const input = await body<Partial<AddBookRequest>>(req);
++      const hasSimaniaId = input.simania_id !== undefined;
++      const hasHardcoverId = input.hardcover_id !== undefined;
+       if (
+-        !Number.isSafeInteger(input.simania_id) ||
+-        Number(input.simania_id) <= 0 ||
++        hasSimaniaId === hasHardcoverId ||
++        (hasSimaniaId &&
++          (!Number.isSafeInteger(input.simania_id) ||
++            Number(input.simania_id) <= 0)) ||
++        (hasHardcoverId &&
++          (!Number.isSafeInteger(input.hardcover_id) ||
++            Number(input.hardcover_id) <= 0)) ||
+         typeof input.shelf_id !== "string" || !input.shelf_id.trim()
+       ) {
+         throw new HttpError(
+           400,
+-          "A valid Simania ID and shelf ID are required.",
++          "Exactly one valid book ID and a shelf ID are required.",
+         );
+       }
+ 
+@@ -67,18 +77,26 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
+       if (shelfResult.error) throw new Error(shelfResult.error.message);
+       if (!shelfResult.data) throw new HttpError(404, "Shelf not found.");
+ 
+-      let edition = await deps.ensureEdition(
+-        catalogDb,
+-        input.simania_id!,
+-        suppliedProviders(suppliedSimania(input.simania)),
+-      );
+-      try {
+-        edition = await deps.ensureResolved(catalogDb, edition);
+-      } catch (error) {
+-        console.error(
+-          "Book resolution failed; shelving unresolved edition.",
+-          error,
++      let edition;
++      if (hasHardcoverId) {
++        edition = await deps.ensureEnglishEdition(
++          catalogDb,
++          input.hardcover_id!,
+         );
++      } else {
++        edition = await deps.ensureEdition(
++          catalogDb,
++          input.simania_id!,
++          suppliedProviders(suppliedSimania(input.simania)),
++        );
++        try {
++          edition = await deps.ensureResolved(catalogDb, edition);
++        } catch (error) {
++          console.error(
++            "Book resolution failed; shelving unresolved edition.",
++            error,
++          );
++        }
+       }
+ 
+       const insertResult = await callerDb.from("shelf_books").insert({
+diff --git a/supabase/functions/book-details/index.ts b/supabase/functions/book-details/index.ts
+index 2a8cea0..ac6dfc5 100644
+--- a/supabase/functions/book-details/index.ts
++++ b/supabase/functions/book-details/index.ts
+@@ -7,6 +7,7 @@ import {
+   suppliedSimania,
+ } from "../_shared/catalog.ts";
+ import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
++import { ensureEnglishEdition } from "../_shared/english.ts";
+ import type {
+   BookDetailsRequest,
+   BookDetailsResponse,
+@@ -24,6 +25,7 @@ type FunctionDeps = {
+   serviceClient: () => CatalogDb;
+   userClient: (req: Request) => CatalogDb;
+   ensureEdition: typeof ensureEdition;
++  ensureEnglishEdition: typeof ensureEnglishEdition;
+   ensureResolved: typeof ensureResolved;
+ };
+ 
+@@ -32,6 +34,7 @@ const defaults: FunctionDeps = {
+   serviceClient,
+   userClient,
+   ensureEdition,
++  ensureEnglishEdition,
+   ensureResolved,
+ };
+ 
+@@ -44,19 +47,28 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
+       const userId = await deps.requireUser(req);
+       const input = await body<Partial<BookDetailsRequest>>(req);
+       if (
+-        !Number.isSafeInteger(input.simania_id) || Number(input.simania_id) <= 0
++        !Number.isSafeInteger(input.simania_id) ||
++        Number(input.simania_id) === 0
+       ) {
+         throw new HttpError(400, "A valid Simania ID is required.");
+       }
+       const catalogDb = deps.serviceClient();
+-      let edition = await deps.ensureEdition(
+-        catalogDb,
+-        input.simania_id!,
+-        suppliedProviders(suppliedSimania(input.simania)),
+-      );
+-      // Pending after a provider failure in add-book: opening the card retries it.
+-      if (edition.resolve_status === "pending") {
+-        edition = await deps.ensureResolved(catalogDb, edition);
++      let edition;
++      if (input.simania_id! < 0) {
++        edition = await deps.ensureEnglishEdition(
++          catalogDb,
++          -input.simania_id!,
++        );
++      } else {
++        edition = await deps.ensureEdition(
++          catalogDb,
++          input.simania_id!,
++          suppliedProviders(suppliedSimania(input.simania)),
++        );
++        // Pending after a provider failure in add-book: opening the card retries it.
++        if (edition.resolve_status === "pending") {
++          edition = await deps.ensureResolved(catalogDb, edition);
++        }
+       }
+       const response: BookDetailsResponse = {
+         book: await bookCard(deps.userClient(req), userId, edition),
+diff --git a/tests/functions/add-book-handler.test.ts b/tests/functions/add-book-handler.test.ts
+index 9370b63..f580ff2 100644
+--- a/tests/functions/add-book-handler.test.ts
++++ b/tests/functions/add-book-handler.test.ts
+@@ -3,6 +3,17 @@ import { createHandler } from "../../supabase/functions/add-book/index.ts";
+ import type { EditionRow } from "../../supabase/functions/_shared/types.ts";
+ import { edition, FakeDb } from "./helpers/fake-db.ts";
+ 
++function request(body: Record<string, unknown>) {
++  return new Request("http://local/add-book", {
++    method: "POST",
++    headers: {
++      "content-type": "application/json",
++      authorization: "Bearer test",
++    },
++    body: JSON.stringify(body),
++  });
++}
++
+ Deno.test("add-book maps only the named duplicate-book conflict to 409", async () => {
+   const callerDb = new FakeDb({
+     shelves: [{ id: "shelf-1", user_id: "user-1" }],
+@@ -21,14 +32,100 @@ Deno.test("add-book maps only the named duplicate-book conflict to 409", async (
+     ensureResolved: async () => current,
+   });
+   const response = await handler(
+-    new Request("http://local/add-book", {
+-      method: "POST",
+-      headers: {
+-        "content-type": "application/json",
+-        authorization: "Bearer test",
+-      },
+-      body: JSON.stringify({ simania_id: 1234, shelf_id: "shelf-1" }),
+-    }),
++    request({ simania_id: 1234, shelf_id: "shelf-1" }),
++  );
++  assertEquals(response.status, 409);
++  assertEquals(await response.json(), { error: "Book is already on a shelf." });
++});
++
++Deno.test("add-book shelves an English edition without calling Simania dependencies", async () => {
++  const callerDb = new FakeDb({
++    shelves: [{
++      id: "shelf-1",
++      user_id: "user-1",
++      name: "רוצה לקרוא",
++      kind: "want",
++    }],
++  });
++  const english = edition({
++    simania_id: -383752,
++    work_id: "work-1",
++    resolve_status: "hardcover",
++    title: "Spin",
++    author: "Robert Charles Wilson",
++  }) as EditionRow;
++  let englishId: number | null = null;
++  let simaniaCalls = 0;
++  let resolverCalls = 0;
++  const handler = createHandler({
++    requireUser: async () => "user-1",
++    serviceClient: () => new FakeDb(),
++    userClient: () => callerDb,
++    ensureEnglishEdition: async (_db, hardcoverId) => {
++      englishId = hardcoverId;
++      return english;
++    },
++    ensureEdition: async () => {
++      simaniaCalls++;
++      return english;
++    },
++    ensureResolved: async () => {
++      resolverCalls++;
++      return english;
++    },
++  });
++
++  const response = await handler(
++    request({ hardcover_id: 383752, shelf_id: "shelf-1" }),
++  );
++  const payload = await response.json();
++
++  assertEquals(response.status, 200);
++  assertEquals(englishId, 383752);
++  assertEquals(simaniaCalls, 0);
++  assertEquals(resolverCalls, 0);
++  assertEquals(callerDb.tables.shelf_books[0].simania_id, -383752);
++  assertEquals(payload.resolve_status, "hardcover");
++  assertEquals(payload.book.simania_id, -383752);
++});
++
++Deno.test("add-book rejects invalid Simania and Hardcover ID combinations", async () => {
++  const handler = createHandler({ requireUser: async () => "user-1" });
++  const invalidBodies = [
++    { shelf_id: "shelf-1" },
++    { simania_id: 1234, hardcover_id: 383752, shelf_id: "shelf-1" },
++    { simania_id: 1234, hardcover_id: -1, shelf_id: "shelf-1" },
++    { hardcover_id: -1, shelf_id: "shelf-1" },
++  ];
++
++  for (const invalidBody of invalidBodies) {
++    const response = await handler(request(invalidBody));
++    assertEquals(response.status, 400);
++  }
++});
++
++Deno.test("add-book maps an English-edition duplicate to 409", async () => {
++  const callerDb = new FakeDb({
++    shelves: [{ id: "shelf-1", user_id: "user-1" }],
++  });
++  callerDb.nextInsertError = {
++    code: "23505",
++    message: "duplicate",
++    details: "shelf_books_pkey",
++  };
++  const english = edition({
++    simania_id: -383752,
++    resolve_status: "hardcover",
++  }) as EditionRow;
++  const handler = createHandler({
++    requireUser: async () => "user-1",
++    serviceClient: () => new FakeDb(),
++    userClient: () => callerDb,
++    ensureEnglishEdition: async () => english,
++  });
++
++  const response = await handler(
++    request({ hardcover_id: 383752, shelf_id: "shelf-1" }),
+   );
+   assertEquals(response.status, 409);
+   assertEquals(await response.json(), { error: "Book is already on a shelf." });
+diff --git a/tests/functions/book-details-handler.test.ts b/tests/functions/book-details-handler.test.ts
+index 6101945..ccd21a8 100644
+--- a/tests/functions/book-details-handler.test.ts
++++ b/tests/functions/book-details-handler.test.ts
+@@ -68,3 +68,51 @@ Deno.test("book-details does not resolve an edition that already has a result",
+   assertEquals(response.status, 200);
+   assertEquals(resolved, 0);
+ });
++
++Deno.test("book-details serves a negative English edition without Simania or resolution", async () => {
++  const english = edition({
++    simania_id: -383752,
++    work_id: "work-1",
++    resolve_status: "hardcover",
++    title: "Spin",
++  }) as EditionRow;
++  let englishId: number | null = null;
++  let simaniaCalls = 0;
++  let resolverCalls = 0;
++  const handler = createHandler({
++    requireUser: async () => "user-1",
++    serviceClient: () => new FakeDb(),
++    userClient: () => new FakeDb(),
++    ensureEnglishEdition: async (_db, hardcoverId) => {
++      englishId = hardcoverId;
++      return english;
++    },
++    ensureEdition: async () => {
++      simaniaCalls++;
++      return english;
++    },
++    ensureResolved: async () => {
++      resolverCalls++;
++      return english;
++    },
++  });
++
++  const response = await handler(
++    new Request("http://local/book-details", {
++      method: "POST",
++      headers: {
++        "content-type": "application/json",
++        authorization: "Bearer test",
++      },
++      body: JSON.stringify({ simania_id: -383752 }),
++    }),
++  );
++  const payload = await response.json();
++
++  assertEquals(response.status, 200);
++  assertEquals(englishId, 383752);
++  assertEquals(simaniaCalls, 0);
++  assertEquals(resolverCalls, 0);
++  assertEquals(payload.book.simania_id, -383752);
++  assertEquals(payload.book.resolve_status, "hardcover");
++});

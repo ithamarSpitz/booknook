@@ -43,3 +43,7 @@ Contract: `add-book` (English edition paragraph) and `book-details`.
 # Acceptance criteria
 
 1. The behavior above; all tests pass.
+
+# Previous attempt (start here)
+
+A previous attempt wrote part or all of this task's work and stopped only because the agent quota ran out. Apply `tasks/sprint-07-english-books/draft/S7-T5-changes.diff.txt` (for example `git apply`), review it against this brief, finish anything missing, then run the verification commands. Do not edit the draft files.

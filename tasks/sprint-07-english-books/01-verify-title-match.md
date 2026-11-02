@@ -51,6 +51,3 @@ Contract: "Title-match verification" (recommendations section).
 
 1. The behavior above; `test:web` passes; the live gate passes all cases including Aurora → none.
 
-# Previous attempt (start here)
-
-A previous attempt wrote this task's work and stopped only because the agent quota ran out. Apply `tasks/sprint-07-english-books/draft/S7-T1-changes.diff.txt` (for example `git apply`), review it against this brief, finish anything missing, then run the verification commands. Do not edit the draft files. The previous attempt also had to update mocks in `tests/web/simania.test.mjs`; that file is now allowed.
