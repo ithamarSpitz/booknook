@@ -41,6 +41,26 @@ const providers: CatalogProviders = {
 
 const DAY = 86_400_000;
 
+/** Simania display title with trailing edition labels removed for provider matching. */
+export function matchTitle(title: string): string {
+  const trimmed = title.trim();
+  let result = trimmed;
+  for (;;) {
+    let next = result.replace(/\s*\[[^\]]*\]$/, "");
+    if (next !== result) {
+      result = next.trim();
+      continue;
+    }
+    next = result.replace(/\s*\([^)]*\)$/, "");
+    if (next !== result) {
+      result = next.trim();
+      continue;
+    }
+    break;
+  }
+  return result === "" ? trimmed : result;
+}
+
 function stale(
   value: string | null | undefined,
   days: number,
@@ -281,9 +301,10 @@ export async function ensureResolved(
   // A provider error is not evidence that the book is missing. If nothing matched
   // and any request failed, stay pending so the next request retries.
   const failures = { count: 0 };
+  const titleForMatch = matchTitle(edition.title);
 
   try {
-    const bridge = await api.wikidataOriginal(edition.title);
+    const bridge = await api.wikidataOriginal(titleForMatch);
     wikidataTitle = bridge?.title ?? "";
     if (bridge) {
       match = await tryMatch(
@@ -298,7 +319,10 @@ export async function ensureResolved(
 
   if (!match) {
     try {
-      const bridge = await api.nliOriginal(edition.title, edition.author ?? "");
+      const bridge = await api.nliOriginal(
+        titleForMatch,
+        edition.author ?? "",
+      );
       if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
         match = await tryMatch(
           () => api.findHardcoverBook(bridge.title, bridge.author),
@@ -313,7 +337,7 @@ export async function ensureResolved(
 
   if (!match) {
     match = await tryMatch(
-      () => api.findHardcoverBook(edition.title, edition.author ?? ""),
+      () => api.findHardcoverBook(titleForMatch, edition.author ?? ""),
       failures,
     );
     if (match) status = "fuzzy";
