@@ -282,6 +282,44 @@ async function tryMatch(
   }
 }
 
+async function englishAuthorHint(
+  db: CatalogDb,
+  edition: EditionRow,
+): Promise<string | null> {
+  const author = edition.author?.trim();
+  if (!author) return null;
+
+  const editionsResult = await db.from("editions")
+    .select("work_id")
+    .eq("author", author)
+    .not("work_id", "is", null)
+    .neq("simania_id", edition.simania_id)
+    .order("resolved_at", { ascending: false })
+    .limit(5);
+  if (editionsResult.error) return null;
+
+  const linked = editionsResult.data as { work_id: string }[] | null;
+  if (!linked?.length) return null;
+
+  const workIds = [...new Set(linked.map((row) => row.work_id))];
+  const worksResult = await db.from("works")
+    .select("id, original_authors")
+    .in("id", workIds);
+  if (worksResult.error) return null;
+
+  const authorsByWorkId = new Map(
+    (worksResult.data as Pick<WorkRow, "id" | "original_authors">[]).map((
+      work,
+    ) => [work.id, work.original_authors]),
+  );
+
+  for (const row of linked) {
+    const first = authorsByWorkId.get(row.work_id)?.[0]?.trim();
+    if (first) return first;
+  }
+  return null;
+}
+
 export async function ensureResolved(
   db: CatalogDb,
   edition: EditionRow,
@@ -324,8 +362,9 @@ export async function ensureResolved(
         edition.author ?? "",
       );
       if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
+        const hint = await englishAuthorHint(db, edition);
         match = await tryMatch(
-          () => api.findHardcoverBook(bridge.title, bridge.author),
+          () => api.findHardcoverBook(bridge.title, hint ?? bridge.author),
           failures,
         );
         if (match) status = "nli";

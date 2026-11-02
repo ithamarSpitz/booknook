@@ -3,7 +3,11 @@ import type { CatalogDb } from "../../../supabase/functions/_shared/catalog.ts";
 type Row = Record<string, any>;
 type Result = { data: any; error: any };
 
-type Filter = [string, unknown] | ["__in__", string, unknown[]];
+type Filter =
+  | [string, unknown]
+  | ["__in__", string, unknown[]]
+  | ["__neq__", string, unknown]
+  | ["__notnull__", string];
 
 class Query implements PromiseLike<Result> {
   private action: "select" | "upsert" | "update" | "insert" | "delete" =
@@ -12,6 +16,8 @@ class Query implements PromiseLike<Result> {
   private payload: Row | Row[] | null = null;
   private conflict = "id";
   private defaultToNull = true;
+  private orderBy: { column: string; ascending: boolean } | null = null;
+  private limitN: number | null = null;
 
   constructor(private db: FakeDb, private table: string) {}
 
@@ -24,8 +30,30 @@ class Query implements PromiseLike<Result> {
     return this;
   }
 
+  neq(column: string, value: unknown): this {
+    this.filters.push(["__neq__", column, value]);
+    return this;
+  }
+
+  not(column: string, operator: string, value: unknown): this {
+    if (operator === "is" && value === null) {
+      this.filters.push(["__notnull__", column]);
+    }
+    return this;
+  }
+
   is(column: string, value: null): this {
     this.filters.push([column, value]);
+    return this;
+  }
+
+  order(column: string, options: { ascending?: boolean } = {}): this {
+    this.orderBy = { column, ascending: options.ascending ?? true };
+    return this;
+  }
+
+  limit(count: number): this {
+    this.limitN = count;
     return this;
   }
 
@@ -92,6 +120,15 @@ class Query implements PromiseLike<Result> {
         const values = filter[2] as unknown[];
         return values.includes(row[column]);
       }
+      if (filter[0] === "__neq__") {
+        const column = filter[1] as string;
+        const value = filter[2];
+        return row[column] !== value;
+      }
+      if (filter[0] === "__notnull__") {
+        const column = filter[1] as string;
+        return row[column] !== null && row[column] !== undefined;
+      }
       const [column, value] = filter;
       return row[column] === value;
     });
@@ -105,7 +142,22 @@ class Query implements PromiseLike<Result> {
     }
     const rows = this.db.tables[this.table] ??= [];
     if (this.action === "select") {
-      return { data: rows.filter((row) => this.matches(row)), error: null };
+      this.db.recordSelect(this.table);
+      let matched = rows.filter((row) => this.matches(row));
+      if (this.orderBy) {
+        const { column, ascending } = this.orderBy;
+        matched = [...matched].sort((left, right) => {
+          const a = left[column];
+          const b = right[column];
+          if (a === b) return 0;
+          if (a === null || a === undefined) return 1;
+          if (b === null || b === undefined) return -1;
+          const cmp = a < b ? -1 : 1;
+          return ascending ? cmp : -cmp;
+        });
+      }
+      if (this.limitN !== null) matched = matched.slice(0, this.limitN);
+      return { data: matched, error: null };
     }
     if (this.action === "update") {
       const changed = rows.filter((row) => this.matches(row));
@@ -151,11 +203,16 @@ class Query implements PromiseLike<Result> {
 
 export class FakeDb implements CatalogDb {
   nextInsertError: Row | null = null;
+  selectCounts: Record<string, number> = {};
 
   constructor(public tables: Record<string, Row[]> = {}) {}
 
   from(table: string): Query {
     return new Query(this, table);
+  }
+
+  recordSelect(table: string): void {
+    this.selectCounts[table] = (this.selectCounts[table] ?? 0) + 1;
   }
 
   withDefaults(table: string, row: Row): Row {
