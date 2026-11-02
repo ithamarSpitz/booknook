@@ -3,6 +3,7 @@ import {
   errorResponse,
   HttpError,
   json,
+  normalize,
   options,
 } from "../_shared/utils.ts";
 import {
@@ -10,7 +11,11 @@ import {
   type HardcoverBook,
   hardcoverBooks,
 } from "../_shared/hardcover.ts";
-import { nliHebrew, wikidataHebrew } from "../_shared/bridges.ts";
+import {
+  nliHebrew,
+  wikidataHebrew,
+  wikidataHebrewAuthor,
+} from "../_shared/bridges.ts";
 import { ensureResolved } from "../_shared/catalog.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type {
@@ -38,8 +43,97 @@ export type RecommendationDependencies = {
   serviceDatabase: () => DbClient;
   fetchHardcover: (ids: number[]) => Promise<HardcoverBook[]>;
   hebrewHint: (book: HardcoverBook) => Promise<HebrewHint | null>;
+  wikidataHebrewAuthor: (englishName: string) => Promise<string | null>;
+  hebrewAuthor?: (
+    db: DbClient,
+    englishAuthor: string,
+    cache: Map<string, string | null>,
+  ) => Promise<string | null>;
   ensureResolved: typeof ensureResolved;
 };
+
+export async function defaultHebrewHint(
+  book: HardcoverBook,
+): Promise<HebrewHint | null> {
+  const author = authors(book)[0] ?? "";
+  const wikidata = await wikidataHebrew(book.title, author);
+  if (wikidata) {
+    return {
+      source: "wikidata",
+      title: wikidata.title,
+      author: wikidata.author || null,
+    };
+  }
+  const nli = await nliHebrew(book.title, author);
+  return nli
+    ? { source: "nli", title: nli.title, author: nli.author || null }
+    : null;
+}
+
+export async function hebrewAuthorFor(
+  db: DbClient,
+  englishAuthor: string,
+  deps: Pick<RecommendationDependencies, "wikidataHebrewAuthor">,
+  cache: Map<string, string | null>,
+  inFlight = new Map<string, Promise<string | null>>(),
+): Promise<string | null> {
+  const key = normalize(englishAuthor.trim());
+  if (!key) return null;
+  if (cache.has(key)) return cache.get(key)!;
+  const pending = inFlight.get(key);
+  if (pending) return pending;
+
+  const lookup = (async (): Promise<string | null> => {
+    let resolved: string | null = null;
+    try {
+      const worksResult = await db.from("works")
+        .select("id, original_authors")
+        .contains("original_authors", [englishAuthor.trim()])
+        .limit(50);
+      if (worksResult.error) throw worksResult.error;
+
+      const matchedWorkIds = (
+        (worksResult.data ?? []) as Pick<WorkRow, "id" | "original_authors">[]
+      )
+        .filter((work) =>
+          normalize(work.original_authors[0] ?? "") === key
+        )
+        .map((work) => work.id);
+
+      if (matchedWorkIds.length) {
+        const editionsResult = await db.from("editions")
+          .select("author, resolved_at")
+          .in("work_id", matchedWorkIds)
+          .not("work_id", "is", null)
+          .order("resolved_at", { ascending: false });
+        if (editionsResult.error) throw editionsResult.error;
+
+        for (const row of (editionsResult.data ?? []) as {
+          author: string | null;
+        }[]) {
+          const author = row.author?.trim();
+          if (author) {
+            resolved = author;
+            break;
+          }
+        }
+      }
+
+      if (!resolved) {
+        resolved = await deps.wikidataHebrewAuthor(englishAuthor);
+      }
+    } catch {
+      resolved = null;
+    }
+
+    cache.set(key, resolved);
+    inFlight.delete(key);
+    return resolved;
+  })();
+
+  inFlight.set(key, lookup);
+  return lookup;
+}
 
 const defaults: RecommendationDependencies = {
   authenticate: requireUser,
@@ -48,17 +142,8 @@ const defaults: RecommendationDependencies = {
   fetchHardcover: hardcoverBooks,
   // Simania blocks data-center IPs, so the server only finds the Hebrew title;
   // the browser matches it in Simania and calls link-edition.
-  hebrewHint: async (book) => {
-    const author = authors(book)[0] ?? "";
-    const wikidata = await wikidataHebrew(book.title, author);
-    if (wikidata) {
-      return { source: "wikidata", title: wikidata.title, author: wikidata.author || null };
-    }
-    const nli = await nliHebrew(book.title, author);
-    return nli
-      ? { source: "nli", title: nli.title, author: nli.author || null }
-      : null;
-  },
+  hebrewHint: defaultHebrewHint,
+  wikidataHebrewAuthor,
   ensureResolved,
 };
 
@@ -395,12 +480,31 @@ export async function handleRecommendations(
     const titleBySeed = new Map(
       seeds.map((seed) => [seed.simania_id, seed.title]),
     );
-    const cards: RecommendationCard[] =
+    const authorCache = new Map<string, string | null>();
+    const authorLookups = new Map<string, Promise<string | null>>();
+    const resolveHebrewAuthor = dependencies.hebrewAuthor ??
+      ((
+        db,
+        author,
+        cache,
+      ) => hebrewAuthorFor(db, author, dependencies, cache, authorLookups));
+    const cards: RecommendationCard[] = await Promise.all(
       ((replacement.data ?? []) as RecommendationRow[]).flatMap((row) => {
         const item = preparedByWork.get(row.work_id);
         if (!item) return [];
         const edition = item.edition;
+        const englishAuthor = item.work.original_authors[0] ?? "";
         return [{
+          row,
+          item,
+          edition,
+          englishAuthor,
+        }];
+      }).map(async ({ row, item, edition, englishAuthor }) => {
+        const hebrew_author = row.simania_id === null
+          ? await resolveHebrewAuthor(serviceDb, englishAuthor, authorCache)
+          : null;
+        return {
           work_id: row.work_id,
           simania_id: row.simania_id,
           title: edition?.title ?? item.work.original_title,
@@ -420,8 +524,10 @@ export async function handleRecommendations(
           english_only: row.simania_id === null,
           can_add: row.simania_id !== null,
           hebrew_hint: row.simania_id === null ? item.hint : null,
-        }];
-      });
+          hebrew_author,
+        };
+      }),
+    );
     return json({ recommendations: cards });
   } catch (error) {
     return errorResponse(error);
