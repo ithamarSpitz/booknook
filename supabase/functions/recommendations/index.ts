@@ -11,6 +11,7 @@ import {
   hardcoverBooks,
 } from "../_shared/hardcover.ts";
 import { nliHebrew, wikidataHebrew } from "../_shared/bridges.ts";
+import { ensureResolved } from "../_shared/catalog.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type {
   EditionRow,
@@ -37,6 +38,7 @@ export type RecommendationDependencies = {
   serviceDatabase: () => DbClient;
   fetchHardcover: (ids: number[]) => Promise<HardcoverBook[]>;
   hebrewHint: (book: HardcoverBook) => Promise<HebrewHint | null>;
+  ensureResolved: typeof ensureResolved;
 };
 
 const defaults: RecommendationDependencies = {
@@ -57,7 +59,68 @@ const defaults: RecommendationDependencies = {
       ? { source: "nli", title: nli.title, author: nli.author || null }
       : null;
   },
+  ensureResolved,
 };
+
+const SELF_HEAL_BUDGET_MS = 20_000;
+const NOT_FOUND_RETRY_DAYS = 14;
+const DAY_MS = 86_400_000;
+
+function notFoundRetryDue(
+  resolvedAt: string | null | undefined,
+  now: Date,
+): boolean {
+  if (!resolvedAt) return true;
+  const timestamp = Date.parse(resolvedAt);
+  return !Number.isFinite(timestamp) ||
+    now.getTime() - timestamp >= NOT_FOUND_RETRY_DAYS * DAY_MS;
+}
+
+function editionNeedsSelfHeal(edition: EditionRow, now: Date): boolean {
+  if (edition.work_id !== null) return false;
+  if (edition.resolve_status === "pending") return true;
+  if (edition.resolve_status === "not_found") {
+    return notFoundRetryDue(edition.resolved_at, now);
+  }
+  return false;
+}
+
+async function selfHealShelvedEditions(
+  userDb: DbClient,
+  serviceDb: DbClient,
+  userId: string,
+  resolve: RecommendationDependencies["ensureResolved"],
+): Promise<void> {
+  const { data, error } = await userDb.from("shelf_books").select(
+    "added_at, editions!inner(*)",
+  ).eq("user_id", userId);
+  if (error) fail(error);
+
+  const now = new Date();
+  const toResolve = (data ?? [])
+    .map((row: Record<string, unknown>) => {
+      const edition = relation(
+        row.editions as EditionRow | EditionRow[] | null,
+      );
+      if (!edition) return null;
+      return { added_at: String(row.added_at), edition };
+    })
+    .filter((item): item is { added_at: string; edition: EditionRow } =>
+      item !== null && editionNeedsSelfHeal(item.edition, now)
+    )
+    .sort((left, right) => right.added_at.localeCompare(left.added_at))
+    .slice(0, 2);
+
+  const started = Date.now();
+  for (const { edition } of toResolve) {
+    if (Date.now() - started >= SELF_HEAL_BUDGET_MS) break;
+    try {
+      await resolve(serviceDb, edition);
+    } catch (error) {
+      console.warn(`Self-heal resolution failed for ${edition.simania_id}:`, error);
+    }
+  }
+}
 
 function fail(error: unknown): never {
   throw new Error(
@@ -244,6 +307,12 @@ export async function handleRecommendations(
     }
     const userDb = dependencies.userDatabase(request);
     const serviceDb = dependencies.serviceDatabase();
+    await selfHealShelvedEditions(
+      userDb,
+      serviceDb,
+      userId,
+      dependencies.ensureResolved,
+    );
     const [library, dismissed] = await Promise.all([
       loadLibrary(userDb, userId),
       loadDismissed(userDb, userId),
