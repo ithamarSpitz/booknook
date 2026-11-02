@@ -13,7 +13,8 @@
     "check:contract": "node scripts/check-contract.mjs",
     "check:harness": "harness validate",
     "verify:integration": "node scripts/verify-integration.mjs",
-    "verify:resolution": "deno run --allow-net --allow-env --allow-read scripts/verify-resolution.ts"
+    "verify:resolution": "deno run --allow-net --allow-env --allow-read scripts/verify-resolution.ts",
+    "verify:localization": "deno run --allow-net --allow-env --allow-read scripts/verify-localization.ts"
   },
   "devDependencies": {
     "deno": "^2.9.6",

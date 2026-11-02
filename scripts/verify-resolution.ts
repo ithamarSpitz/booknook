@@ -211,6 +211,58 @@ const CASES: CaseSpec[] = [
       return { ok: true, detail: "" };
     },
   },
+  {
+    simania_id: 34027,
+    title: "נערה בנוף",
+    author: "ג'ונתן לת'ם",
+    buildDb: () => ({
+      editions: [edition({
+        simania_id: 34027,
+        title: "נערה בנוף",
+        author: "ג'ונתן לת'ם",
+      })],
+    }),
+    check: (row, work) => {
+      if (row.resolve_status === "not_found" && row.work_id === null) {
+        return { ok: true, detail: "" };
+      }
+      const hardcoverId = work?.hardcover_id;
+      if (hardcoverId === 473787) return { ok: true, detail: "" };
+      if (hardcoverId === 483014) {
+        return { ok: false, detail: "wrong book 483014" };
+      }
+      return {
+        ok: false,
+        detail: `expected not_found or 473787, got ${row.resolve_status} ${hardcoverId ?? "null"}`,
+      };
+    },
+  },
+  {
+    simania_id: 1013521,
+    title: "כיבוי אורות",
+    author: "דיוויד קופ",
+    buildDb: () => ({
+      editions: [edition({
+        simania_id: 1013521,
+        title: "כיבוי אורות",
+        author: "דיוויד קופ",
+      })],
+    }),
+    check: (row, work) => {
+      if (row.resolve_status === "not_found" && row.work_id === null) {
+        return { ok: true, detail: "" };
+      }
+      const hardcoverId = work?.hardcover_id;
+      if (hardcoverId === 559469) return { ok: true, detail: "" };
+      if (hardcoverId === 372879) {
+        return { ok: false, detail: "wrong book 372879" };
+      }
+      return {
+        ok: false,
+        detail: `expected not_found or 559469, got ${row.resolve_status} ${hardcoverId ?? "null"}`,
+      };
+    },
+  },
 ];
 
 function workForEdition(
