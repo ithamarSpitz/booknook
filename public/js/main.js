@@ -10,6 +10,7 @@ import * as recs from "./recs.js";
 import * as addBook from "./add-book.js";
 import * as invite from "./invite.js";
 import { createRecsRefresher } from "./recs-refresh.js";
+import { createOpenRefresh } from "./app-open-refresh.js";
 import { SHELVES_CHANGED } from "./events.js";
 
 /** @type {import('./data.js').LibraryState | null} */
@@ -64,8 +65,16 @@ const ctx = {
   recsRefresh: createRecsRefresher({ callFunction: api.callFunction }),
 };
 
+const openRefresh = createOpenRefresh({
+  request: () => ctx.recsRefresh.request(),
+});
+
 // Any book landing on a shelf regenerates recommendations quietly in the background.
 document.addEventListener(SHELVES_CHANGED, () => ctx.recsRefresh.request());
+
+document.addEventListener("visibilitychange", () => {
+  openRefresh.visibility(document.visibilityState === "visible");
+});
 
 async function redrawLibrary() {
   const libRoot = screens[ROUTES.LIBRARY];
@@ -136,6 +145,8 @@ async function onRoute(route) {
 
   const session = await auth.requireSession(api);
   if (!session) return;
+
+  openRefresh.signedIn();
 
   showScreen(route);
   updateMenuTitle();
