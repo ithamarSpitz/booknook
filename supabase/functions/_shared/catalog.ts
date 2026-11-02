@@ -1,4 +1,8 @@
-import { nliOriginal, wikidataOriginal } from "./bridges.ts";
+import {
+  nliOriginal,
+  wikidataEnglishAuthor,
+  wikidataOriginal,
+} from "./bridges.ts";
 import { authors, findHardcoverBook, type HardcoverBook } from "./hardcover.ts";
 import {
   bookDetails,
@@ -26,6 +30,7 @@ export interface CatalogProviders {
   bookRating: typeof bookRating;
   wikidataOriginal: typeof wikidataOriginal;
   nliOriginal: typeof nliOriginal;
+  wikidataEnglishAuthor: typeof wikidataEnglishAuthor;
   findHardcoverBook: typeof findHardcoverBook;
   now: () => Date;
 }
@@ -35,6 +40,7 @@ const providers: CatalogProviders = {
   bookRating,
   wikidataOriginal,
   nliOriginal,
+  wikidataEnglishAuthor,
   findHardcoverBook,
   now: () => new Date(),
 };
@@ -362,7 +368,10 @@ export async function ensureResolved(
         edition.author ?? "",
       );
       if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
-        const hint = await englishAuthorHint(db, edition);
+        let hint = await englishAuthorHint(db, edition);
+        if (hint === null && edition.author?.trim()) {
+          hint = await api.wikidataEnglishAuthor(edition.author);
+        }
         match = await tryMatch(
           () => api.findHardcoverBook(bridge.title, hint ?? bridge.author),
           failures,
