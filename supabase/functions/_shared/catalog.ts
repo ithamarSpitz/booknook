@@ -376,7 +376,7 @@ export async function ensureResolved(
 
   if (!match) {
     match = await tryMatch(
-      () => api.findHardcoverBook(titleForMatch, edition.author ?? ""),
+      () => api.findHardcoverBook(titleForMatch, edition.author ?? "", { requireAuthor: true }),
       failures,
     );
     if (match) status = "fuzzy";
