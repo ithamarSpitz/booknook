@@ -93,3 +93,88 @@ Deno.test("ensureEdition keeps a stale cached row when the Simania refresh fails
   }).catch(() => (failed = true));
   assertEquals(failed, true);
 });
+
+Deno.test("link-edition rejects when the caller already shelved this edition", async () => {
+  const { db, handler } = setup([
+    edition({ simania_id: 77, work_id: null }),
+  ], false);
+  db.tables.shelf_books = [{
+    user_id: "user-1",
+    simania_id: 77,
+    shelf_id: "shelf-1",
+    position: 0,
+  }];
+  const response = await handler(request(valid));
+  assertEquals(response.status, 409);
+  assertEquals(await response.json(), { error: "Already on your shelves." });
+  assertEquals(db.tables.editions[0].work_id, "work-1");
+  assertEquals(db.tables.recommendations.length, 0);
+});
+
+Deno.test("link-edition rejects when the caller shelved another edition of the same work", async () => {
+  const { db, handler } = setup([
+    edition({ simania_id: 77, work_id: null }),
+    edition({ simania_id: 88, work_id: "work-1", resolve_status: "wikidata" }),
+  ], false);
+  db.tables.shelf_books = [{
+    user_id: "user-1",
+    simania_id: 88,
+    shelf_id: "shelf-1",
+    position: 0,
+  }];
+  const response = await handler(request(valid));
+  assertEquals(response.status, 409);
+  assertEquals(await response.json(), { error: "Already on your shelves." });
+  assertEquals(db.tables.editions[0].work_id, "work-1");
+  assertEquals(db.tables.recommendations.length, 0);
+});
+
+Deno.test("link-edition does not delete a dismissed recommendation when shelved", async () => {
+  const db = new FakeDb({
+    editions: [edition({ simania_id: 77, work_id: null })],
+    recommendations: [
+      {
+        user_id: "user-1",
+        work_id: "work-1",
+        simania_id: null,
+        dismissed: false,
+      },
+      {
+        user_id: "user-1",
+        work_id: "work-1",
+        simania_id: null,
+        dismissed: true,
+      },
+    ],
+    shelf_books: [{
+      user_id: "user-1",
+      simania_id: 77,
+      shelf_id: "shelf-1",
+      position: 0,
+    }],
+  });
+  const handler = createHandler({
+    requireUser: async () => "user-1",
+    serviceClient: () => db,
+    userClient: () => db,
+  });
+  const response = await handler(request(valid));
+  assertEquals(response.status, 409);
+  assertEquals(db.tables.recommendations.length, 1);
+  assertEquals(db.tables.recommendations[0].dismissed, true);
+});
+
+Deno.test("link-edition ignores another user's shelf of the same edition", async () => {
+  const { db, handler } = setup([
+    edition({ simania_id: 77, work_id: null }),
+  ], false);
+  db.tables.shelf_books = [{
+    user_id: "user-2",
+    simania_id: 77,
+    shelf_id: "shelf-1",
+    position: 0,
+  }];
+  const response = await handler(request(valid));
+  assertEquals(response.status, 200);
+  assertEquals(db.tables.recommendations[0].simania_id, 77);
+});
