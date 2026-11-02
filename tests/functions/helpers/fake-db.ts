@@ -187,8 +187,11 @@ class Query implements PromiseLike<Result> {
     const incoming =
       (Array.isArray(this.payload) ? this.payload : [this.payload]) as Row[];
     if (this.action === "insert") {
-      rows.push(...incoming.map((row) => ({ ...row })));
-      return { data: incoming, error: null };
+      const inserted = incoming.map((row) =>
+        this.table === "works" ? this.db.withDefaults(this.table, row) : { ...row }
+      );
+      rows.push(...inserted);
+      return { data: inserted.map((row) => ({ ...row })), error: null };
     }
     const changed: Row[] = [];
     for (const value of incoming) {
@@ -217,6 +220,7 @@ class Query implements PromiseLike<Result> {
 export class FakeDb implements CatalogDb {
   nextInsertError: Row | null = null;
   selectCounts: Record<string, number> = {};
+  private nextWorkId = 1;
 
   constructor(public tables: Record<string, Row[]> = {}) {}
 
@@ -248,7 +252,11 @@ export class FakeDb implements CatalogDb {
         ...row,
       };
     }
-    if (table === "works") return { id: "work-1", ...row };
+    if (table === "works") {
+      return row.id === undefined
+        ? { id: `work-${this.nextWorkId++}`, ...row }
+        : { ...row };
+    }
     return { ...row };
   }
 }

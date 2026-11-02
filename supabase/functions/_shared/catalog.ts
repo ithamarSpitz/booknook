@@ -370,7 +370,11 @@ export async function ensureResolved(
       if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
         let hint = await englishAuthorHint(db, edition);
         if (hint === null && edition.author?.trim()) {
-          hint = await api.wikidataEnglishAuthor(edition.author);
+          try {
+            hint = await api.wikidataEnglishAuthor(edition.author);
+          } catch {
+            failures.count += 1;
+          }
         }
         match = await tryMatch(
           () => api.findHardcoverBook(bridge.title, hint ?? bridge.author),
