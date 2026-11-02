@@ -276,6 +276,29 @@ function coverUrl(book: HardcoverBook): string | null {
     );
 }
 
+/** Upsert the canonical work fields shared by resolution and English editions. */
+export async function upsertWork(
+  db: CatalogDb,
+  book: HardcoverBook,
+  now: Date,
+): Promise<string> {
+  const workValues = {
+    hardcover_id: book.id,
+    original_title: book.title,
+    original_authors: authors(book),
+    similar_ids: book.cached_similar_book_ids ?? [],
+    tags: cachedTags(book),
+    hardcover_cover_url: coverUrl(book),
+    refreshed_at: now.toISOString(),
+  } satisfies Omit<WorkRow, "id">;
+  const workResult = await db.from("works").upsert(workValues, {
+    onConflict: "hardcover_id",
+    defaultToNull: false,
+  }).select("id").single();
+  if (workResult.error) dbFailure(workResult.error);
+  return workResult.data.id;
+}
+
 async function tryMatch(
   operation: () => Promise<HardcoverBook | null>,
   failures: { count: number },
@@ -397,21 +420,7 @@ export async function ensureResolved(
 
   let workId: string | null = null;
   if (match) {
-    const workValues = {
-      hardcover_id: match.id,
-      original_title: match.title,
-      original_authors: authors(match),
-      similar_ids: match.cached_similar_book_ids ?? [],
-      tags: cachedTags(match),
-      hardcover_cover_url: coverUrl(match),
-      refreshed_at: now.toISOString(),
-    } satisfies Omit<WorkRow, "id">;
-    const workResult = await db.from("works").upsert(workValues, {
-      onConflict: "hardcover_id",
-      defaultToNull: false,
-    }).select("id").single();
-    if (workResult.error) dbFailure(workResult.error);
-    workId = workResult.data.id;
+    workId = await upsertWork(db, match, now);
   }
 
   if (!match && failures.count > 0) status = "pending";
