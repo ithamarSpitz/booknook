@@ -1,0 +1,263 @@
+diff --git a/supabase/functions/_shared/bridges.ts b/supabase/functions/_shared/bridges.ts
+index a17de4d..f90b35f 100644
+--- a/supabase/functions/_shared/bridges.ts
++++ b/supabase/functions/_shared/bridges.ts
+@@ -8,6 +8,8 @@ const PROVIDER_HEADERS = {
+ /** A provider answered with an error (after one retry), as opposed to answering "no match". */
+ export class ProviderError extends Error {}
+ 
++class WikidataResponseError extends ProviderError {}
++
+ async function providerFetch(url: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
+   const headers = { ...PROVIDER_HEADERS, ...(init.headers as Record<string, string> | undefined) };
+   for (let attempt = 0; ; attempt += 1) {
+@@ -34,6 +36,14 @@ type Entity = {
+   claims?: Record<string, Array<{ mainsnak?: { datavalue?: { value?: { id?: string } } } }>>;
+ };
+ 
++async function wikidataField<T>(response: Response, field: string): Promise<T> {
++  const body = await response.json() as unknown;
++  if (typeof body !== "object" || body === null || "error" in body || !(field in body)) {
++    throw new WikidataResponseError(`www.wikidata.org returned an invalid ${field} response`);
++  }
++  return (body as Record<string, unknown>)[field] as T;
++}
++
+ function entityTypes(entity?: Entity | null): string[] {
+   return (entity?.claims?.P31 ?? []).map((claim) => claim?.mainsnak?.datavalue?.value?.id).filter(Boolean) as string[];
+ }
+@@ -51,7 +61,8 @@ function isHuman(entity?: Entity | null): boolean {
+ async function wikidataEntity(id: string, languages = "he|en"): Promise<Entity | null> {
+   const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(id)}&props=labels|descriptions|claims&languages=${languages}&format=json&origin=*`;
+   const response = await providerFetch(url);
+-  return (await response.json()).entities?.[id] ?? null;
++  const entities = await wikidataField<Record<string, Entity>>(response, "entities");
++  return entities[id] ?? null;
+ }
+ 
+ async function wikidataAuthor(entity?: Entity | null, language = "en"): Promise<string> {
+@@ -87,7 +98,7 @@ async function wikidataAuthorMatchesHint(entity: Entity | null, authorHint: stri
+ export async function wikidataOriginal(hebrewTitle: string): Promise<Bridge | null> {
+   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(hebrewTitle)}&language=he&uselang=en&type=item&limit=8&format=json&origin=*`;
+   const response = await providerFetch(url);
+-  const search = (await response.json()).search ?? [];
++  const search = await wikidataField<Array<{ id: string; label?: string }>>(response, "search");
+   for (const candidate of search.slice(0, 6)) {
+     const entity = await wikidataEntity(candidate.id);
+     if (!isWrittenWork(entity)) continue;
+@@ -110,7 +121,7 @@ export async function wikidataHebrew(title: string, author = ""): Promise<Bridge
+ async function wikidataHebrewLookup(title: string, author: string): Promise<Bridge | null> {
+   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(title)}&language=en&uselang=en&type=item&limit=10&format=json&origin=*`;
+   const response = await providerFetch(url);
+-  const candidates = ((await response.json()).search ?? [])
++  const candidates = (await wikidataField<Array<{ id: string; label?: string; description?: string }>>(response, "search"))
+     .map((candidate: { id: string; label?: string; description?: string }) => ({
+       candidate,
+       score: similarity(title, candidate.label) * 3 + (author && normalize(candidate.description).includes(normalize(author)) ? 2 : 0),
+@@ -156,7 +167,7 @@ async function wikidataHebrewAuthorLookup(englishName: string): Promise<string |
+   if (!name) return null;
+   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&uselang=en&type=item&limit=5&format=json&origin=*`;
+   const response = await providerFetch(url);
+-  const search = (await response.json()).search ?? [];
++  const search = await wikidataField<Array<{ id: string; label?: string }>>(response, "search");
+   let reads = 0;
+   for (const candidate of search) {
+     if (reads >= 3) break;
+@@ -174,7 +185,8 @@ async function wikidataHebrewAuthorLookup(englishName: string): Promise<string |
+ export async function wikidataEnglishAuthor(hebrewName: string): Promise<string | null> {
+   try {
+     return await wikidataEnglishAuthorLookup(hebrewName);
+-  } catch {
++  } catch (error) {
++    if (error instanceof ProviderError) throw error;
+     return null;
+   }
+ }
+@@ -184,7 +196,7 @@ async function wikidataEnglishAuthorLookup(hebrewName: string): Promise<string |
+   if (!name) return null;
+   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}&language=he&uselang=en&type=item&limit=5&format=json&origin=*`;
+   const response = await providerFetch(url);
+-  const search = (await response.json()).search ?? [];
++  const search = await wikidataField<Array<{ id: string; label?: string }>>(response, "search");
+   let reads = 0;
+   for (const candidate of search) {
+     if (reads >= 3) break;
+diff --git a/supabase/functions/_shared/catalog.ts b/supabase/functions/_shared/catalog.ts
+index ac196ed..a4e3610 100644
+--- a/supabase/functions/_shared/catalog.ts
++++ b/supabase/functions/_shared/catalog.ts
+@@ -370,7 +370,11 @@ export async function ensureResolved(
+       if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
+         let hint = await englishAuthorHint(db, edition);
+         if (hint === null && edition.author?.trim()) {
+-          hint = await api.wikidataEnglishAuthor(edition.author);
++          try {
++            hint = await api.wikidataEnglishAuthor(edition.author);
++          } catch {
++            failures.count += 1;
++          }
+         }
+         match = await tryMatch(
+           () => api.findHardcoverBook(bridge.title, hint ?? bridge.author),
+diff --git a/tests/functions/helpers/fake-db.ts b/tests/functions/helpers/fake-db.ts
+index df3ec7a..3695d14 100644
+--- a/tests/functions/helpers/fake-db.ts
++++ b/tests/functions/helpers/fake-db.ts
+@@ -187,8 +187,11 @@ class Query implements PromiseLike<Result> {
+     const incoming =
+       (Array.isArray(this.payload) ? this.payload : [this.payload]) as Row[];
+     if (this.action === "insert") {
+-      rows.push(...incoming.map((row) => ({ ...row })));
+-      return { data: incoming, error: null };
++      const inserted = incoming.map((row) =>
++        this.table === "works" ? this.db.withDefaults(this.table, row) : { ...row }
++      );
++      rows.push(...inserted);
++      return { data: inserted.map((row) => ({ ...row })), error: null };
+     }
+     const changed: Row[] = [];
+     for (const value of incoming) {
+@@ -217,6 +220,7 @@ class Query implements PromiseLike<Result> {
+ export class FakeDb implements CatalogDb {
+   nextInsertError: Row | null = null;
+   selectCounts: Record<string, number> = {};
++  private nextWorkId = 1;
+ 
+   constructor(public tables: Record<string, Row[]> = {}) {}
+ 
+@@ -248,7 +252,11 @@ export class FakeDb implements CatalogDb {
+         ...row,
+       };
+     }
+-    if (table === "works") return { id: "work-1", ...row };
++    if (table === "works") {
++      return row.id === undefined
++        ? { id: `work-${this.nextWorkId++}`, ...row }
++        : { ...row };
++    }
+     return { ...row };
+   }
+ }
+diff --git a/tests/functions/wikidata-errors.test.ts b/tests/functions/wikidata-errors.test.ts
+new file mode 100644
+index 0000000..211cc3d
+--- /dev/null
++++ b/tests/functions/wikidata-errors.test.ts
+@@ -0,0 +1,117 @@
++import { assertEquals, assertRejects } from "jsr:@std/assert@1";
++import {
++  ProviderError,
++  wikidataEnglishAuthor,
++  wikidataOriginal,
++} from "../../supabase/functions/_shared/bridges.ts";
++import { ensureResolved } from "../../supabase/functions/_shared/catalog.ts";
++import type { EditionRow } from "../../supabase/functions/_shared/types.ts";
++import { edition, FakeDb } from "./helpers/fake-db.ts";
++
++function withFetch(
++  fetcher: typeof fetch,
++  run: () => Promise<void>,
++): Promise<void> {
++  const originalFetch = globalThis.fetch;
++  globalThis.fetch = fetcher;
++  return run().finally(() => {
++    globalThis.fetch = originalFetch;
++  });
++}
++
++Deno.test("wikidataOriginal throws ProviderError for a Wikidata error body", () =>
++  withFetch(
++    () => Promise.resolve(new Response('{"error":{"code":"maxlag"}}')),
++    async () => {
++      await assertRejects(() => wikidataOriginal("ספר"), ProviderError);
++    },
++  ));
++
++Deno.test("wikidataOriginal throws ProviderError when an entity response omits entities", () =>
++  withFetch(
++    (input) => {
++      const action = new URL(String(input)).searchParams.get("action");
++      const body = action === "wbsearchentities"
++        ? '{"search":[{"id":"Q1","label":"Book"}]}'
++        : "{}";
++      return Promise.resolve(new Response(body));
++    },
++    async () => {
++      await assertRejects(() => wikidataOriginal("ספר"), ProviderError);
++    },
++  ));
++
++Deno.test("wikidataEnglishAuthor propagates provider errors but returns null for no match", async () => {
++  await withFetch(
++    () => Promise.resolve(new Response('{"error":{"code":"maxlag"}}')),
++    async () => {
++      await assertRejects(() => wikidataEnglishAuthor("סופר"), ProviderError);
++    },
++  );
++  await withFetch(
++    () => Promise.resolve(new Response('{"search":[]}')),
++    async () => {
++      assertEquals(await wikidataEnglishAuthor("סופר"), null);
++    },
++  );
++});
++
++for (const failedAction of ["wbsearchentities", "wbgetentities"]) {
++  Deno.test(`wikidataEnglishAuthor propagates HTTP errors from ${failedAction}`, () =>
++    withFetch(
++      (input) => {
++        const action = new URL(String(input)).searchParams.get("action");
++        return Promise.resolve(action === failedAction
++          ? new Response("Bad request", { status: 400 })
++          : new Response('{"search":[{"id":"Q1"}]}'));
++      },
++      async () => {
++        await assertRejects(
++          () => wikidataEnglishAuthor("Author"),
++          ProviderError,
++          "www.wikidata.org returned 400",
++        );
++      },
++    ));
++}
++
++Deno.test("ensureResolved stays pending after Wikidata failures and still tries the NLI creator", async () => {
++  const current = edition() as EditionRow;
++  const db = new FakeDb({ editions: [current] });
++  const hardcoverHints: Array<string | undefined> = [];
++  const result = await ensureResolved(db, current, {
++    now: () => new Date("2026-11-02T10:00:00.000Z"),
++    wikidataOriginal: async () => {
++      throw new ProviderError("Wikidata search failed");
++    },
++    nliOriginal: async () => ({
++      title: "Original title",
++      author: "NLI creator",
++      source: "NLI",
++    }),
++    wikidataEnglishAuthor: async () => {
++      throw new ProviderError("Wikidata author search failed");
++    },
++    findHardcoverBook: async (_title, author) => {
++      hardcoverHints.push(author);
++      return null;
++    },
++  });
++
++  assertEquals(hardcoverHints[0], "NLI creator");
++  assertEquals(result.resolve_status, "pending");
++  assertEquals(result.resolved_at, null);
++  assertEquals(result.work_id, null);
++});
++
++Deno.test("FakeDb gives inserted works unique generated ids", async () => {
++  const db = new FakeDb();
++  const first = await db.from("works").insert({ original_title: "First" })
++    .select().single();
++  const second = await db.from("works").insert({ original_title: "Second" })
++    .select().single();
++
++  assertEquals(first.data.id, "work-1");
++  assertEquals(second.data.id, "work-2");
++  assertEquals(db.tables.works.map((work) => work.id), ["work-1", "work-2"]);
++});

@@ -13,6 +13,7 @@ allowed_paths:
   - supabase/functions/_shared/catalog.ts
   - tests/functions/helpers/fake-db.ts
   - tests/functions/wikidata-errors.test.ts
+  - tests/functions/author-bridges.test.ts
 context:
   - contract
   - architecture.matching
@@ -49,4 +50,8 @@ New `tests/functions/wikidata-errors.test.ts`, stubbed `fetch`:
 
 # Acceptance criteria
 
-1. The behavior above; all tests pass, existing tests unchanged.
+1. The behavior above; all tests pass. The only existing test that changes is `tests/functions/author-bridges.test.ts` "wikidata author bridges return null on fetch failure": keep its `wikidataHebrewAuthor` assertion (still null) and change the `wikidataEnglishAuthor` assertion to expect a `ProviderError` throw (the new rule). Change nothing else in that file.
+
+# Previous attempt (start here)
+
+A previous attempt implemented everything; it failed only on that one existing test, which it was not allowed to edit. Apply `tasks/sprint-06-localization/draft/T9-changes.diff.txt` (for example `git apply`), update that one test as described, then run the verification commands. Do not edit the draft files.
