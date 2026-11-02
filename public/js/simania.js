@@ -143,3 +143,38 @@ export function simaniaIdOf(book) {
   const id = Number(book?.id ?? book?.bookId);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
+
+const HEBREW_LETTER = /[\u0590-\u05FF]/;
+
+function unwrapBooksSearch(data) {
+  const list = Array.isArray(data)
+    ? data
+    : (data?.books ?? data?.results ?? data?.items ?? data?.data ?? []);
+  return Array.isArray(list) ? list : [];
+}
+
+/**
+ * Author-path Simania search: first and last name word, filter by author similarity.
+ * @returns {Promise<Array<{ simania_id: number, title: string, author: string | null }>>}
+ */
+export async function searchByAuthor(hebrewAuthor, fetchImpl = fetch) {
+  const words = String(hebrewAuthor ?? "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const query = words.length === 1 ? words[0] : `${words[0]} ${words[words.length - 1]}`;
+  const data = await callTool("books_search", { query, limit: 50, offset: 0 }, fetchImpl);
+  const out = [];
+  for (const book of unwrapBooksSearch(data)) {
+    const title = String(book?.title ?? "");
+    if (!HEBREW_LETTER.test(title)) continue;
+    if (similarity(hebrewAuthor, book?.author ?? "") < 0.6) continue;
+    const simania_id = simaniaIdOf(book);
+    if (simania_id == null) continue;
+    out.push({
+      simania_id,
+      title,
+      author: book.author != null ? String(book.author) : null,
+    });
+    if (out.length >= 8) break;
+  }
+  return out;
+}

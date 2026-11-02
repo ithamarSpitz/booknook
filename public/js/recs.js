@@ -1,6 +1,6 @@
 import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
 import { promptRating, shouldPromptRating } from "./my-rating.js";
-import { fetchSimaniaPayload, matchHebrewBook, simaniaIdOf } from "./simania.js";
+import { fetchSimaniaPayload, matchHebrewBook, searchByAuthor, simaniaIdOf } from "./simania.js";
 import { notifyShelvesChanged } from "./events.js";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
@@ -175,7 +175,15 @@ export function recommendationFromApiCard(card) {
         author: c.hebrew_hint.author != null ? String(c.hebrew_hint.author) : null,
       }
       : null,
+    hebrew_author: simaniaId == null && c.hebrew_author != null ? String(c.hebrew_author) : null,
   };
+}
+
+/** @param {string | null | undefined} resolveStatus */
+function linkSourceFromAuthorMatch(resolveStatus) {
+  if (resolveStatus === "fuzzy") return "nli";
+  if (resolveStatus === "wikidata" || resolveStatus === "nli") return resolveStatus;
+  return null;
 }
 
 /**
@@ -188,25 +196,54 @@ export function recommendationFromApiCard(card) {
  *   onLinked: (workId: string, patch: { simania_id: number, title: string, author: string | null, cover_url: string | null }) => void,
  *   isCurrent: () => boolean,
  *   match?: typeof matchHebrewBook,
+ *   searchByAuthor?: typeof searchByAuthor,
  *   fetchPayload?: typeof fetchSimaniaPayload,
  *   concurrency?: number,
  * }} deps
  */
 export async function localizeRecommendations(items, deps) {
   const match = deps.match ?? matchHebrewBook;
+  const searchByAuthorFn = deps.searchByAuthor ?? searchByAuthor;
   const fetchPayload = deps.fetchPayload ?? fetchSimaniaPayload;
-  const queue = items.filter((rec) => rec.english_only && rec.hebrew_hint?.title);
+  const queue = items.filter(
+    (rec) => rec.english_only && (rec.hebrew_hint?.title || rec.hebrew_author),
+  );
   async function one(rec) {
     const hint = rec.hebrew_hint;
-    const book = await match(hint.title, hint.author ?? "");
-    const simaniaId = simaniaIdOf(book);
-    if (simaniaId == null || !deps.isCurrent()) return;
+    let simaniaId = null;
+    /** @type {"wikidata"|"nli"|null} */
+    let source = null;
+    if (hint?.title) {
+      const book = await match(hint.title, hint.author ?? "");
+      simaniaId = simaniaIdOf(book);
+      if (simaniaId != null) source = hint.source;
+    }
+    if (simaniaId == null && rec.hebrew_author) {
+      const candidates = await searchByAuthorFn(rec.hebrew_author);
+      if (candidates.length && deps.isCurrent()) {
+        const matched = await deps.callFunction(FUNCTIONS.MATCH_BY_AUTHOR, {
+          work_id: rec.work_id,
+          candidates,
+        });
+        const resolvedId = matched && typeof matched === "object"
+          ? Number(matched.simania_id)
+          : null;
+        const linkSource = matched && typeof matched === "object"
+          ? linkSourceFromAuthorMatch(String(matched.resolve_status ?? ""))
+          : null;
+        if (Number.isSafeInteger(resolvedId) && resolvedId > 0 && linkSource) {
+          simaniaId = resolvedId;
+          source = linkSource;
+        }
+      }
+    }
+    if (simaniaId == null || source == null || !deps.isCurrent()) return;
     const simania = await fetchPayload(simaniaId);
     if (!deps.isCurrent()) return;
     const res = await deps.callFunction(FUNCTIONS.LINK_EDITION, {
       work_id: rec.work_id,
       simania_id: simaniaId,
-      source: hint.source,
+      source,
       simania,
     });
     if (res && typeof res === "object" && Number(res.simania_id) === simaniaId && deps.isCurrent()) {
