@@ -93,6 +93,17 @@ sprints:
       - npm run check:functions
       - npm run test:functions
 
+  S3-polish:
+    name: Visual polish
+    tasks:
+      S3-T1:
+        file: tasks/sprint-03-polish/01-carved-shelf-labels.md
+        stage: 1
+        depends_on: []
+    stage_verification:
+      '1':
+      - npm run test:web
+
   demo:
     name: Harness demo DAG
     tasks:
