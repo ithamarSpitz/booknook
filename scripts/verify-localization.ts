@@ -13,8 +13,9 @@ import { ensureResolved } from "../supabase/functions/_shared/catalog.ts";
 import {
   matchHebrewBook,
   searchByAuthor,
-  simaniaIdOf,
 } from "../public/js/simania.js";
+import { FUNCTIONS } from "../public/js/contract.js";
+import { verifyTitleMatch } from "../public/js/recs.js";
 import { edition, FakeDb } from "../tests/functions/helpers/fake-db.ts";
 
 type LocCase = {
@@ -138,6 +139,12 @@ const CASES: LocCase[] = [
     buildDb: mcfaddenSeed,
     expectedSimania: null,
   },
+  {
+    hardcoverId: 372879,
+    label: "Aurora",
+    buildDb: () => ({}),
+    expectedSimania: null,
+  },
 ];
 
 const authorDeps = { wikidataHebrewAuthor };
@@ -160,21 +167,48 @@ async function localizeChain(
   let simaniaId: number | null = null;
   let path: "title" | "author" | null = null;
 
+  const englishAuthor = authors(book)[0] ?? "";
+  const hebrewAuthor = await hebrewAuthorFor(
+    db as never,
+    englishAuthor,
+    authorDeps,
+    new Map(),
+  );
+
   const hint = await defaultHebrewHint(book);
+  const workId = `loc-work-${hardcoverId}`;
+  const titleMatchDeps = {
+    callFunction: async (name: string, body: Record<string, unknown>) => {
+      if (name !== FUNCTIONS.MATCH_BY_AUTHOR) {
+        throw new Error(`unexpected function ${name}`);
+      }
+      return await matchCandidates(
+        db,
+        hardcoverId,
+        body.candidates as AuthorCandidate[],
+        matchDeps,
+      );
+    },
+  };
+
   if (hint?.title) {
     path = "title";
     const matched = await matchHebrewBook(hint.title, hint.author ?? "");
-    simaniaId = simaniaIdOf(matched);
+    if (matched) {
+      const verified = await verifyTitleMatch(
+        {
+          work_id: workId,
+          hebrew_hint: hint,
+          hebrew_author: hebrewAuthor,
+        },
+        matched,
+        titleMatchDeps,
+      );
+      if (verified) simaniaId = verified.simania_id;
+    }
   }
 
   if (simaniaId == null) {
-    const englishAuthor = authors(book)[0] ?? "";
-    const hebrewAuthor = await hebrewAuthorFor(
-      db as never,
-      englishAuthor,
-      authorDeps,
-      new Map(),
-    );
     if (hebrewAuthor) {
       path = "author";
       const candidates = await searchByAuthor(hebrewAuthor) as AuthorCandidate[];

@@ -95,12 +95,19 @@ describe("localizeRecommendations", () => {
       fetchPayload: async (id) => ({ details: { title: `#${id}` }, rating: null }),
       callFunction: async (name, body) => {
         sent.push([name, body]);
+        if (name === "match-by-author") {
+          const id = body.candidates?.[0]?.simania_id;
+          return { simania_id: id, resolve_status: "nli" };
+        }
         return { work_id: body.work_id, simania_id: body.simania_id, title: "עברית", author: null, cover_url: null };
       },
       onLinked: (workId, patch) => linked.push([workId, patch]),
       isCurrent: () => true,
     });
-    assert.deepEqual(sent, [["link-edition", { work_id: "w1", simania_id: 7, source: "nli", simania: { details: { title: "#7" }, rating: null } }]]);
+    assert.deepEqual(sent, [
+      ["match-by-author", { work_id: "w1", candidates: [{ simania_id: 7, title: "עברית", author: null }] }],
+      ["link-edition", { work_id: "w1", simania_id: 7, source: "nli", simania: { details: { title: "#7" }, rating: null } }],
+    ]);
     assert.deepEqual(linked, [["w1", { simania_id: 7, title: "עברית", author: null, cover_url: null }]]);
   });
 
@@ -114,7 +121,12 @@ describe("localizeRecommendations", () => {
         return { id: 2, title };
       },
       fetchPayload: async () => ({ details: { title: "ב" }, rating: null }),
-      callFunction: async (_n, body) => ({ simania_id: body.simania_id, title: "ב" }),
+      callFunction: async (name, body) => {
+        if (name === "match-by-author") {
+          return { simania_id: body.candidates[0].simania_id, resolve_status: "wikidata" };
+        }
+        return { simania_id: body.simania_id, title: "ב" };
+      },
       onLinked: (workId) => linked.push(workId),
       isCurrent: () => current,
     });

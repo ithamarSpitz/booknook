@@ -24,6 +24,7 @@ import {
   visibleRecommendations,
   localizeRecommendations,
   recommendationFromApiCard,
+  verifyTitleMatch,
 } from "../../public/js/recs.js";
 
 const recsCss = readFileSync(new URL("../../public/css/recs.css", import.meta.url), "utf8");
@@ -575,7 +576,7 @@ describe("localizeRecommendations author path", () => {
         hebrew_author: wilsonAuthor(),
       }),
     ], {
-      match: async () => ({ id: 97171, title: "סחרור" }),
+      match: async () => ({ id: 97171, title: "סחרור", author: wilsonAuthor() }),
       searchByAuthor: async () => assert.fail("author search must not run"),
       fetchPayload: async () => ({ details: { title: "סחרור" }, rating: null }),
       callFunction: async (name, body) => {
@@ -588,6 +589,94 @@ describe("localizeRecommendations author path", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0][0], "link-edition");
     assert.deepEqual(sent[0][1].source, "wikidata");
+  });
+
+  it("links a mismatched title result only when match-by-author confirms it", async () => {
+    const sent = [];
+    await localizeRecommendations([
+      base("verified", {
+        hebrew_hint: { source: "nli", title: "title", author: "hint author" },
+        hebrew_author: "expected author",
+      }),
+    ], {
+      match: async () => ({ id: 42, title: "title", author: "different author" }),
+      searchByAuthor: async () => assert.fail("author search must not run"),
+      fetchPayload: async () => ({ details: { title: "title" }, rating: null }),
+      callFunction: async (name, body) => {
+        sent.push([name, body]);
+        if (name === "match-by-author") return { simania_id: 42, resolve_status: "wikidata" };
+        return { simania_id: 42, title: "title", author: null, cover_url: null };
+      },
+      onLinked: () => {},
+      isCurrent: () => true,
+    });
+
+    assert.deepEqual(sent[0], [
+      "match-by-author",
+      {
+        work_id: "verified",
+        candidates: [{ simania_id: 42, title: "title", author: "different author" }],
+      },
+    ]);
+    assert.equal(sent[1][0], "link-edition");
+    assert.equal(sent[1][1].source, "wikidata");
+  });
+
+  it("falls through to the author path when title verification rejects the book", async () => {
+    const sent = [];
+    const candidates = [{ simania_id: 71, title: "right title", author: "expected author" }];
+    await localizeRecommendations([
+      base("fallback", {
+        hebrew_hint: { source: "nli", title: "wrong title", author: null },
+        hebrew_author: "expected author",
+      }),
+    ], {
+      match: async () => ({ id: 99, title: "wrong title", author: "different author" }),
+      searchByAuthor: async () => candidates,
+      fetchPayload: async () => ({ details: { title: "right title" }, rating: null }),
+      callFunction: async (name, body) => {
+        sent.push([name, body]);
+        if (name === "match-by-author" && body.candidates[0].simania_id === 99) {
+          return { simania_id: null, resolve_status: null };
+        }
+        if (name === "match-by-author") return { simania_id: 71, resolve_status: "wikidata" };
+        return { simania_id: 71, title: "right title", author: "expected author", cover_url: null };
+      },
+      onLinked: () => {},
+      isCurrent: () => true,
+    });
+
+    assert.deepEqual(sent[0][1].candidates, [
+      { simania_id: 99, title: "wrong title", author: "different author" },
+    ]);
+    assert.deepEqual(sent[1], ["match-by-author", { work_id: "fallback", candidates }]);
+    assert.equal(sent[2][0], "link-edition");
+  });
+
+  it("lets match-by-author decide title matches without hebrew_author", async () => {
+    const sent = [];
+    await localizeRecommendations([
+      base("no-author", {
+        hebrew_hint: { source: "wikidata", title: "title", author: null },
+      }),
+    ], {
+      match: async () => ({ id: 8, title: "title" }),
+      searchByAuthor: async () => assert.fail("author search must not run"),
+      fetchPayload: async () => ({ details: { title: "title" }, rating: null }),
+      callFunction: async (name, body) => {
+        sent.push([name, body]);
+        if (name === "match-by-author") return { simania_id: 8, resolve_status: "fuzzy" };
+        return { simania_id: 8, title: "title", author: null, cover_url: null };
+      },
+      onLinked: () => {},
+      isCurrent: () => true,
+    });
+
+    assert.deepEqual(sent[0], [
+      "match-by-author",
+      { work_id: "no-author", candidates: [{ simania_id: 8, title: "title", author: null }] },
+    ]);
+    assert.equal(sent[1][1].source, "nli");
   });
 
   it("runs match-by-author then link-edition when the title misses", async () => {
@@ -670,6 +759,24 @@ describe("localizeRecommendations author path", () => {
     });
     assert.equal(sent[1][0], "link-edition");
     assert.equal(sent[1][1].source, "nli");
+  });
+});
+
+describe("verifyTitleMatch", () => {
+  it("accepts a matching hebrew_author without a server call", async () => {
+    let calls = 0;
+    const result = await verifyTitleMatch(
+      {
+        work_id: "work",
+        hebrew_hint: { source: "nli", title: "title", author: null },
+        hebrew_author: "same author",
+      },
+      { id: 7, title: "title", author: "same author" },
+      { callFunction: async () => { calls += 1; } },
+    );
+
+    assert.equal(calls, 0);
+    assert.deepEqual(result, { simania_id: 7, resolve_status: "nli" });
   });
 });
 
