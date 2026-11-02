@@ -33,12 +33,17 @@ The `search-books` function was removed. Search runs in the browser: under 2 cha
   2. Candidate score: for each seed, the first 40 `works.similar_ids`, score `weight * (1 - rank/40)`, summed across seeds.
   3. Exclude: works of any book on any of the caller's shelves (including want and stopped), and dismissed recommendations.
   4. Load missing candidate works from Hardcover in batches of 50; upsert `works`.
-  5. Localize the top candidates (see `matching.md`), 5 in parallel, stop at 20 results or 40 attempts. The function finds only the Hebrew title (Wikidata, then NLI) and returns it as `hebrew_hint`; the browser matches it on Simania and calls `link-edition`. Until then, and on a miss, the card is English-only with `simania_id` null: Hardcover title and cover, dismiss but not add-to-shelf.
+  5. Localize the top candidates (see `matching.md`), 5 in parallel, stop at 20 results or 40 attempts. The function finds only the Hebrew title (Wikidata, then NLI) and returns it as `hebrew_hint`, plus the author's Hebrew name as `hebrew_author` (catalog first, then Wikidata); the browser matches the title on Simania, or on a miss searches Simania by author and asks `match-by-author`, then calls `link-edition`. Until then, and on a miss, the card is English-only with `simania_id` null: Hardcover title and cover, dismiss but not add-to-shelf.
   6. `shared_tags`: tags present on the candidate and on at least one of its seeds.
   7. Replace the caller's non-dismissed rows in `recommendations`, return them.
 - Zero seeds returns `{ recommendations: [] }` with status 200.
 - Self-healing: before selecting seeds, it resolves at most 2 of the caller's unlinked shelved editions (`pending`, or `not_found` at least 14 days old), within 20 seconds; failures are ignored.
 - The browser regenerates recommendations in the background (`public/js/recs-refresh.js`, debounced) after every shelf change.
+
+## match-by-author
+
+- In: `{ work_id, candidates: [{ simania_id, title, author }] }` (1-8). Out: `{ simania_id, resolve_status }` or nulls.
+- Behavior: the caller must have a non-dismissed recommendation for `work_id` (404). Each candidate is resolved Hebrew to English with the normal resolver (stored as a `pending` edition first when new); the first whose work has the recommended `hardcover_id` wins. Sequential, no new candidate after 25 seconds. Nothing is ever linked by title similarity alone.
 
 ## link-edition
 

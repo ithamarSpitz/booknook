@@ -10,6 +10,7 @@
 | Web, pure modules | `node --test` | `npm run test:web` | none |
 | Integration gate | Node script against local stack and live APIs | `npm run verify:integration` | live |
 | Resolution gate | Deno script: real resolver, in-memory DB, live Wikidata/NLI/Hardcover, real problem books | `npm run verify:resolution` | live |
+| Localization gate | Deno script: the real recommendation localization chain (title hint, then author path) on real books, live Wikidata/NLI/Hardcover/Simania | `npm run verify:localization` | live |
 
 ## Shared local Supabase stack
 
@@ -17,7 +18,7 @@ There is one local Supabase stack (`project_id = "booknook"`, API on 54321, DB o
 
 - Only tasks whose brief says so may run `supabase db reset` or `supabase test db`. The roadmap never puts two such tasks in the same stage.
 - No task starts, stops or reconfigures the stack.
-- Automated tests never call Simania, Hardcover, Wikidata or NLI; only the two live gates above do. Stub `fetch` with recorded fixtures under `tests/functions/fixtures/`.
+- Automated tests never call Simania, Hardcover, Wikidata or NLI; only the live gates above do. Stub `fetch` with recorded fixtures under `tests/functions/fixtures/`.
 
 ## Fixtures
 
