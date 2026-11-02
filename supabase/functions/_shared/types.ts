@@ -11,7 +11,8 @@ export type ResolveStatus =
   | "nli"
   | "fuzzy"
   | "llm"
-  | "not_found";
+  | "not_found"
+  | "hardcover";
 
 export interface ProfileRow {
   id: string;
@@ -97,7 +98,10 @@ export interface SearchCacheRow {
 }
 
 export interface BookCard {
+  /** Negative for an English edition: -hardcover_id. */
   simania_id: number;
+  /** True when simania_id < 0 (an English edition from Hardcover, not on Simania). */
+  english_edition?: boolean;
   work_id: string | null;
   resolve_status: ResolveStatus;
   title: string;
@@ -123,6 +127,8 @@ export interface BookCard {
 
 export interface RecommendationCard {
   work_id: string;
+  /** works.hardcover_id; English-only cards are added with add-book { hardcover_id }. */
+  hardcover_id?: number;
   simania_id: number | null;
   title: string;
   author: string | null;
@@ -181,6 +187,22 @@ export interface LinkEditionResponse {
   cover_url: string | null;
 }
 
+export interface SearchEnglishRequest {
+  query: string;
+}
+
+export interface EnglishBook {
+  hardcover_id: number;
+  title: string;
+  author: string | null;
+  year: number | null;
+  cover_url: string | null;
+}
+
+export interface SearchEnglishResponse {
+  books: EnglishBook[];
+}
+
 export interface ErrorResponse {
   error: string;
 }
@@ -194,7 +216,9 @@ export interface SearchBooksResponse {
 }
 
 export interface AddBookRequest {
-  simania_id: number;
+  /** Exactly one of simania_id (a Simania edition) or hardcover_id (an English edition). */
+  simania_id?: number;
+  hardcover_id?: number;
   shelf_id: string;
   /** Raw Simania `books_get_details` / `books_get_rating` results fetched by the browser. */
   simania?: { details: Record<string, unknown>; rating: Record<string, unknown> | null };

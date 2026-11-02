@@ -233,6 +233,76 @@ sprints:
       - npm run verify:resolution
       - npm run verify:localization
 
+  S7-english-books:
+    name: English books on shelves (Hardcover editions) and verified title matches
+    tasks:
+      S7-T1:
+        file: tasks/sprint-07-english-books/01-verify-title-match.md
+        stage: 1
+        depends_on: []
+      S7-T2:
+        file: tasks/sprint-07-english-books/02-hardcover-status-migration.md
+        stage: 1
+        depends_on: []
+      S7-T3:
+        file: tasks/sprint-07-english-books/03-english-edition-core.md
+        stage: 1
+        depends_on: []
+      S7-T4:
+        file: tasks/sprint-07-english-books/04-search-english-function.md
+        stage: 2
+        depends_on:
+        - S7-T3
+      S7-T5:
+        file: tasks/sprint-07-english-books/05-add-and-details-english.md
+        stage: 2
+        depends_on:
+        - S7-T3
+      S7-T6:
+        file: tasks/sprint-07-english-books/06-recommendations-english.md
+        stage: 2
+        depends_on:
+        - S7-T3
+      S7-T7:
+        file: tasks/sprint-07-english-books/07-add-english-ui.md
+        stage: 3
+        depends_on:
+        - S7-T4
+        - S7-T5
+      S7-T8:
+        file: tasks/sprint-07-english-books/08-english-cards-ui.md
+        stage: 4
+        depends_on:
+        - S7-T1
+        - S7-T5
+        - S7-T6
+        - S7-T7
+      S7-T9:
+        file: tasks/sprint-07-english-books/09-live-english-gate.md
+        stage: 5
+        depends_on:
+        - S7-T7
+        - S7-T8
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '2':
+      - npm run check:functions
+      - npm run test:functions
+      '3':
+      - npm run test:web
+      '4':
+      - npm run test:web
+      '5':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:resolution
+      - npm run verify:localization
+      - npm run verify:english
+
   demo:
     name: Harness demo DAG
     tasks:

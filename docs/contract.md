@@ -7,9 +7,9 @@ This is the binding interface for sprint S1. SQL, JSON, and TypeScript names are
 | PostgreSQL / TypeScript type | Exact values |
 |---|---|
 | `shelf_kind` / `ShelfKind` | `reading`, `read`, `want`, `stopped`, `custom` |
-| `resolve_status` / `ResolveStatus` | `pending`, `wikidata`, `nli`, `fuzzy`, `llm`, `not_found` |
+| `resolve_status` / `ResolveStatus` | `pending`, `wikidata`, `nli`, `fuzzy`, `llm`, `not_found`, `hardcover` |
 
-`llm` is reserved and is never produced in this build. Simania display text is stored and returned unchanged; normalization is only for matching.
+`llm` is reserved and is never produced in this build. `hardcover` marks an English edition (below). Simania display text is stored and returned unchanged; normalization is only for matching.
 
 ## Database rows
 
@@ -64,6 +64,8 @@ Authenticated clients may select; only service-role Edge Functions write.
 | `details_at` | `timestamptz` | yes | none |
 
 Authenticated clients may select; only service-role Edge Functions write. Null `work_id` means unresolved or unavailable on Hardcover and never prevents shelving.
+
+**English editions.** A book that is not on Simania can be shelved as its English Hardcover edition: an `editions` row with `simania_id = -hardcover_id` (always negative; Simania IDs are always positive), `work_id` set to that Hardcover work, `resolve_status = 'hardcover'` and `resolved_at` now. It never goes through the Hebrew resolution procedure, Wikidata, NLI or Simania. Its display fields come from the Hardcover book: `title` = Hardcover `title`; `author` = cached contributor names joined with `, ` (null if none); `publisher` = `default_physical_edition.publisher.name`; `year` = `release_year`; `pages` = `pages`, else `default_physical_edition.pages`; `description` = `description` as plain text (`<br>` and `</p>` become a newline, other tags are removed, HTML entities decoded, runs of more than two newlines collapsed, trimmed; null if empty); `cover_url` = `image.url`; `simania_rating` = `rating` rounded to 2 decimals (Hardcover and Simania both rate 0 to 5); `simania_rating_count` = `ratings_count`; `translator`, `series`, `category` null; `details_at` now. Refresh these fields from Hardcover when `details_at` is at least 30 days old. The work row is upserted exactly as the resolver upserts an accepted Hardcover book. Since the edition has the work's `work_id`, the shelf trigger's same-work rule already prevents shelving both a Hebrew and an English edition of one work.
 
 ### `shelves`
 
@@ -172,9 +174,15 @@ Simania's Cloudflare answers `403` to Edge Function (data-center) IPs and allows
 
 Functions that need edition data take an optional `simania` field `{"details": <raw books_get_details object>, "rating": <raw books_get_rating object or null>}` that the browser fetched just before the call. The server trusts it (about 10 invited users) and maps it with the same field rules as before. Wherever this contract says "call Simania `books_get_details` and `books_get_rating`", read: use the supplied `simania` field; when it is absent, try Simania directly (works only off-cloud), and when that fails keep an existing cached row unchanged instead of failing.
 
+### `search-english`
+
+Request `SearchEnglishRequest`: `{"query":"spin robert charles wilson"}`. Response `SearchEnglishResponse`: `{"books":[{"hardcover_id":383752,"title":"Spin","author":"Robert Charles Wilson","year":2005,"cover_url":"https://..."}]}`. Trim the query; under 2 characters returns `{"books":[]}` without a call. Otherwise one Hardcover Book search (`per_page=8`) and one batch read of the returned IDs, returned in search order; `author` is the cached contributor names joined with `, ` or null. Hardcover failure is `502`. Requires a signed-in user.
+
 ### `add-book`
 
-Request `AddBookRequest`: `{"simania_id":1234,"shelf_id":"7d94c068-7489-4aea-9e13-78c1113df4f7","simania":{"details":{"title":"ספר"},"rating":null}}` (the browser always sends `simania`). Response is `AddBookResponse`:
+An English edition: request `{"hardcover_id":383752,"shelf_id":"..."}` (no `simania`). Exactly one of `simania_id` or `hardcover_id` (positive integers) is required (`400`). Create or refresh the English edition `-hardcover_id` as described under `editions` (unknown Hardcover ID is `404`, Hardcover failure `502`), then insert into `shelf_books` exactly as for a Simania edition, with the same `409` duplicate rules; the response is the same `AddBookResponse` with `resolve_status` `hardcover`.
+
+A Simania edition: request `AddBookRequest`: `{"simania_id":1234,"shelf_id":"7d94c068-7489-4aea-9e13-78c1113df4f7","simania":{"details":{"title":"ספר"},"rating":null}}` (the browser always sends `simania`). Response is `AddBookResponse`:
 
 ```json
 {"book":{"simania_id":1234,"work_id":null,"resolve_status":"not_found","title":"ספר","author":null,"translator":null,"publisher":null,"series":null,"category":null,"year":null,"pages":null,"description":null,"cover_url":null,"simania_rating":null,"simania_rating_count":null,"shelf_id":"7d94c068-7489-4aea-9e13-78c1113df4f7","shelf_name":"רוצה לקרוא","shelf_kind":"want","position":3,"added_at":"2026-10-25T10:00:00Z","finished_at":null,"rating":null},"resolve_status":"not_found"}
@@ -202,7 +210,7 @@ Request `BookDetailsRequest`: `{"simania_id":1234}`, optionally with `simania` a
 {"book":{"simania_id":1234,"work_id":null,"resolve_status":"pending","title":"ספר","author":null,"translator":null,"publisher":null,"series":null,"category":null,"year":null,"pages":null,"description":null,"cover_url":null,"simania_rating":null,"simania_rating_count":null,"shelf_id":null,"shelf_name":null,"shelf_kind":null,"position":null,"added_at":null,"finished_at":null,"rating":null}}
 ```
 
-Perform the same 30-day detail/rating refresh. If the edition is still `pending` (an earlier resolution hit a provider failure), also run the resolution procedure above. Never shelve. Fill shelf fields for the caller if shelved, otherwise set them all null. Unknown ID is `404`; Simania failure is `502`.
+Perform the same 30-day detail/rating refresh (for a negative `simania_id`, the English edition, refresh from Hardcover and never call Simania or the resolver; `simania_id` may be negative here). If the edition is still `pending` (an earlier resolution hit a provider failure), also run the resolution procedure above. Never shelve. Fill shelf fields for the caller if shelved, otherwise set them all null. Unknown ID is `404`; Simania failure is `502`.
 
 ### `recommendations`
 
@@ -226,7 +234,9 @@ Fetch missing candidate IDs from Hardcover in batches of at most 50; discard IDs
 
 **Hebrew author name.** Every English-only card carries `hebrew_author`: the Hebrew name of the work's first Hardcover author, from (1) the catalog: the Simania `author` of the most recently resolved edition linked to a work whose first `original_authors` entry equals that author (normalized), else (2) Wikidata: an English item search for the author name (`limit=5`), the first result whose label has Dice `1` with the name, that is a human (P31 `Q5`) and has a Hebrew label; else null. Cache per author within one run.
 
-**Step 2 runs in the browser.** The function performs steps 1 and 3 only as far as finding a Hebrew title: the Wikidata Hebrew label and author, or, only when Wikidata yields none, the top NLI record. It returns that as the card's `hebrew_hint` `{"source":"wikidata"|"nli","title":"...","author":"..."|null}` and the card stays English-only. The browser (`localizeRecommendations` in `public/js/recs.js`, at most 3 cards at a time) runs step 2 against Simania, fetches the accepted result's details and rating, and calls `link-edition`; if the title match misses and `hebrew_author` is set, the browser runs the author path: it searches Simania once for the first and last word of `hebrew_author` (`limit: 50`), keeps results with Hebrew titles whose author has Dice at least `0.6` with `hebrew_author` (spelling varies, for example `צ'ארלס` and `צ'רלס`), takes at most 8, and calls `match-by-author`; on a match it fetches that edition's details and rating and calls `link-edition` with `source` equal to the returned `resolve_status` (`fuzzy` is sent as `nli`). A miss or any failure leaves the card English-only. Thus a candidate without a cached edition makes at most 9 server bridge requests (6 Wikidata, 3 NLI) and the browser at most 2 Simania searches plus 2 detail reads; the original bound below describes the combined procedure: at most 13 bridge/localization requests (6 Wikidata, two Simania, three NLI, two Simania). Run at most 5 candidate localizations concurrently, begin no more than the first 40 candidates, and stop scheduling when 20 cards have been accepted or retained as English-only. Every attempted candidate yields a card: if localization is not accepted it uses the English-only fallback, so the ordinary result reaches `min(20, candidate count, 40)` cards. Provider request loops may not exceed these bounds.
+**Step 2 runs in the browser.** The function performs steps 1 and 3 only as far as finding a Hebrew title: the Wikidata Hebrew label and author, or, only when Wikidata yields none, the top NLI record. It returns that as the card's `hebrew_hint` `{"source":"wikidata"|"nli","title":"...","author":"..."|null}` and the card stays English-only. The browser (`localizeRecommendations` in `public/js/recs.js`, at most 3 cards at a time) runs step 2 against Simania, fetches the accepted result's details and rating, and calls `link-edition`; if the title match misses (or fails the title-match verification below) and `hebrew_author` is set, the browser runs the author path: it searches Simania once for the first and last word of `hebrew_author` (`limit: 50`), keeps results with Hebrew titles whose author has Dice at least `0.6` with `hebrew_author` (spelling varies, for example `צ'ארלס` and `צ'רלס`), takes at most 8, and calls `match-by-author`; on a match it fetches that edition's details and rating and calls `link-edition` with `source` equal to the returned `resolve_status` (`fuzzy` is sent as `nli`). A miss or any failure leaves the card English-only. Thus a candidate without a cached edition makes at most 9 server bridge requests (6 Wikidata, 3 NLI) and the browser at most 2 Simania searches plus 2 detail reads; the original bound below describes the combined procedure: at most 13 bridge/localization requests (6 Wikidata, two Simania, three NLI, two Simania). Run at most 5 candidate localizations concurrently, begin no more than the first 40 candidates, and stop scheduling when 20 cards have been accepted or retained as English-only. Every attempted candidate yields a card: if localization is not accepted it uses the English-only fallback, so the ordinary result reaches `min(20, candidate count, 40)` cards. Provider request loops may not exceed these bounds.
+
+**Title-match verification.** A Simania book found by the title match is linked only when verified: either `hebrew_author` is set and the Simania book's author has Dice at least `0.6` with it, or `match-by-author` called with that single book as the only candidate returns it. Otherwise the title match counts as a miss (live case: the NLI Hebrew hint for Kim Stanley Robinson's "Aurora" is David Koepp's "כיבוי אורות", whose original title is also "Aurora"). Self-healing and every Hebrew resolution step skip negative (English) edition IDs, and the browser never calls Simania for them.
 
 **Self-healing resolution.** Before selecting seeds, the `recommendations` function resolves at most 2 of the caller's shelved editions that have null `work_id` and are `pending` or `not_found` at least 14 days old (most recently added first), with the same procedure, sequentially, and starts no new one after 20 seconds. A failure never fails the request. The library is then loaded, so newly linked books seed and are excluded at once.
 
@@ -254,7 +264,8 @@ No external-site URL is included.
 
 | Field | Type | Exact source |
 |---|---|---|
-| `simania_id` | `number` | `editions.simania_id` |
+| `simania_id` | `number` | `editions.simania_id` (negative for an English edition) |
+| `english_edition` | `boolean` | `simania_id < 0` |
 | `work_id` | `string \| null` | `editions.work_id` |
 | `resolve_status` | `ResolveStatus` | `editions.resolve_status` |
 | `title` | `string` | `editions.title` |
@@ -282,6 +293,7 @@ No external-site URL is included.
 | Field | Type | Exact source / computation |
 |---|---|---|
 | `work_id` | `string` | `recommendations.work_id` |
+| `hardcover_id` | `number` | `works.hardcover_id` |
 | `simania_id` | `number \| null` | `recommendations.simania_id` |
 | `title` | `string` | edition title; English-only `works.original_title` |
 | `author` | `string \| null` | edition author; English-only authors joined with `, `, null if empty |
@@ -293,7 +305,7 @@ No external-site URL is included.
 | `dismissed` | `boolean` | `recommendations.dismissed` |
 | `generated_at` | `string` | `recommendations.generated_at` |
 | `english_only` | `boolean` | `simania_id === null` |
-| `can_add` | `boolean` | `simania_id !== null` |
+| `can_add` | `boolean` | always `true`: a card with `simania_id` is added with that edition; an English-only card is added as its English edition with `add-book { hardcover_id }` |
 | `hebrew_hint` | `HebrewHint \| null` | English-only cards only: the bridge's Hebrew title for the browser's Simania match; not stored |
 | `hebrew_author` | `string \| null` | English-only cards only: the author's Hebrew name for the browser's Simania author search; not stored |
 
