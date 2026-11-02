@@ -17,7 +17,7 @@ context:
 environment: null
 verification:
   - >-
-    node -e "const t=require('fs').readFileSync('README.md','utf8');for(const w of ['harness.py','supabase:start','functions:serve','web:serve','test:db','Simania','Hardcover','Wikidata'])if(!t.includes(w))throw new Error('README.md missing '+w);for(const w of ['Open Library','Google Books','LibraryThing'])if(t.includes(w))throw new Error('README.md mentions rejected source '+w)"
+    node -e "const t=require('fs').readFileSync('README.md','utf8');for(const w of ['harness status','supabase:start','functions:serve','web:serve','test:db','Simania','Hardcover','Wikidata'])if(!t.includes(w))throw new Error('README.md missing '+w);for(const w of ['Open Library','Google Books','LibraryThing'])if(t.includes(w))throw new Error('README.md mentions rejected source '+w)"
 ---
 
 # Goal
