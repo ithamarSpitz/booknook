@@ -149,6 +149,17 @@ sprints:
       - npm run test:web
       - npm run verify:resolution
 
+  S5-open-refresh:
+    name: Refresh recommendations when the app opens
+    tasks:
+      S5-T1:
+        file: tasks/sprint-05-open-refresh/01-refresh-on-open.md
+        stage: 1
+        depends_on: []
+    stage_verification:
+      '1':
+      - npm run test:web
+
   demo:
     name: Harness demo DAG
     tasks:

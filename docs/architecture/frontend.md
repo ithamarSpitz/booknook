@@ -30,6 +30,7 @@ public/js/simania.js       browser Simania client: search, details, rating, Hebr
 public/js/my-rating.js     five-star rating widget and the "how was it?" prompt
 public/js/events.js        shelves-changed event fired on every shelf change
 public/js/recs-refresh.js  debounced background recommendation refresh
+public/js/app-open-refresh.js  one refresh per app open, and after 30+ minutes away
 public/js/invite.js        invite-friends screen (#invite)
 public/css/invite.css      invite screen styles
 public/sw.js               network-first service worker (Android install, offline shell)
