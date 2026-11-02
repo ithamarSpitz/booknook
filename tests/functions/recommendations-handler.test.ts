@@ -1,5 +1,8 @@
 import { handleRecommendations } from "../../supabase/functions/recommendations/index.ts";
-import type { WorkRow } from "../../supabase/functions/_shared/types.ts";
+import type {
+  EditionRow,
+  WorkRow,
+} from "../../supabase/functions/_shared/types.ts";
 import { HttpError } from "../../supabase/functions/_shared/utils.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -113,16 +116,42 @@ function shelfBook(
   simaniaId: number,
   kind: string,
   value: WorkRow | null,
+  options: {
+    added_at?: string;
+    rating?: number | null;
+    edition?: Partial<EditionRow>;
+  } = {},
 ): unknown {
+  const work_id = value?.id ?? options.edition?.work_id ?? null;
+  const edition: EditionRow = {
+    simania_id: simaniaId,
+    title: options.edition?.title ?? `Seed ${simaniaId}`,
+    work_id,
+    resolve_status: work_id ? "wikidata" : "pending",
+    resolved_at: work_id ? "2026-01-01T00:00:00Z" : null,
+    author: null,
+    translator: null,
+    publisher: null,
+    series: null,
+    category: null,
+    year: null,
+    pages: null,
+    description: null,
+    cover_url: null,
+    simania_rating: null,
+    simania_rating_count: null,
+    details_at: null,
+    ...options.edition,
+  };
   return {
     simania_id: simaniaId,
     position: 0,
-    added_at: "2026-01-01T00:00:00Z",
+    added_at: options.added_at ?? "2026-01-01T00:00:00Z",
     finished_at: null,
+    rating: options.rating ?? null,
     shelves: { kind },
     editions: {
-      title: `Seed ${simaniaId}`,
-      work_id: value?.id ?? null,
+      ...edition,
       works: value,
     },
   };
@@ -198,4 +227,164 @@ Deno.test("unauthenticated request returns 401", async () => {
     },
   });
   assert(response.status === 401, "expected 401");
+});
+
+Deno.test("self-heal links a pending shelved edition and it seeds and excludes its work", async () => {
+  const parisWork = work("paris", 9001, [8002]);
+  parisWork.original_title = "The Paris Apartment";
+  const otherWork = work("other", 8002);
+  const seedWork = work("seed", 1, [9001, 8002]);
+  const library = [
+    shelfBook(100, "read", seedWork, { rating: 5 }),
+    shelfBook(200, "read", null, {
+      added_at: "2026-06-01T00:00:00Z",
+      rating: 4,
+      edition: {
+        title: "הדירה בפריז",
+        resolve_status: "pending",
+        work_id: null,
+        resolved_at: null,
+      },
+    }),
+  ];
+  const db = new FakeDb(library, [seedWork, parisWork, otherWork]);
+  const resolveCalls: number[] = [];
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    ensureResolved: async (_db, edition) => {
+      resolveCalls.push(edition.simania_id);
+      const row = library.find((item) =>
+        (item as { simania_id: number }).simania_id === edition.simania_id
+      ) as {
+        editions: EditionRow & { works: WorkRow | null };
+      };
+      row.editions.work_id = parisWork.id;
+      row.editions.works = parisWork;
+      row.editions.resolve_status = "nli";
+      return { ...edition, work_id: parisWork.id, resolve_status: "nli" };
+    },
+  });
+  const payload = await response.json();
+  assert(response.status === 200, "expected 200");
+  assert(
+    resolveCalls.length === 1 && resolveCalls[0] === 200,
+    "pending shelved edition should be resolved once",
+  );
+  const replacement = db.replacement as {
+    work_id: string;
+    because: number[];
+  }[] | null;
+  assert(
+    replacement?.length === 1 && replacement[0].work_id === "other",
+    "linked Paris work should be excluded from recommendations",
+  );
+  assert(
+    replacement[0].because.includes(200),
+    "newly linked shelved book should seed recommendations",
+  );
+  assert(payload.recommendations.length === 1, "expected one card");
+});
+
+Deno.test("self-heal resolves at most two newest eligible editions", async () => {
+  const linked = work("linked", 10);
+  const library = [
+    shelfBook(401, "want", null, {
+      added_at: "2026-05-01T00:00:00Z",
+      edition: { resolve_status: "pending", work_id: null },
+    }),
+    shelfBook(402, "want", null, {
+      added_at: "2026-04-01T00:00:00Z",
+      edition: { resolve_status: "pending", work_id: null },
+    }),
+    shelfBook(403, "want", null, {
+      added_at: "2026-03-01T00:00:00Z",
+      edition: { resolve_status: "pending", work_id: null },
+    }),
+    shelfBook(404, "want", linked, {
+      added_at: "2026-07-01T00:00:00Z",
+    }),
+    shelfBook(405, "want", null, {
+      added_at: "2026-06-01T00:00:00Z",
+      edition: {
+        resolve_status: "not_found",
+        work_id: null,
+        resolved_at: new Date().toISOString(),
+      },
+    }),
+    shelfBook(406, "want", null, {
+      added_at: "2026-01-01T00:00:00Z",
+      edition: {
+        resolve_status: "not_found",
+        work_id: null,
+        resolved_at: "2020-01-01T00:00:00Z",
+      },
+    }),
+  ];
+  const db = new FakeDb(library, [linked]);
+  const resolveCalls: number[] = [];
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    ensureResolved: async (_db, edition) => {
+      resolveCalls.push(edition.simania_id);
+      return edition;
+    },
+  });
+  assert(response.status === 200, "expected 200");
+  assert(
+    resolveCalls.length === 2 &&
+      resolveCalls[0] === 401 &&
+      resolveCalls[1] === 402,
+    "only the two newest pending editions should be resolved",
+  );
+  assert(!resolveCalls.includes(404), "linked edition should not be resolved");
+  assert(!resolveCalls.includes(405), "recent not_found should not be resolved");
+  assert(!resolveCalls.includes(406), "older not_found waits its turn after pending");
+});
+
+Deno.test("self-heal resolver failure does not fail the request", async () => {
+  const seed = work("seed", 1, [2]);
+  const candidate = work("kept", 2);
+  const db = new FakeDb(
+    [
+      shelfBook(11, "read", seed, { rating: 4 }),
+      shelfBook(12, "want", null, {
+        edition: { resolve_status: "pending", work_id: null },
+      }),
+    ],
+    [seed, candidate],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    ensureResolved: async () => {
+      throw new Error("resolver blew up");
+    },
+  });
+  assert(response.status === 200, "expected 200");
+});
+
+Deno.test("self-heal skips when every shelved edition is linked", async () => {
+  const seed = work("seed", 1, [2]);
+  const candidate = work("kept", 2);
+  const db = new FakeDb([shelfBook(11, "read", seed, { rating: 4 })], [
+    seed,
+    candidate,
+  ]);
+  const resolveCalls: number[] = [];
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    ensureResolved: async (_db, edition) => {
+      resolveCalls.push(edition.simania_id);
+      return edition;
+    },
+  });
+  assert(response.status === 200, "expected 200");
+  assert(resolveCalls.length === 0, "resolver should not run without unlinked editions");
 });
