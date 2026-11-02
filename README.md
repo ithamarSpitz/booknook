@@ -17,7 +17,7 @@ Provider secrets (for example `HARDCOVER_API_KEY`) stay in a local env file and 
 ## Architecture (summary)
 
 - **Web app** (`public/`): talks to Supabase Auth and Postgres via `supabase-js`; no direct calls to Simania, Hardcover, Wikidata or NLI.
-- **Edge Functions** (`supabase/functions/`): `search-books`, `resolve-book`, `recommendations`, plus shared code in `_shared/`.
+- **Edge Functions** (`supabase/functions/`): `add-book`, `book-details`, `recommendations`, `link-edition`, `invite-user`, plus shared code in `_shared/`. Simania is called from the browser (`public/js/simania.js`) because its Cloudflare blocks Supabase server IPs.
 - **Database** (`supabase/migrations/`): shared catalog cache and per-user library tables with RLS.
 
 ## Repository layout

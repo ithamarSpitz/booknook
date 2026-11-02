@@ -211,9 +211,9 @@ Request `RecommendationsRequest` is `{}` (unknown fields ignored). Response `Rec
 {"recommendations":[{"work_id":"78e9c71d-d6f2-4ea4-bcbb-42e4ec9300cf","simania_id":null,"title":"Piranesi","author":"Susanna Clarke","cover_url":"https://...","score":1.75,"because":[1234,5678],"because_titles":["ספר א","ספר ב"],"shared_tags":["fantasy"],"dismissed":false,"generated_at":"2026-10-25T10:00:00Z","english_only":true,"can_add":false}]}
 ```
 
-Seeds are books on `reading` and `read` with non-null work. Take at most 8: `reading` first in book position order, then `read` by `finished_at desc nulls last`, `added_at desc`, and Simania ID tie-break. Zero seeds calls `replace_recommendations` with an empty array and returns `{"recommendations":[]}` with status `200`.
+Seeds are the caller's books with non-null work and a positive weight: the reader's rating when it is 3-5 (any shelf), 2.5 for an unrated book on `read`, otherwise 0 (not a seed). There is no seed cap. Order seeds by weight descending, then `finished_at desc nulls last`, `added_at desc`, and Simania ID tie-break; this order also orders `because`. Zero seeds calls `replace_recommendations` with an empty array and returns `{"recommendations":[]}` with status `200`.
 
-For each seed inspect only its first 40 `similar_ids`. At zero-based rank `r`, add `1 - r/40` to candidate score. Sum across seeds and deduplicate contributing seed IDs. Sort score descending then Hardcover ID ascending. Exclude works of every caller book on every shelf, plus every dismissed work. Null-work shelf books cannot seed and exclude only that edition until resolved.
+For each seed inspect only its first 40 `similar_ids`. At zero-based rank `r`, add `weight * (1 - r/40)` to candidate score. Sum across seeds and deduplicate contributing seed IDs. Sort score descending then Hardcover ID ascending. Exclude works of every caller book on every shelf, plus every dismissed work. Null-work shelf books cannot seed and exclude only that edition until resolved.
 
 Fetch missing candidate IDs from Hardcover in batches of at most 50; discard IDs not returned by Hardcover and upsert the rest. Localize candidates in score/Hardcover-ID order. First reuse the linked edition having the lowest `simania_id`, if one exists. Otherwise use this bounded procedure (normalization and Dice are exactly as defined for `add-book`):
 

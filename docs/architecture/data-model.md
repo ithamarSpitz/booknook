@@ -78,7 +78,7 @@ RLS: all operations where `user_id = auth.uid()`; insert only with `kind = 'cust
 | position | int not null | |
 | added_at | timestamptz | |
 | finished_at | timestamptz | set when the book first lands on a `read` shelf |
-| rating | smallint check (rating between 1 and 5) | deferred, unused |
+| rating | smallint check (rating between 1 and 5) | the reader's own rating, set only through `set_rating`; weights recommendation seeds |
 
 PK `(user_id, simania_id)`: a book sits on one shelf. One work per user is enforced by `add-book` (409 when another edition of the same work is already shelved), not by a constraint, because `work_id` can be resolved after the book is shelved. A later resolution that creates such a duplicate is tolerated; recommendations exclude by work either way. Unique `(shelf_id, position)` deferrable initially deferred. A check or trigger guarantees `shelf_id` belongs to `user_id`.
 
@@ -109,7 +109,33 @@ RLS: select where `user_id = auth.uid()`; update only of `dismissed` (column-lev
 | results | jsonb not null | |
 | fetched_at | timestamptz | TTL 24 hours |
 
-RLS enabled with no policies (service role only).
+RLS enabled with no policies (service role only). Unused since `search-books` was removed (search runs in the browser).
+
+## invitations
+
+| column | type | note |
+|---|---|---|
+| id | uuid PK default gen_random_uuid() | |
+| inviter_id | uuid not null references auth.users on delete cascade | |
+| email | text not null | |
+| created_at | timestamptz not null default now() | |
+
+Index on `(inviter_id, created_at desc)`. Written only by `invite-user` (service role). RLS: select where `inviter_id = auth.uid()`.
+
+## book_events
+
+| column | type | note |
+|---|---|---|
+| id | bigint identity PK | |
+| user_id | uuid not null references auth.users on delete cascade | |
+| simania_id | int not null | no foreign key |
+| action | text check in (`added`, `moved`, `removed`, `rated`) | |
+| from_shelf_id, to_shelf_id | uuid | no foreign key (custom shelves can be deleted) |
+| from_shelf_kind, from_shelf_name, to_shelf_kind, to_shelf_name | text | snapshots at the time of the event |
+| rating | smallint | |
+| occurred_at | timestamptz not null default now() | |
+
+Filled only by a trigger on `shelf_books`, so every path is recorded the same way. For reading statistics later. RLS: select where `user_id = auth.uid()`; no client writes.
 
 ## Functions and triggers
 
@@ -118,3 +144,4 @@ RLS enabled with no policies (service role only).
 - `move_shelf(p_shelf_id uuid, p_to_position int)` RPC: reorders the caller's shelves without gaps.
 - `delete_shelf(p_shelf_id uuid)` RPC: custom shelves only; moves its books to the end of `want`, then deletes it.
 - `remove_book(p_simania_id int)` RPC: deletes the caller's shelf_books row and closes the position gap.
+- `set_rating(p_simania_id int, p_rating smallint)` RPC: sets the caller's 1-5 rating for a shelved book on any shelf; null clears it.

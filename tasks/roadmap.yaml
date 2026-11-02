@@ -1,4 +1,4 @@
-project: torimitor
+project: booknook
 sprints:
   S0-contract:
     name: Interface contract (human review gate before S1)
