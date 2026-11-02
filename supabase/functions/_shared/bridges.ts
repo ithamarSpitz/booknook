@@ -44,6 +44,10 @@ function isWrittenWork(entity?: Entity | null): boolean {
   return types.some((type) => WORK_TYPES.has(type)) || Boolean(entity?.claims?.P50?.length);
 }
 
+function isHuman(entity?: Entity | null): boolean {
+  return entityTypes(entity).includes("Q5");
+}
+
 async function wikidataEntity(id: string, languages = "he|en"): Promise<Entity | null> {
   const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(id)}&props=labels|descriptions|claims&languages=${languages}&format=json&origin=*`;
   const response = await providerFetch(url);
@@ -135,6 +139,63 @@ async function wikidataHebrewLookup(title: string, author: string): Promise<Brid
     const hebrewTitle = cleanHebrewWikidataLabel(rawHebrew);
     if (!hebrewTitle) continue;
     return { title: hebrewTitle, author: await wikidataAuthor(entity, "he"), source: "Wikidata" };
+  }
+  return null;
+}
+
+export async function wikidataHebrewAuthor(englishName: string): Promise<string | null> {
+  try {
+    return await wikidataHebrewAuthorLookup(englishName);
+  } catch {
+    return null;
+  }
+}
+
+async function wikidataHebrewAuthorLookup(englishName: string): Promise<string | null> {
+  const name = englishName.trim();
+  if (!name) return null;
+  const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&uselang=en&type=item&limit=5&format=json&origin=*`;
+  const response = await providerFetch(url);
+  const search = (await response.json()).search ?? [];
+  let reads = 0;
+  for (const candidate of search) {
+    if (reads >= 3) break;
+    if (similarity(name, candidate.label) !== 1) continue;
+    reads += 1;
+    const entity = await wikidataEntity(candidate.id, "he|en");
+    if (!isHuman(entity)) continue;
+    const heLabel = entity?.labels?.he?.value;
+    if (!heLabel) continue;
+    return heLabel;
+  }
+  return null;
+}
+
+export async function wikidataEnglishAuthor(hebrewName: string): Promise<string | null> {
+  try {
+    return await wikidataEnglishAuthorLookup(hebrewName);
+  } catch {
+    return null;
+  }
+}
+
+async function wikidataEnglishAuthorLookup(hebrewName: string): Promise<string | null> {
+  const name = hebrewName.trim();
+  if (!name) return null;
+  const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}&language=he&uselang=en&type=item&limit=5&format=json&origin=*`;
+  const response = await providerFetch(url);
+  const search = (await response.json()).search ?? [];
+  let reads = 0;
+  for (const candidate of search) {
+    if (reads >= 3) break;
+    reads += 1;
+    const entity = await wikidataEntity(candidate.id, "he|en");
+    if (!isHuman(entity)) continue;
+    const heLabel = entity?.labels?.he?.value ?? "";
+    if (similarity(name, heLabel) < 0.8) continue;
+    const enLabel = entity?.labels?.en?.value;
+    if (!enLabel) continue;
+    return enLabel;
   }
   return null;
 }
