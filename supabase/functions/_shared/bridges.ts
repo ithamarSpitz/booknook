@@ -128,13 +128,24 @@ function parseNliRecords(xml: string): NliRecord[] {
   }).filter((record) => record.title);
 }
 
-async function nliSearch(index: string, value: string, limit = 25): Promise<NliRecord[]> {
-  const clean = value.replace(/["\\]/g, " ").trim();
-  if (!clean) return [];
+function cleanNliValue(value: string): string {
+  return value.replace(/["\\]/g, " ").trim();
+}
+
+function authorSurname(hebrewAuthor: string): string {
+  const segment = hebrewAuthor.split(",")[0]?.trim() ?? "";
+  if (!segment) return "";
+  const words = segment.split(/\s+/).filter(Boolean);
+  const last = words[words.length - 1] ?? "";
+  return last.replace(/["\\]/g, "").trim();
+}
+
+async function nliSearchQuery(query: string, limit = 25): Promise<NliRecord[]> {
+  if (!query.trim()) return [];
   const params = new URLSearchParams({
     version: "1.2",
     operation: "searchRetrieve",
-    query: `alma.${index} all "${clean}"`,
+    query,
     maximumRecords: String(limit),
     recordSchema: "marcxml",
   });
@@ -142,12 +153,17 @@ async function nliSearch(index: string, value: string, limit = 25): Promise<NliR
   return parseNliRecords(await response.text());
 }
 
+async function nliSearch(index: string, value: string, limit = 25): Promise<NliRecord[]> {
+  const clean = cleanNliValue(value);
+  if (!clean) return [];
+  return nliSearchQuery(`alma.${index} all "${clean}"`, limit);
+}
+
 function cleanOriginal(value: string): string {
   return value.replace(/\s*[\/.]\s*(?:Hebrew|עברית)\.?\s*$/i, "").replace(/[\s/.:;]+$/g, "").trim();
 }
 
-export async function nliOriginal(hebrewTitle: string, hebrewAuthor = ""): Promise<Bridge | null> {
-  const records = await nliSearch("title", hebrewTitle);
+function nliOriginalFromRecords(hebrewTitle: string, hebrewAuthor: string, records: NliRecord[]): Bridge | null {
   const ranked = records.map((record) => {
     const titleScore = similarity(hebrewTitle, record.title);
     const authorScore = hebrewAuthor ? Math.max(0, ...record.creators.map((creator) => similarity(hebrewAuthor, creator))) : 0;
@@ -156,6 +172,20 @@ export async function nliOriginal(hebrewTitle: string, hebrewAuthor = ""): Promi
   }).filter((item) => item.original && item.titleScore >= 0.78).sort((a, b) => b.score - a.score);
   const best = ranked[0];
   return best ? { title: best.original!, author: best.record.creators[0] ?? "", source: "NLI" } : null;
+}
+
+export async function nliOriginal(hebrewTitle: string, hebrewAuthor = ""): Promise<Bridge | null> {
+  const surname = authorSurname(hebrewAuthor);
+  const cleanTitle = cleanNliValue(hebrewTitle);
+  if (surname && cleanTitle) {
+    const fromAuthorSearch = nliOriginalFromRecords(
+      hebrewTitle,
+      hebrewAuthor,
+      await nliSearchQuery(`alma.title all "${cleanTitle}" AND alma.creator all "${surname}"`),
+    );
+    if (fromAuthorSearch) return fromAuthorSearch;
+  }
+  return nliOriginalFromRecords(hebrewTitle, hebrewAuthor, await nliSearch("title", hebrewTitle));
 }
 
 /** Recommendations only: a failure means no Hebrew edition this time, so it returns null. */
