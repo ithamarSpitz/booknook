@@ -13,6 +13,18 @@ export type HardcoverBook = {
   image?: { url?: string | null } | null;
 };
 
+export type HardcoverEnglishBook = HardcoverBook & {
+  description?: string | null;
+  rating?: number | null;
+  ratings_count?: number | null;
+  pages?: number | null;
+  release_year?: number | null;
+  default_physical_edition?: {
+    pages?: number | null;
+    publisher?: { name?: string | null } | null;
+  } | null;
+};
+
 export function authors(book: HardcoverBook): string[] {
   return (book.cached_contributors ?? []).map((item) => item?.author?.name).filter(Boolean) as string[];
 }
@@ -85,6 +97,26 @@ export async function hardcoverBooks(ids: number[]): Promise<HardcoverBook[]> {
   if (!ids.length) return [];
   const data = await graphql<{ books?: HardcoverBook[] }>(
     `query { books(where:{id:{_in:${JSON.stringify(ids)}}}) { id title slug users_read_count cached_contributors cached_similar_book_ids cached_tags image { url } } }`,
+  );
+  return data.books ?? [];
+}
+
+/** Search Hardcover's Book index and return provider IDs in relevance order. */
+export async function searchHardcoverBooks(query: string): Promise<number[]> {
+  const safe = query.replace(/[\\"]/g, " ").trim();
+  const data = await graphql<{ search?: { ids?: Array<string | number> } }>(
+    `query { search(query: "${safe}", query_type: "Book", per_page: 8) { ids } }`,
+  );
+  return (data.search?.ids ?? []).map(Number).filter(Number.isFinite);
+}
+
+/** Detailed Hardcover rows used to create and refresh English editions. */
+export async function hardcoverEnglishBooks(
+  ids: number[],
+): Promise<HardcoverEnglishBook[]> {
+  if (!ids.length) return [];
+  const data = await graphql<{ books?: HardcoverEnglishBook[] }>(
+    `query { books(where:{id:{_in:${JSON.stringify(ids)}}}) { id title slug users_read_count cached_contributors cached_similar_book_ids cached_tags image { url } description rating ratings_count pages release_year default_physical_edition { pages publisher { name } } } }`,
   );
   return data.books ?? [];
 }
