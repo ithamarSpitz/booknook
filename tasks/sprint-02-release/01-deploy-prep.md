@@ -18,7 +18,7 @@ environment: null
 verification:
   - npm run check:functions
   - >-
-    node -e "const t=require('fs').readFileSync('supabase/config.toml','utf8');if(!/\[auth\.email\][^\[]*enable_signup\s*=\s*false/s.test(t)&&!/\[auth\][^\[]*enable_signup\s*=\s*false/s.test(t))throw new Error('sign-up must be disabled')"
+    node -e "const t=require('fs').readFileSync('supabase/config.toml','utf8');const a=(t.split(/^\[auth\]\s*$/m)[1]||'').split(/^\[/m)[0];if(!/^enable_signup\s*=\s*false/m.test(a))throw new Error('sign-up must be disabled')"
 ---
 
 # Goal
