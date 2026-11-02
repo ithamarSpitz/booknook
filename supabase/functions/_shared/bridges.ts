@@ -56,6 +56,30 @@ async function wikidataAuthor(entity?: Entity | null, language = "en"): Promise<
   return (await wikidataEntity(id, `${language}|en`))?.labels?.[language]?.value ?? "";
 }
 
+function cleanHebrewWikidataLabel(label: string): string {
+  let result = label.trim();
+  while (true) {
+    const match = result.match(/^(.+?)\s+\([^)]+\)$/);
+    if (!match) break;
+    const stripped = match[1].trim();
+    if (!stripped) break;
+    result = stripped;
+  }
+  return result;
+}
+
+async function wikidataAuthorMatchesHint(entity: Entity | null, authorHint: string): Promise<boolean> {
+  const claims = entity?.claims?.P50 ?? [];
+  for (const claim of claims.slice(0, 2)) {
+    const id = claim?.mainsnak?.datavalue?.value?.id;
+    if (!id) continue;
+    const authorEntity = await wikidataEntity(id, "en");
+    const label = authorEntity?.labels?.en?.value ?? "";
+    if (similarity(authorHint, label) > 0.45) return true;
+  }
+  return false;
+}
+
 export async function wikidataOriginal(hebrewTitle: string): Promise<Bridge | null> {
   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(hebrewTitle)}&language=he&uselang=en&type=item&limit=8&format=json&origin=*`;
   const response = await providerFetch(url);
@@ -88,10 +112,27 @@ async function wikidataHebrewLookup(title: string, author: string): Promise<Brid
       score: similarity(title, candidate.label) * 3 + (author && normalize(candidate.description).includes(normalize(author)) ? 2 : 0),
     }))
     .sort((a: { score: number }, b: { score: number }) => b.score - a.score);
+  const checkedWorks = new Set<string>();
+  const authorHint = author.trim();
   for (const { candidate } of candidates.slice(0, 4)) {
-    const entity = await wikidataEntity(candidate.id);
+    let entity = await wikidataEntity(candidate.id);
+    let workId = candidate.id;
+    const editionOf = entity?.claims?.P629?.[0]?.mainsnak?.datavalue?.value?.id;
+    if (editionOf) {
+      workId = editionOf;
+      if (checkedWorks.has(workId)) continue;
+      entity = await wikidataEntity(editionOf);
+    } else if (checkedWorks.has(workId)) {
+      continue;
+    }
+    checkedWorks.add(workId);
     if (!isWrittenWork(entity)) continue;
-    const hebrewTitle = entity?.labels?.he?.value;
+    if (entity?.claims?.P50?.length && authorHint) {
+      if (!(await wikidataAuthorMatchesHint(entity, authorHint))) continue;
+    }
+    const rawHebrew = entity?.labels?.he?.value;
+    if (!rawHebrew) continue;
+    const hebrewTitle = cleanHebrewWikidataLabel(rawHebrew);
     if (!hebrewTitle) continue;
     return { title: hebrewTitle, author: await wikidataAuthor(entity, "he"), source: "Wikidata" };
   }
