@@ -303,6 +303,48 @@ sprints:
       - npm run verify:localization
       - npm run verify:english
 
+  S8-genre-shelves:
+    name: Genre recommendation shelves below the reader's shelves
+    tasks:
+      S8-T1:
+        file: tasks/sprint-08-genre-shelves/01-genre-table.md
+        stage: 1
+        depends_on: []
+      S8-T2:
+        file: tasks/sprint-08-genre-shelves/02-genre-logic.md
+        stage: 1
+        depends_on: []
+      S8-T3:
+        file: tasks/sprint-08-genre-shelves/03-genre-in-recommendations.md
+        stage: 2
+        depends_on:
+        - S8-T1
+        - S8-T2
+      S8-T4:
+        file: tasks/sprint-08-genre-shelves/04-load-genre-shelves.md
+        stage: 2
+        depends_on:
+        - S8-T1
+      S8-T5:
+        file: tasks/sprint-08-genre-shelves/05-genre-shelves-ui.md
+        stage: 3
+        depends_on:
+        - S8-T4
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      '2':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '3':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:resolution
+      - npm run verify:localization
+
   demo:
     name: Harness demo DAG
     tasks:

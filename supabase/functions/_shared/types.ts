@@ -203,6 +203,42 @@ export interface SearchEnglishResponse {
   books: EnglishBook[];
 }
 
+export interface GenreRecommendationRow {
+  user_id: string;
+  work_id: string;
+  genre: string;
+  shelf_position: number;
+  position: number;
+  simania_id: number | null;
+  score: number;
+  generated_at: string;
+}
+
+/** One item of the replace_genre_recommendations payload. */
+export interface GenreRecommendationReplacement {
+  work_id: string;
+  genre: string;
+  shelf_position: number;
+  position: number;
+  simania_id: number | null;
+  score: number;
+}
+
+export interface GenreBook {
+  work_id: string;
+  hardcover_id: number;
+  simania_id: number | null;
+  title: string;
+  author: string | null;
+  cover_url: string | null;
+  english_only: boolean;
+}
+
+export interface GenreShelf {
+  genre: string;
+  books: GenreBook[];
+}
+
 export interface ErrorResponse {
   error: string;
 }

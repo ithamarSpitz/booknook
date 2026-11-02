@@ -109,6 +109,23 @@ Authenticated clients may select; only service-role Edge Functions write. Null `
 
 RLS permits select where `user_id = auth.uid()`. Revoke table-level `UPDATE` from clients and grant only `UPDATE (dismissed)` on their own rows; the service role performs all other writes. Dismissal is one-way: a `BEFORE UPDATE OF dismissed` trigger permits `false -> true`, `false -> false`, and `true -> true`, but rejects `true -> false` with `22023`, for clients and the service role alike. Dismissed works therefore remain stored and excluded permanently.
 
+### `genre_recommendations`
+
+Recommendation shelves by genre, shown below the reader's own shelves.
+
+| Column | SQL type | Null? | Default / constraint |
+|---|---|---:|---|
+| `user_id` | `uuid` | no | references `auth.users(id)` on delete cascade; PK part 1 |
+| `work_id` | `uuid` | no | references `works`; PK part 2 (a work is on at most one genre shelf) |
+| `genre` | `text` | no | Hebrew shelf name from the genre map |
+| `shelf_position` | `smallint` | no | 0-4, shelf order |
+| `position` | `smallint` | no | 0-11, book order within the shelf |
+| `simania_id` | `integer` | yes | references `editions`; null is English-only |
+| `score` | `real` | no | none |
+| `generated_at` | `timestamptz` | no | `now()` |
+
+RLS: a user may only `SELECT` own rows; clients get no write grants. Writes go only through `replace_genre_recommendations`.
+
 ### `search_cache`
 
 | Column | SQL type | Null? | Default / constraint |
@@ -153,6 +170,10 @@ The TS interfaces `MoveBookArgs`, `MoveShelfArgs`, `DeleteShelfArgs`, and `Remov
 ```json
 {"rpc":"move_book","args":{"p_simania_id":1234,"p_to_shelf":"7d94c068-7489-4aea-9e13-78c1113df4f7","p_to_position":0},"result":null}
 ```
+
+### Service-only genre recommendation replacement
+
+`replace_genre_recommendations(p_user_id uuid, p_rows jsonb) returns void`: transactional, security-invoker, execute granted only to service_role (revoked from PUBLIC, anon, authenticated). `p_rows` is an array of at most 60 `GenreRecommendationReplacement` objects (`work_id`, `genre` non-empty, `shelf_position` 0-4, `position` 0-11, nullable `simania_id`, finite `score`); work IDs distinct; a non-null edition must belong to its work; at most 5 distinct genres and 12 rows per genre. Invalid payloads raise `22023`, missing references `23503`. Lock the user's `profiles` row first (same lock order as the other RPCs), delete all of this user's rows, insert the payload except works now on this user's shelves, with one `clock_timestamp()` as `generated_at`. Empty input clears the user's rows.
 
 ### Service-only recommendation replacement
 
@@ -244,6 +265,21 @@ Fetch missing candidate IDs from Hardcover in batches of at most 50; discard IDs
 
 Localization misses remain English-only: null Simania ID, title/authors/cover from the work, dismiss allowed, add-to-shelf forbidden. Localized cards use edition display data. `shared_tags` includes only actual candidate Hardcover tags also present on a contributing seed. `because_titles` looks up exact edition titles in `because` order; explanations never invent tags. Call `replace_recommendations` once with the completed candidates to preserve dismissed rows and atomically replace only non-dismissed rows, using one generation timestamp; build the response from its returned rows. Hardcover failure is `502`; individual bridge failure counts as a localization miss.
 
+### Genre recommendation shelves
+
+Computed in the same `recommendations` run, after the ordinary cards, and stored with `replace_genre_recommendations`; the response body does not change.
+
+1. **Genre map** (`supabase/functions/_shared/genres.ts`): a fixed list of Hebrew shelf names, each with Hardcover `Genre` tag aliases compared case-insensitively after trimming. Only mapped tags count; all others (for example `General`, `Fiction`, `did-not-finish`, `Audiobooks`) are ignored. Of each work, only its first 8 `Genre` tags are read. The list:
+   `מדע בדיוני`: Science Fiction, Sci-fi, Space, Aliens, Cyberpunk, Space Opera, Hard Science Fiction · `פנטזיה`: Fantasy, Epic Fantasy, High Fantasy, Urban Fantasy, Dark Fantasy · `דיסטופיה`: Dystopian, Dystopia, Post-Apocalyptic, Apocalyptic · `מותחנים`: Thriller, Thrillers, Thriller & Suspense, Suspense, Psychological Thriller · `מתח ובלש`: Mystery, Crime, Murder, Detective, Mystery & Detective · `רומנטיקה`: Romance, Contemporary Romance, Historical Romance · `ספרות יפה`: Literary Fiction, Literary, Literature & Fiction · `קלאסיקות`: Classics · `רומן היסטורי`: Historical Fiction · `אימה`: Horror · `הרפתקאות`: Adventure · `נוער`: Young Adult, Young Adult Fiction · `ריאליזם מאגי`: Magical Realism · `מלחמה`: War · `היסטוריה`: History · `ביוגרפיה וממואר`: Biography, Biography & Autobiography, Memoir, Autobiography · `קומיקס`: Comics, Graphic Novels · `הומור`: Humor · `עיון`: Nonfiction, Non-Fiction · `פילוסופיה`: Philosophy · `פסיכולוגיה`: Psychology · `מדע`: Science, Popular Science.
+   A work's genres are the distinct Hebrew names its mapped tags give, in tag order.
+2. **Genre seeds.** The ordinary seeds with their weights, plus every book on the caller's `reading` shelf that is not already a seed, with weight `2.5` (so a genre appears as soon as the reader starts reading in it). Only books with a `work_id`.
+3. **Qualifying genres.** For each Hebrew genre: `evidence` = sum of the weights of genre seeds whose work has it; `count` = number of such seeds. A genre qualifies when `count >= 2`. Order by evidence descending, then count descending, then Hebrew name; take at most the first 5 that end up with at least 4 books (step 4); fewer is fine, zero means no genre shelves.
+4. **Books per genre.** Candidates are the first 40 `similar_ids` of that genre's seeds, scored `weight * (1 - rank/40)` summed across those seeds. Keep only candidate works that are in `works` and have that genre (load missing candidate works from Hardcover in batches of 50, at most 100 new works per run in total across all genres, highest-scored first). Exclude works on any of the caller's shelves, dismissed recommendations, and works already placed on an earlier (higher-ordered) genre shelf. Order by score descending, then `hardcover_id` ascending; take up to 12; a genre with fewer than 4 is dropped (the next qualifying genre may take its place).
+5. **Edition.** For each book, `simania_id` is the caller's ordinary recommendation's `simania_id` for that work if any, else the most recently resolved positive-ID edition linked to the work, else null (English-only). No bridge or Simania calls are made for genre shelves.
+6. **Failure.** Any failure while computing or storing genre shelves is logged and ignored; it never fails the ordinary recommendations response.
+
+**Reading them (browser).** The library screen loads the caller's `genre_recommendations` once when the screen mounts (with each row's work and edition fields) and renders them below the reader's own shelves. It never re-renders them while mounted: no spinner, no live replacement. New rows written by a background regeneration appear on the next mount or page load. A genre shelf's book opens the book card (Simania edition by `simania_id`; English-only by `book-details` with `simania_id = -hardcover_id`), and the card offers adding it to one of the reader's shelves (`add-book` with `simania_id`, or `hardcover_id` for English-only).
+
 ### `match-by-author`
 
 Request `MatchByAuthorRequest`: `{"work_id":"...","candidates":[{"simania_id":97171,"title":"סחרור","author":"רוברט צ'רלס וילסון"}]}`; at most 8 candidates (`400` otherwise). Response `MatchByAuthorResponse`: `{"simania_id":97171,"resolve_status":"wikidata"}` or `{"simania_id":null,"resolve_status":null}`.
@@ -287,6 +323,10 @@ No external-site URL is included.
 | `added_at` | `string \| null` | caller's `shelf_books.added_at`, else null |
 | `finished_at` | `string \| null` | caller's `shelf_books.finished_at`, else null |
 | `rating` | `number \| null` | caller's `shelf_books.rating`, else null; unused by scoring |
+
+### `GenreShelf` and `GenreBook`
+
+`GenreShelf` is `{ genre, books }` ordered by `shelf_position`; `books` ordered by `position`. `GenreBook`: `work_id`; `hardcover_id` = `works.hardcover_id`; `simania_id`; `title` = edition title, else `works.original_title`; `author` = edition author, else `works.original_authors` joined with `, ` (null if empty); `cover_url` = edition cover, else `works.hardcover_cover_url`; `english_only` = `simania_id === null`.
 
 ### `RecommendationCard`
 
