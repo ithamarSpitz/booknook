@@ -12,7 +12,8 @@
     "test:db": "supabase db reset && supabase test db",
     "check:contract": "node scripts/check-contract.mjs",
     "check:harness": "harness validate",
-    "verify:integration": "node scripts/verify-integration.mjs"
+    "verify:integration": "node scripts/verify-integration.mjs",
+    "verify:resolution": "deno run --allow-net --allow-env --allow-read scripts/verify-resolution.ts"
   },
   "devDependencies": {
     "deno": "^2.9.6",
