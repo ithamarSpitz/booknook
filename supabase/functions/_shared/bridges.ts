@@ -8,6 +8,8 @@ const PROVIDER_HEADERS = {
 /** A provider answered with an error (after one retry), as opposed to answering "no match". */
 export class ProviderError extends Error {}
 
+class WikidataResponseError extends ProviderError {}
+
 async function providerFetch(url: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
   const headers = { ...PROVIDER_HEADERS, ...(init.headers as Record<string, string> | undefined) };
   for (let attempt = 0; ; attempt += 1) {
@@ -34,6 +36,14 @@ type Entity = {
   claims?: Record<string, Array<{ mainsnak?: { datavalue?: { value?: { id?: string } } } }>>;
 };
 
+async function wikidataField<T>(response: Response, field: string): Promise<T> {
+  const body = await response.json() as unknown;
+  if (typeof body !== "object" || body === null || "error" in body || !(field in body)) {
+    throw new WikidataResponseError(`www.wikidata.org returned an invalid ${field} response`);
+  }
+  return (body as Record<string, unknown>)[field] as T;
+}
+
 function entityTypes(entity?: Entity | null): string[] {
   return (entity?.claims?.P31 ?? []).map((claim) => claim?.mainsnak?.datavalue?.value?.id).filter(Boolean) as string[];
 }
@@ -51,7 +61,8 @@ function isHuman(entity?: Entity | null): boolean {
 async function wikidataEntity(id: string, languages = "he|en"): Promise<Entity | null> {
   const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(id)}&props=labels|descriptions|claims&languages=${languages}&format=json&origin=*`;
   const response = await providerFetch(url);
-  return (await response.json()).entities?.[id] ?? null;
+  const entities = await wikidataField<Record<string, Entity>>(response, "entities");
+  return entities[id] ?? null;
 }
 
 async function wikidataAuthor(entity?: Entity | null, language = "en"): Promise<string> {
@@ -87,7 +98,7 @@ async function wikidataAuthorMatchesHint(entity: Entity | null, authorHint: stri
 export async function wikidataOriginal(hebrewTitle: string): Promise<Bridge | null> {
   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(hebrewTitle)}&language=he&uselang=en&type=item&limit=8&format=json&origin=*`;
   const response = await providerFetch(url);
-  const search = (await response.json()).search ?? [];
+  const search = await wikidataField<Array<{ id: string; label?: string }>>(response, "search");
   for (const candidate of search.slice(0, 6)) {
     const entity = await wikidataEntity(candidate.id);
     if (!isWrittenWork(entity)) continue;
@@ -110,7 +121,7 @@ export async function wikidataHebrew(title: string, author = ""): Promise<Bridge
 async function wikidataHebrewLookup(title: string, author: string): Promise<Bridge | null> {
   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(title)}&language=en&uselang=en&type=item&limit=10&format=json&origin=*`;
   const response = await providerFetch(url);
-  const candidates = ((await response.json()).search ?? [])
+  const candidates = (await wikidataField<Array<{ id: string; label?: string; description?: string }>>(response, "search"))
     .map((candidate: { id: string; label?: string; description?: string }) => ({
       candidate,
       score: similarity(title, candidate.label) * 3 + (author && normalize(candidate.description).includes(normalize(author)) ? 2 : 0),
@@ -156,7 +167,7 @@ async function wikidataHebrewAuthorLookup(englishName: string): Promise<string |
   if (!name) return null;
   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&uselang=en&type=item&limit=5&format=json&origin=*`;
   const response = await providerFetch(url);
-  const search = (await response.json()).search ?? [];
+  const search = await wikidataField<Array<{ id: string; label?: string }>>(response, "search");
   let reads = 0;
   for (const candidate of search) {
     if (reads >= 3) break;
@@ -174,7 +185,8 @@ async function wikidataHebrewAuthorLookup(englishName: string): Promise<string |
 export async function wikidataEnglishAuthor(hebrewName: string): Promise<string | null> {
   try {
     return await wikidataEnglishAuthorLookup(hebrewName);
-  } catch {
+  } catch (error) {
+    if (error instanceof ProviderError) throw error;
     return null;
   }
 }
@@ -184,7 +196,7 @@ async function wikidataEnglishAuthorLookup(hebrewName: string): Promise<string |
   if (!name) return null;
   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}&language=he&uselang=en&type=item&limit=5&format=json&origin=*`;
   const response = await providerFetch(url);
-  const search = (await response.json()).search ?? [];
+  const search = await wikidataField<Array<{ id: string; label?: string }>>(response, "search");
   let reads = 0;
   for (const candidate of search) {
     if (reads >= 3) break;

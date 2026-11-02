@@ -1,5 +1,6 @@
-import { assertEquals } from "jsr:@std/assert@1";
+import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
+  ProviderError,
   wikidataEnglishAuthor,
   wikidataHebrewAuthor,
 } from "../../supabase/functions/_shared/bridges.ts";
@@ -183,7 +184,10 @@ Deno.test("wikidata author bridges return null on fetch failure", async () => {
   globalThis.fetch = () => Promise.resolve(new Response("error", { status: 500 }));
   try {
     assertEquals(await wikidataHebrewAuthor("Fredrik Backman"), null);
-    assertEquals(await wikidataEnglishAuthor("דיוויד קופ"), null);
+    await assertRejects(
+      () => wikidataEnglishAuthor("דיוויד קופ"),
+      ProviderError,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
