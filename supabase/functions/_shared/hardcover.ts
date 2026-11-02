@@ -1,4 +1,4 @@
-import { fetchTimeout, HttpError, similarity } from "./utils.ts";
+import { fetchTimeout, HttpError, normalize, similarity } from "./utils.ts";
 
 const HARDCOVER = "https://api.hardcover.app/v1/graphql";
 
@@ -35,7 +35,24 @@ async function graphql<T>(query: string): Promise<T> {
   return payload.data as T;
 }
 
-export async function findHardcoverBook(originalTitle: string, authorHint = ""): Promise<HardcoverBook | null> {
+export type FindHardcoverBookOptions = {
+  requireAuthor?: boolean;
+};
+
+function authorBoost(authorHint: string, book: HardcoverBook): number {
+  if (!authorHint.trim()) return 0;
+  return authors(book).some((author) => similarity(authorHint, author) > 0.45) ? 2 : 0;
+}
+
+function firstContributorNormalized(book: HardcoverBook): string {
+  return normalize(authors(book)[0] ?? "");
+}
+
+export async function findHardcoverBook(
+  originalTitle: string,
+  authorHint = "",
+  options?: FindHardcoverBookOptions,
+): Promise<HardcoverBook | null> {
   const safe = originalTitle.replace(/[\\"]/g, " ").trim();
   const search = await graphql<{ search?: { ids?: Array<string | number> } }>(
     `query { search(query: "${safe}", query_type: "Book", per_page: 8) { ids } }`,
@@ -44,12 +61,24 @@ export async function findHardcoverBook(originalTitle: string, authorHint = ""):
   if (!ids.length) return null;
   const details = await hardcoverBooks(ids);
   const ranked = details.map((book) => {
-    let score = similarity(originalTitle, book.title) * 3;
-    if (authorHint && authors(book).some((author) => similarity(authorHint, author) > 0.45)) score += 2;
+    const titleDice = similarity(originalTitle, book.title);
+    let score = titleDice * 3;
+    const boost = authorBoost(authorHint, book);
+    score += boost;
     score += Math.log10(1 + (book.users_read_count ?? 0)) / 20;
-    return { book, score };
-  }).sort((a, b) => b.score - a.score);
-  return ranked[0] && similarity(originalTitle, ranked[0].book.title) >= 0.5 ? ranked[0].book : null;
+    return { book, score, titleDice, boost };
+  }).sort((a, b) => b.score - a.score || a.book.id - b.book.id);
+  const top = ranked[0];
+  if (!top || top.titleDice < 0.5) return null;
+  if (options?.requireAuthor && top.boost === 0) return null;
+  if (top.boost === 0) {
+    const topAuthor = firstContributorNormalized(top.book);
+    for (const entry of ranked.slice(1)) {
+      if (entry.titleDice !== top.titleDice) continue;
+      if (firstContributorNormalized(entry.book) !== topAuthor) return null;
+    }
+  }
+  return top.book;
 }
 
 export async function hardcoverBooks(ids: number[]): Promise<HardcoverBook[]> {
