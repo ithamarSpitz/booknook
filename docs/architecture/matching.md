@@ -6,7 +6,7 @@ The current implementation in `supabase/functions/_shared/bridges.ts` and `siman
 
 1. Wikidata: find a written work by the Hebrew title, read its original or English label and author (`wikidataOriginal`).
 2. Look the result up on Hardcover (`findHardcoverBook`); accept only if title and author are close after normalization.
-3. If that fails, NLI: read the uniform/original title (MARC 240) for the Hebrew record (`nliOriginal`) and repeat step 2.
+3. If that fails, NLI: read the uniform/original title (MARC 240) for the Hebrew record (`nliOriginal`) and repeat step 2. Search NLI by title and author surname first, then by title alone. NLI creators are Hebrew, so the Hardcover author hint is the English author of another linked edition by the same Simania author, when one exists.
 4. Nothing accepted: `resolve_status = 'not_found'`, but only when every provider answered. If any provider request failed, keep `pending` so a later request retries.
 5. Record which step succeeded in `resolve_status` (`wikidata`, `nli`, `fuzzy`).
 

@@ -104,6 +104,51 @@ sprints:
       '1':
       - npm run test:web
 
+  S4-resolution:
+    name: Link more Hebrew editions and never recommend an owned book
+    tasks:
+      S4-T1:
+        file: tasks/sprint-04-resolution/01-nli-author-search.md
+        stage: 1
+        depends_on: []
+      S4-T2:
+        file: tasks/sprint-04-resolution/02-match-title.md
+        stage: 1
+        depends_on: []
+      S4-T3:
+        file: tasks/sprint-04-resolution/03-link-edition-shelved.md
+        stage: 1
+        depends_on: []
+      S4-T4:
+        file: tasks/sprint-04-resolution/04-english-author-hint.md
+        stage: 2
+        depends_on:
+        - S4-T2
+      S4-T5:
+        file: tasks/sprint-04-resolution/05-self-healing.md
+        stage: 3
+        depends_on:
+        - S4-T4
+      S4-T6:
+        file: tasks/sprint-04-resolution/06-live-resolution-gate.md
+        stage: 3
+        depends_on:
+        - S4-T1
+        - S4-T4
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '2':
+      - npm run check:functions
+      - npm run test:functions
+      '3':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:resolution
+
   demo:
     name: Harness demo DAG
     tasks:

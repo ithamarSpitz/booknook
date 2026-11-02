@@ -37,12 +37,13 @@ The `search-books` function was removed. Search runs in the browser: under 2 cha
   6. `shared_tags`: tags present on the candidate and on at least one of its seeds.
   7. Replace the caller's non-dismissed rows in `recommendations`, return them.
 - Zero seeds returns `{ recommendations: [] }` with status 200.
+- Self-healing: before selecting seeds, it resolves at most 2 of the caller's unlinked shelved editions (`pending`, or `not_found` at least 14 days old), within 20 seconds; failures are ignored.
 - The browser regenerates recommendations in the background (`public/js/recs-refresh.js`, debounced) after every shelf change.
 
 ## link-edition
 
 - In: `{ work_id, simania_id, source: "wikidata" | "nli", simania: { details, rating } }`. Out: `{ work_id, simania_id, title, author, cover_url }`.
-- Behavior: the caller must have a non-dismissed recommendation for `work_id` (404 otherwise). Store the edition with the 30-day rule, link it to the work only while its `work_id` is null, keep an existing link to the same work, and answer 409 if it links to a different work (never relink). On success set the caller's recommendation `simania_id`.
+- Behavior: the caller must have a non-dismissed recommendation for `work_id` (404 otherwise). Store the edition with the 30-day rule, link it to the work only while its `work_id` is null, keep an existing link to the same work, and answer 409 if it links to a different work (never relink). If the caller already has that edition, or another edition of the work, on a shelf, delete the recommendation and answer 409 "Already on your shelves.". Otherwise set the caller's recommendation `simania_id`.
 
 ## invite-user
 
