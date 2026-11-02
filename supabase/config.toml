@@ -29,6 +29,9 @@ enable_signup = true
 subject = "{{ .Data.inviter_name }} מזמין/ה אותך ל־BookNook"
 content_path = "./supabase/templates/invite.html"
 
+[functions.match-by-author]
+verify_jwt = true
+
 [functions.link-edition]
 verify_jwt = true
 
