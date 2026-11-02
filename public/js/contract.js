@@ -10,6 +10,7 @@ export const FUNCTIONS = Object.freeze({
   ADD_BOOK: "add-book",
   BOOK_DETAILS: "book-details",
   LINK_EDITION: "link-edition",
+  MATCH_BY_AUTHOR: "match-by-author",
   INVITE_USER: "invite-user",
   RECOMMENDATIONS: "recommendations",
 });
@@ -88,5 +89,6 @@ export const RPCS = Object.freeze({
  * @property {boolean} english_only
  * @property {boolean} can_add
  * @property {{source: 'wikidata'|'nli', title: string, author: string|null}|null} hebrew_hint English-only: Hebrew title for the browser's Simania match
+ * @property {string|null} hebrew_author English-only: Hebrew author name for the browser's Simania author search; not stored
  */
 

@@ -22,6 +22,8 @@ import {
   shouldShowRecsEmptyState,
   sortRecommendations,
   visibleRecommendations,
+  localizeRecommendations,
+  recommendationFromApiCard,
 } from "../../public/js/recs.js";
 
 const recsCss = readFileSync(new URL("../../public/css/recs.css", import.meta.url), "utf8");
@@ -553,3 +555,146 @@ function firstText(el) {
   const node = el.childNodes.find((c) => c.nodeType === 3 && String(c.textContent).trim());
   return String(node?.textContent ?? "").trim();
 }
+
+describe("localizeRecommendations author path", () => {
+  const base = (workId, extra = {}) => ({
+    work_id: workId,
+    title: "Spin",
+    english_only: true,
+    can_add: false,
+    hebrew_hint: null,
+    hebrew_author: null,
+    ...extra,
+  });
+
+  it("does not use the author path when the title match succeeds", async () => {
+    const sent = [];
+    await localizeRecommendations([
+      base("w1", {
+        hebrew_hint: { source: "wikidata", title: "סחרור", author: wilsonAuthor() },
+        hebrew_author: wilsonAuthor(),
+      }),
+    ], {
+      match: async () => ({ id: 97171, title: "סחרור" }),
+      searchByAuthor: async () => assert.fail("author search must not run"),
+      fetchPayload: async () => ({ details: { title: "סחרור" }, rating: null }),
+      callFunction: async (name, body) => {
+        sent.push([name, body]);
+        return { simania_id: body.simania_id, title: "סחרור", author: null, cover_url: null };
+      },
+      onLinked: () => {},
+      isCurrent: () => true,
+    });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0][0], "link-edition");
+    assert.deepEqual(sent[0][1].source, "wikidata");
+  });
+
+  it("runs match-by-author then link-edition when the title misses", async () => {
+    const sent = [];
+    const linked = [];
+    const candidates = [{ simania_id: 97171, title: "סחרור", author: wilsonAuthor() }];
+    await localizeRecommendations([
+      base("w2", {
+        hebrew_hint: { source: "nli", title: "סחרור", author: wilsonAuthor() },
+        hebrew_author: wilsonAuthor(),
+      }),
+    ], {
+      match: async () => null,
+      searchByAuthor: async () => candidates,
+      fetchPayload: async () => ({ details: { title: "סחרור" }, rating: null }),
+      callFunction: async (name, body) => {
+        sent.push([name, body]);
+        if (name === "match-by-author") {
+          return { simania_id: 97171, resolve_status: "wikidata" };
+        }
+        return { simania_id: 97171, title: "סחרור", author: wilsonAuthor(), cover_url: null };
+      },
+      onLinked: (workId, patch) => linked.push([workId, patch]),
+      isCurrent: () => true,
+    });
+    assert.deepEqual(sent[0], ["match-by-author", { work_id: "w2", candidates }]);
+    assert.deepEqual(sent[1][0], "link-edition");
+    assert.equal(sent[1][1].source, "wikidata");
+    assert.deepEqual(linked, [["w2", { simania_id: 97171, title: "סחרור", author: wilsonAuthor(), cover_url: null }]]);
+  });
+
+  it("skips link-edition when match-by-author returns null", async () => {
+    const sent = [];
+    await localizeRecommendations([
+      base("w3", { hebrew_author: wilsonAuthor() }),
+    ], {
+      match: async () => null,
+      searchByAuthor: async () => [{ simania_id: 1, title: "ס", author: "א" }],
+      fetchPayload: async () => assert.fail("must not fetch"),
+      callFunction: async (name) => {
+        sent.push(name);
+        return { simania_id: null, resolve_status: null };
+      },
+      onLinked: () => assert.fail("must not link"),
+      isCurrent: () => true,
+    });
+    assert.deepEqual(sent, ["match-by-author"]);
+  });
+
+  it("localizes a card with only hebrew_author", async () => {
+    const sent = [];
+    await localizeRecommendations([base("w4", { hebrew_author: wilsonAuthor() })], {
+      match: async () => assert.fail("title match must not run without hint"),
+      searchByAuthor: async () => [{ simania_id: 7, title: "ס", author: wilsonAuthor() }],
+      fetchPayload: async () => ({ details: { title: "ס" }, rating: null }),
+      callFunction: async (name, body) => {
+        sent.push(name);
+        if (name === "match-by-author") return { simania_id: 7, resolve_status: "nli" };
+        return { simania_id: 7, title: "ס", author: null, cover_url: null };
+      },
+      onLinked: () => {},
+      isCurrent: () => true,
+    });
+    assert.deepEqual(sent, ["match-by-author", "link-edition"]);
+  });
+
+  it("maps fuzzy resolve_status to nli for link-edition", async () => {
+    const sent = [];
+    await localizeRecommendations([base("w5", { hebrew_author: wilsonAuthor() })], {
+      match: async () => null,
+      searchByAuthor: async () => [{ simania_id: 9, title: "ס", author: wilsonAuthor() }],
+      fetchPayload: async () => ({ details: { title: "ס" }, rating: null }),
+      callFunction: async (name, body) => {
+        sent.push([name, body]);
+        if (name === "match-by-author") return { simania_id: 9, resolve_status: "fuzzy" };
+        return { simania_id: 9, title: "ס", author: null, cover_url: null };
+      },
+      onLinked: () => {},
+      isCurrent: () => true,
+    });
+    assert.equal(sent[1][0], "link-edition");
+    assert.equal(sent[1][1].source, "nli");
+  });
+});
+
+function wilsonAuthor() {
+  return "רוברט צ'ארלס וילסון";
+}
+
+describe("recommendationFromApiCard hebrew_author", () => {
+  it("keeps hebrew_author on English-only cards", () => {
+    const card = recommendationFromApiCard({
+      work_id: "w",
+      simania_id: null,
+      title: "Spin",
+      hebrew_author: wilsonAuthor(),
+    });
+    assert.equal(card.hebrew_author, wilsonAuthor());
+  });
+
+  it("clears hebrew_author when simania_id is set", () => {
+    const card = recommendationFromApiCard({
+      work_id: "w",
+      simania_id: 1,
+      title: "ס",
+      hebrew_author: wilsonAuthor(),
+    });
+    assert.equal(card.hebrew_author, null);
+  });
+});

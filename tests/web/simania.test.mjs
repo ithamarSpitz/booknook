@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fetchSimaniaPayload, matchHebrewBook, searchBooks, simaniaIdOf } from "../../public/js/simania.js";
+import { fetchSimaniaPayload, matchHebrewBook, searchBooks, searchByAuthor, simaniaIdOf } from "../../public/js/simania.js";
 import { applyLocalizedRecommendation, localizeRecommendations } from "../../public/js/recs.js";
 
 /** Fake Simania MCP endpoint answering each tool from a table, in SSE framing. */
@@ -56,6 +56,27 @@ describe("browser Simania client", () => {
   it("reads numeric IDs only", () => {
     assert.equal(simaniaIdOf({ bookId: "12" }), 12);
     assert.equal(simaniaIdOf({ id: "x" }), null);
+  });
+
+  it("searchByAuthor uses first and last word, filters by author similarity and Hebrew title", async () => {
+    const calls = [];
+    const wilson = "רוברט צ'ארלס וילסון";
+    const results = await searchByAuthor(wilson, fakeFetch({
+      books_search: [
+        { id: 97171, title: "סחרור", author: "רוברט צ'רלס וילסון" },
+        { id: 2, title: "עונש מוות", author: "רוברט כהן" },
+        { id: 3, title: "Spin", author: "רוברט צ'רלס וילסון" },
+      ],
+    }, calls));
+    assert.deepEqual(calls[0].args, { query: "רוברט וילסון", limit: 50, offset: 0 });
+    assert.deepEqual(results, [{ simania_id: 97171, title: "סחרור", author: "רוברט צ'רלס וילסון" }]);
+    assert.equal(results.some((r) => r.title === "Spin"), false);
+  });
+
+  it("searchByAuthor makes no call for an empty name", async () => {
+    const calls = [];
+    assert.deepEqual(await searchByAuthor("  ", fakeFetch({}, calls)), []);
+    assert.equal(calls.length, 0);
   });
 });
 
