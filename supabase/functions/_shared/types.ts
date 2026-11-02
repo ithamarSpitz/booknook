@@ -137,6 +137,8 @@ export interface RecommendationCard {
   can_add: boolean;
   /** English-only cards: Hebrew title from the Wikidata/NLI bridge, for the browser's Simania match. */
   hebrew_hint: HebrewHint | null;
+  /** English-only cards: the author's Hebrew name, for the browser's Simania author search; null when unknown. */
+  hebrew_author?: string | null;
 }
 
 export interface HebrewHint {
@@ -153,6 +155,24 @@ export interface LinkEditionRequest {
 }
 
 /** The localized fields that replace the English-only ones on the card. */
+export interface AuthorCandidate {
+  simania_id: number;
+  title: string;
+  author: string | null;
+}
+
+export interface MatchByAuthorRequest {
+  work_id: string;
+  candidates: AuthorCandidate[];
+}
+
+export interface MatchByAuthorResponse {
+  /** The candidate that resolves to exactly this work, or null. */
+  simania_id: number | null;
+  /** That edition's resolve status (`wikidata`, `nli` or `fuzzy`), or null. */
+  resolve_status: ResolveStatus | null;
+}
+
 export interface LinkEditionResponse {
   work_id: string;
   simania_id: number;

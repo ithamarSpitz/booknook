@@ -160,6 +160,71 @@ sprints:
       '1':
       - npm run test:web
 
+  S6-localization:
+    name: Find Hebrew editions for English-only recommendations
+    tasks:
+      S6-T1:
+        file: tasks/sprint-06-localization/01-wikidata-hebrew-title.md
+        stage: 1
+        depends_on: []
+      S6-T2:
+        file: tasks/sprint-06-localization/02-no-guessing.md
+        stage: 1
+        depends_on: []
+      S6-T3:
+        file: tasks/sprint-06-localization/03-author-bridges.md
+        stage: 2
+        depends_on:
+        - S6-T1
+      S6-T4:
+        file: tasks/sprint-06-localization/04-match-by-author-function.md
+        stage: 2
+        depends_on:
+        - S6-T2
+      S6-T5:
+        file: tasks/sprint-06-localization/05-english-author-fallback.md
+        stage: 3
+        depends_on:
+        - S6-T2
+        - S6-T3
+      S6-T6:
+        file: tasks/sprint-06-localization/06-hebrew-author-on-cards.md
+        stage: 3
+        depends_on:
+        - S6-T3
+      S6-T7:
+        file: tasks/sprint-06-localization/07-browser-author-path.md
+        stage: 4
+        depends_on:
+        - S6-T4
+        - S6-T6
+      S6-T8:
+        file: tasks/sprint-06-localization/08-live-localization-gate.md
+        stage: 5
+        depends_on:
+        - S6-T5
+        - S6-T7
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      '2':
+      - npm run check:functions
+      - npm run test:functions
+      '3':
+      - npm run check:functions
+      - npm run test:functions
+      '4':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '5':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:resolution
+      - npm run verify:localization
+
   demo:
     name: Harness demo DAG
     tasks:
