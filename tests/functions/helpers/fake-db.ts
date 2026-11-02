@@ -3,9 +3,12 @@ import type { CatalogDb } from "../../../supabase/functions/_shared/catalog.ts";
 type Row = Record<string, any>;
 type Result = { data: any; error: any };
 
+type Filter = [string, unknown] | ["__in__", string, unknown[]];
+
 class Query implements PromiseLike<Result> {
-  private action: "select" | "upsert" | "update" | "insert" = "select";
-  private filters: Array<[string, unknown]> = [];
+  private action: "select" | "upsert" | "update" | "insert" | "delete" =
+    "select";
+  private filters: Filter[] = [];
   private payload: Row | Row[] | null = null;
   private conflict = "id";
   private defaultToNull = true;
@@ -23,6 +26,16 @@ class Query implements PromiseLike<Result> {
 
   is(column: string, value: null): this {
     this.filters.push([column, value]);
+    return this;
+  }
+
+  in(column: string, values: unknown[]): this {
+    this.filters.push(["__in__", column, values]);
+    return this;
+  }
+
+  delete(): this {
+    this.action = "delete";
     return this;
   }
 
@@ -73,7 +86,15 @@ class Query implements PromiseLike<Result> {
   }
 
   private matches(row: Row): boolean {
-    return this.filters.every(([column, value]) => row[column] === value);
+    return this.filters.every((filter) => {
+      if (filter[0] === "__in__") {
+        const column = filter[1] as string;
+        const values = filter[2] as unknown[];
+        return values.includes(row[column]);
+      }
+      const [column, value] = filter;
+      return row[column] === value;
+    });
   }
 
   private execute(): Result {
@@ -90,6 +111,13 @@ class Query implements PromiseLike<Result> {
       const changed = rows.filter((row) => this.matches(row));
       for (const row of changed) Object.assign(row, this.payload);
       return { data: changed.map((row) => ({ ...row })), error: null };
+    }
+    if (this.action === "delete") {
+      const deleted = rows.filter((row) => this.matches(row));
+      const kept = rows.filter((row) => !this.matches(row));
+      rows.length = 0;
+      rows.push(...kept);
+      return { data: deleted.map((row) => ({ ...row })), error: null };
     }
     const incoming =
       (Array.isArray(this.payload) ? this.payload : [this.payload]) as Row[];

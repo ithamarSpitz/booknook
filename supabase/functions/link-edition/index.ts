@@ -96,6 +96,34 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
         throw new HttpError(409, "Edition belongs to another work.");
       }
 
+      const callerDb = deps.userClient(req);
+      const onThisEdition = await callerDb.from("shelf_books")
+        .select("simania_id").eq("user_id", userId).eq("simania_id", simaniaId)
+        .maybeSingle();
+      if (onThisEdition.error) dbFailure(onThisEdition.error);
+      let onShelf = !!onThisEdition.data;
+      if (!onShelf) {
+        const siblings = await callerDb.from("editions").select("simania_id")
+          .eq("work_id", input.work_id);
+        if (siblings.error) dbFailure(siblings.error);
+        const siblingIds = (siblings.data ?? [])
+          .map((row: { simania_id: number }) => row.simania_id)
+          .filter((id: number) => id !== simaniaId);
+        if (siblingIds.length > 0) {
+          const shelved = await callerDb.from("shelf_books").select("simania_id")
+            .eq("user_id", userId).in("simania_id", siblingIds);
+          if (shelved.error) dbFailure(shelved.error);
+          onShelf = (shelved.data?.length ?? 0) > 0;
+        }
+      }
+      if (onShelf) {
+        const removed = await db.from("recommendations").delete()
+          .eq("user_id", userId).eq("work_id", input.work_id)
+          .eq("dismissed", false);
+        if (removed.error) dbFailure(removed.error);
+        throw new HttpError(409, "Already on your shelves.");
+      }
+
       const updated = await db.from("recommendations")
         .update({ simania_id: simaniaId })
         .eq("user_id", userId).eq("work_id", input.work_id).select("work_id");
