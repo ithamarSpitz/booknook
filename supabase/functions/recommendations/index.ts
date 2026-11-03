@@ -162,6 +162,7 @@ function notFoundRetryDue(
 }
 
 function editionNeedsSelfHeal(edition: EditionRow, now: Date): boolean {
+  if (edition.simania_id < 0) return false;
   if (edition.work_id !== null) return false;
   if (edition.resolve_status === "pending") return true;
   if (edition.resolve_status === "not_found") {
@@ -506,6 +507,7 @@ export async function handleRecommendations(
           : null;
         return {
           work_id: row.work_id,
+          hardcover_id: item.work.hardcover_id!,
           simania_id: row.simania_id,
           title: edition?.title ?? item.work.original_title,
           author: edition?.author ??
@@ -522,7 +524,7 @@ export async function handleRecommendations(
           dismissed: row.dismissed,
           generated_at: row.generated_at,
           english_only: row.simania_id === null,
-          can_add: row.simania_id !== null,
+          can_add: true,
           hebrew_hint: row.simania_id === null ? item.hint : null,
           hebrew_author,
         };

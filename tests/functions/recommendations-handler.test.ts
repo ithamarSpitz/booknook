@@ -1,4 +1,8 @@
 import { handleRecommendations } from "../../supabase/functions/recommendations/index.ts";
+import {
+  bookCard,
+  ensureResolved,
+} from "../../supabase/functions/_shared/catalog.ts";
 import type {
   EditionRow,
   WorkRow,
@@ -286,8 +290,12 @@ Deno.test("handler excludes shelved and dismissed works and retains an English-o
   );
   assert(
     payload.recommendations[0].english_only === true &&
-      payload.recommendations[0].can_add === false,
+      payload.recommendations[0].can_add === true,
     "English-only flags mismatch",
+  );
+  assert(
+    payload.recommendations[0].hardcover_id === 4,
+    "English-only card should expose its Hardcover ID",
   );
   assert(
     payload.recommendations[0].hebrew_hint?.title === "נשמר",
@@ -396,6 +404,10 @@ Deno.test("self-heal resolves at most two newest eligible editions", async () =>
         resolved_at: "2020-01-01T00:00:00Z",
       },
     }),
+    shelfBook(-383752, "want", null, {
+      added_at: "2026-08-01T00:00:00Z",
+      edition: { resolve_status: "pending", work_id: null },
+    }),
   ];
   const db = new FakeDb(library, [linked]);
   const resolveCalls: number[] = [];
@@ -416,8 +428,126 @@ Deno.test("self-heal resolves at most two newest eligible editions", async () =>
     "only the two newest pending editions should be resolved",
   );
   assert(!resolveCalls.includes(404), "linked edition should not be resolved");
-  assert(!resolveCalls.includes(405), "recent not_found should not be resolved");
-  assert(!resolveCalls.includes(406), "older not_found waits its turn after pending");
+  assert(
+    !resolveCalls.includes(405),
+    "recent not_found should not be resolved",
+  );
+  assert(
+    !resolveCalls.includes(406),
+    "older not_found waits its turn after pending",
+  );
+  assert(
+    !resolveCalls.includes(-383752),
+    "English edition should not be resolved",
+  );
+});
+
+Deno.test("linked English edition seeds recommendations with its exact title", async () => {
+  const englishSeed = work("spin", 383752, [100]);
+  const candidate = work("candidate", 100);
+  const db = new FakeDb(
+    [shelfBook(-383752, "read", englishSeed, {
+      rating: 5,
+      edition: {
+        title: "Spin",
+        resolve_status: "hardcover",
+        work_id: englishSeed.id,
+      },
+    })],
+    [englishSeed, candidate],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => null,
+  });
+  const payload = await response.json();
+  assert(response.status === 200, "expected 200");
+  assert(payload.recommendations.length === 1, "expected one recommendation");
+  assert(
+    payload.recommendations[0].because[0] === -383752,
+    "English edition should contribute as a seed",
+  );
+  assert(
+    payload.recommendations[0].because_titles[0] === "Spin",
+    "because_titles should use the English edition title",
+  );
+});
+
+Deno.test("ensureResolved returns a negative-ID edition without provider calls", async () => {
+  const current: EditionRow = {
+    simania_id: -383752,
+    work_id: null,
+    resolve_status: "pending",
+    resolved_at: null,
+    title: "Spin",
+    author: "Robert Charles Wilson",
+    translator: null,
+    publisher: null,
+    series: null,
+    category: null,
+    year: null,
+    pages: null,
+    description: null,
+    cover_url: null,
+    simania_rating: null,
+    simania_rating_count: null,
+    details_at: null,
+  };
+  let calls = 0;
+  const provider = async () => {
+    calls += 1;
+    throw new Error("provider should not be called");
+  };
+  const result = await ensureResolved(
+    {
+      from: () => {
+        throw new Error("database should not be queried");
+      },
+    },
+    current,
+    {
+      wikidataOriginal: provider as never,
+      nliOriginal: provider as never,
+      wikidataEnglishAuthor: provider as never,
+      findHardcoverBook: provider as never,
+      now: () => {
+        calls += 1;
+        return new Date();
+      },
+    },
+  );
+  assert(
+    result === current,
+    "negative-ID edition should be returned unchanged",
+  );
+  assert(calls === 0, "negative-ID edition should bypass providers");
+});
+
+Deno.test("bookCard marks negative IDs as English editions", async () => {
+  const current: EditionRow = {
+    simania_id: -383752,
+    work_id: "spin",
+    resolve_status: "hardcover",
+    resolved_at: "2026-11-03T00:00:00Z",
+    title: "Spin",
+    author: "Robert Charles Wilson",
+    translator: null,
+    publisher: null,
+    series: null,
+    category: null,
+    year: 2005,
+    pages: null,
+    description: null,
+    cover_url: null,
+    simania_rating: null,
+    simania_rating_count: null,
+    details_at: "2026-11-03T00:00:00Z",
+  };
+  const card = await bookCard(new FakeDb([], []) as never, "user", current);
+  assert(card.english_edition === true, "negative ID should mark English edition");
 });
 
 Deno.test("self-heal resolver failure does not fail the request", async () => {
@@ -593,6 +723,14 @@ Deno.test("localized recommendation card has null hebrew_author", async () => {
   });
   const payload = await response.json();
   assert(payload.recommendations[0].simania_id === 777, "expected localized card");
+  assert(
+    payload.recommendations[0].hardcover_id === 100,
+    "expected Hardcover ID",
+  );
+  assert(
+    payload.recommendations[0].can_add === true,
+    "localized card should be addable",
+  );
   assert(
     payload.recommendations[0].hebrew_author === null,
     "localized card should not carry hebrew_author",
