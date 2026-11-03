@@ -46,3 +46,7 @@ In the existing add-book search box, typing in English finds English books on Ha
 # Acceptance criteria
 
 1. The behavior above; `npm run test:web` passes.
+
+# Previous attempt (start here)
+
+A previous attempt implemented this task (verification passed) and stopped only because the agent quota ran out during review. Apply `tasks/sprint-07-english-books/draft/S7-T7-changes.diff.txt` (for example `git apply --ignore-whitespace`), review it carefully against this brief and the contract, fix anything missing or wrong, then run the verification commands. Do not edit the draft files.

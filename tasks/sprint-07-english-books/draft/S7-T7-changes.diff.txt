@@ -1,0 +1,367 @@
+diff --git a/public/css/base.css b/public/css/base.css
+index 85454ea..5a60126 100644
+--- a/public/css/base.css
++++ b/public/css/base.css
+@@ -257,6 +257,7 @@
+   .shelf-delete{display:grid;place-items:center;width:24px;height:24px;margin:0;padding:0;border:0;background:none;color:#f0a593;font-size:22px;line-height:1;cursor:pointer;opacity:0;transition:opacity .15s}
+   .shelf-head:hover .shelf-delete,.shelf-head:focus-within .shelf-delete,.shelf-head.tapped .shelf-delete{opacity:1}
+   .add-slot:disabled{opacity:.6;cursor:wait}
++  .search-hit-language{align-self:flex-start;padding:1px 7px;border-radius:999px;background:#f3e6c8;color:#6b3d14;font-size:11px;font-weight:700;line-height:1.5}
+ 
+   @media (prefers-reduced-motion: reduce) {
+     html{scroll-behavior:auto}
+diff --git a/public/js/add-book.js b/public/js/add-book.js
+index 85b261f..c44f5ad 100644
+--- a/public/js/add-book.js
++++ b/public/js/add-book.js
+@@ -8,11 +8,20 @@ import { promptRating, shouldPromptRating } from "./my-rating.js";
+ // response keeps the old search-books envelope so mapSearchResults is unchanged.
+ const searchSimania = async (query) => ({ books: await searchBooks(query) });
+ 
++const HEBREW_LETTER = /[\u0590-\u05FF]/;
++const LATIN_LETTER = /[A-Za-z]/;
++
+ export const SEARCH_DEBOUNCE_MS = 300;
+ export const MIN_SEARCH_QUERY_LEN = 2;
+ 
+ export const DUPLICATE_MSG = "הספר כבר בספרייה שלך";
+ 
++/** English-only queries go to Hardcover; Hebrew and mixed queries stay on Simania. */
++export function isEnglishQuery(text) {
++  const value = String(text ?? "").trim();
++  return LATIN_LETTER.test(value) && !HEBREW_LETTER.test(value);
++}
++
+ /** @typedef {{
+  *   api?: { callFunction: Function, getClient?: Function, getSession?: Function },
+  *   data?: typeof import('./data.js'),
+@@ -84,6 +93,9 @@ export function debounce(waitMs, fn) {
+ 
+ /** @param {Record<string, unknown>} raw */
+ export function mapSearchBook(raw) {
++  const hardcoverIdRaw = raw.hardcover_id;
++  const hardcoverIdNumber = hardcoverIdRaw == null ? null : Number(hardcoverIdRaw);
++  const hardcoverId = Number.isSafeInteger(hardcoverIdNumber) && hardcoverIdNumber > 0 ? hardcoverIdNumber : null;
+   const id = raw.id ?? raw.bookId;
+   const yearRaw = raw.year;
+   let year = null;
+@@ -93,7 +105,9 @@ export function mapSearchBook(raw) {
+     if (Number.isFinite(n)) year = n;
+   }
+   return {
+-    simania_id: typeof id === "number" ? id : Number(id),
++    simania_id: hardcoverId != null ? -hardcoverId : typeof id === "number" ? id : Number(id),
++    hardcover_id: hardcoverId,
++    english_edition: hardcoverId != null,
+     title: String(raw.title ?? ""),
+     author: raw.author != null ? String(raw.author) : null,
+     year,
+@@ -138,6 +152,7 @@ export function applyOptimisticAdd(state, shelfId, hit, pendingKey = nextPending
+   if (!shelf) return next;
+   shelf.books.push({
+     simania_id: hit.simania_id,
++    english_edition: hit.english_edition === true,
+     work_id: null,
+     resolve_status: "pending",
+     title: hit.title,
+@@ -241,36 +256,64 @@ export function markPendingBooks(libRoot, state) {
+ }
+ 
+ /**
+- * @param {number} simaniaId
+- * @param {string} shelfId
++ * @param {string} name
++ * @param {Record<string, unknown>} body
+  */
+-async function callAddBook(simaniaId, shelfId) {
++async function callAuthenticatedFunction(name, body) {
+   const api = await import("./api.js");
+   const { FUNCTIONS_URL, SUPABASE_ANON_KEY } = await import("./config.js");
+-  const [session, simania] = await Promise.all([api.getSession(), fetchSimaniaPayload(simaniaId)]);
++  const session = await api.getSession();
+   const token = session?.access_token || SUPABASE_ANON_KEY;
+-  const res = await fetch(`${FUNCTIONS_URL}/${FUNCTIONS.ADD_BOOK}`, {
++  const res = await fetch(`${FUNCTIONS_URL}/${name}`, {
+     method: "POST",
+     headers: {
+       "Content-Type": "application/json",
+       apikey: SUPABASE_ANON_KEY,
+       Authorization: `Bearer ${token}`,
+     },
+-    body: JSON.stringify({ simania_id: simaniaId, shelf_id: shelfId, simania }),
++    body: JSON.stringify(body),
+   });
+   const json = await res.json().catch(() => ({}));
+-  if (res.status === 409) {
+-    const err = new Error(DUPLICATE_MSG);
+-    err.status = 409;
+-    throw err;
+-  }
+   if (!res.ok) {
+     const msg = typeof json.error === "string" ? json.error : `שגיאה (${res.status})`;
+-    throw new Error(msg);
++    const err = new Error(msg);
++    err.status = res.status;
++    throw err;
+   }
+   return json;
+ }
+ 
++const searchEnglish = (query) => callAuthenticatedFunction(FUNCTIONS.SEARCH_ENGLISH, { query });
++
++/**
++ * @param {ReturnType<typeof mapSearchBook>} hit
++ * @param {string} shelfId
++ * @param {typeof fetchSimaniaPayload} [fetchPayload]
++ */
++export async function buildAddBookRequest(hit, shelfId, fetchPayload = fetchSimaniaPayload) {
++  return hit.english_edition
++    ? { hardcover_id: hit.hardcover_id, shelf_id: shelfId }
++    : {
++        simania_id: hit.simania_id,
++        shelf_id: shelfId,
++        simania: await fetchPayload(hit.simania_id),
++      };
++}
++
++/**
++ * @param {ReturnType<typeof mapSearchBook>} hit
++ * @param {string} shelfId
++ */
++async function callAddBook(hit, shelfId) {
++  const body = await buildAddBookRequest(hit, shelfId);
++  try {
++    return await callAuthenticatedFunction(FUNCTIONS.ADD_BOOK, body);
++  } catch (err) {
++    if (err && typeof err === "object" && err.status === 409) err.message = DUPLICATE_MSG;
++    throw err;
++  }
++}
++
+ function renderResultItem(hit) {
+   const title = escapeHtml(hit.title);
+   const author = escapeHtml(hit.author || "");
+@@ -278,9 +321,11 @@ function renderResultItem(hit) {
+   const cover = hit.cover_url
+     ? `<img src="${escapeHtml(hit.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+     : `<span class="search-hit-cover-ph" aria-hidden="true"></span>`;
++  const direction = hit.english_edition ? ` dir="auto"` : "";
++  const language = hit.english_edition ? `<small class="search-hit-language">אנגלית</small>` : "";
+   return `<li><button type="button" class="search-hit" data-simania-id="${hit.simania_id}">
+     ${cover}
+-    <span class="search-hit-text"><strong>${title}</strong><span>${author}${year}</span></span>
++    <span class="search-hit-text">${language}<strong${direction}>${title}</strong><span${direction}>${author}${year}</span></span>
+   </button></li>`;
+ }
+ 
+@@ -312,6 +357,7 @@ function setResultsPanel(panel, { status, hits = [], message = "" }) {
+  *   panel: HTMLElement,
+  *   onPick: (hit: ReturnType<typeof mapSearchBook>) => void,
+  *   callSearch: (query: string) => Promise<unknown>,
++ *   callEnglishSearch?: (query: string) => Promise<unknown>,
+  * }} opts
+  */
+ export function wireSearchInput(opts) {
+@@ -330,7 +376,8 @@ export function wireSearchInput(opts) {
+     }
+     setResultsPanel(opts.panel, { status: "loading" });
+     try {
+-      const payload = await opts.callSearch(trimmed);
++      const search = isEnglishQuery(trimmed) ? (opts.callEnglishSearch ?? opts.callSearch) : opts.callSearch;
++      const payload = await search(trimmed);
+       if (!gen.isLatest(token)) return;
+       lastHits = mapSearchBooksResponse(payload);
+       setResultsPanel(opts.panel, { status: "results", hits: lastHits });
+@@ -384,7 +431,7 @@ function ensurePickerShell() {
+     <h3 id="picker-title">הוספת ספר</h3>
+     <p class="picker-shelf"></p>
+     <form class="search add-book-search" action="#">
+-      <input type="search" autocomplete="off" placeholder="חפש ספר בעברית…" aria-label="חיפוש ספר">
++      <input type="search" autocomplete="off" placeholder="חפש ספר בעברית או באנגלית…" aria-label="חיפוש ספר">
+     </form>
+     <div class="search-panel"></div>
+   </div>`;
+@@ -456,7 +503,7 @@ export async function addBookToShelf(hit, shelfId, options = {}) {
+ 
+   const add = options.add ?? callAddBook;
+   try {
+-    const payload = await add(hit.simania_id, shelfId);
++    const payload = await add(hit, shelfId);
+     const book = payload?.book;
+     if (!book) throw new Error("תשובה לא תקינה מהשרת");
+     ctx.setLibrary(fillBookFromAddResponse(ctx.getLibrary(), shelfId, pendingKey, book));
+@@ -494,6 +541,7 @@ function wirePicker(ctx) {
+       input,
+       panel,
+       callSearch: searchSimania,
++      callEnglishSearch: searchEnglish,
+       onPick: (hit) => {
+         if (presetShelfId) void addBookToShelf(hit, presetShelfId, { ctx });
+       },
+@@ -545,7 +593,7 @@ export async function mount(root, ctx) {
+   const inner = root.querySelector(".screen-inner") ?? root;
+   inner.innerHTML = `<header class="search-page-head"><h1>חיפוש ספרים</h1></header>
+     <form class="search add-book-search search-page" action="#">
+-      <input type="search" autocomplete="off" placeholder="חפש ספר בעברית…" aria-label="חיפוש ספר">
++      <input type="search" autocomplete="off" placeholder="חפש ספר בעברית או באנגלית…" aria-label="חיפוש ספר">
+     </form>
+     <div class="search-panel"></div>
+     <div class="shelf-pick" hidden>
+@@ -604,6 +652,7 @@ export async function mount(root, ctx) {
+     input,
+     panel,
+     callSearch: searchSimania,
++    callEnglishSearch: searchEnglish,
+     onPick: (hit) => showShelfPick(hit),
+   });
+ 
+diff --git a/public/js/contract.js b/public/js/contract.js
+index c5dfe83..0977527 100644
+--- a/public/js/contract.js
++++ b/public/js/contract.js
+@@ -9,6 +9,7 @@ export const SHELF_KINDS = Object.freeze({
+ export const FUNCTIONS = Object.freeze({
+   ADD_BOOK: "add-book",
+   BOOK_DETAILS: "book-details",
++  SEARCH_ENGLISH: "search-english",
+   LINK_EDITION: "link-edition",
+   MATCH_BY_AUTHOR: "match-by-author",
+   INVITE_USER: "invite-user",
+@@ -50,6 +51,7 @@ export const RPCS = Object.freeze({
+ /**
+  * @typedef {Object} BookCard
+  * @property {number} simania_id
++ * @property {boolean} english_edition
+  * @property {string|null} work_id
+  * @property {'pending'|'wikidata'|'nli'|'fuzzy'|'llm'|'not_found'} resolve_status
+  * @property {string} title
+diff --git a/public/js/simania.js b/public/js/simania.js
+index 11a57d2..9bb5f7d 100644
+--- a/public/js/simania.js
++++ b/public/js/simania.js
+@@ -104,9 +104,10 @@ function objectResult(value, keys) {
+ /**
+  * Raw Simania details and rating for one book, as the Edge Functions expect in
+  * the `simania` request field. Rating failure is tolerated; details are required.
+- * @returns {Promise<{details: Record<string, unknown>, rating: Record<string, unknown> | null}>}
++ * @returns {Promise<{details: Record<string, unknown>, rating: Record<string, unknown> | null} | null>}
+  */
+ export async function fetchSimaniaPayload(simaniaId, fetchImpl = fetch) {
++  if (Number(simaniaId) < 0) return null;
+   const [details, rating] = await Promise.all([
+     callTool("books_get_details", { bookId: simaniaId }, fetchImpl),
+     callTool("books_get_rating", { bookId: simaniaId }, fetchImpl).catch(() => null),
+diff --git a/tests/web/add-book.test.mjs b/tests/web/add-book.test.mjs
+index 59dd631..918a87b 100644
+--- a/tests/web/add-book.test.mjs
++++ b/tests/web/add-book.test.mjs
+@@ -7,9 +7,11 @@ import {
+   addBookToShelf,
+   addErrorMessage,
+   applyOptimisticAdd,
++  buildAddBookRequest,
+   createSearchGeneration,
+   debounce,
+   fillBookFromAddResponse,
++  isEnglishQuery,
+   mapSearchBook,
+   mapSearchBooksResponse,
+   markPendingBooks,
+@@ -80,6 +82,15 @@ function fakeCtx(initial) {
+   };
+ }
+ 
++describe("English query detection", () => {
++  it("uses English search only for Latin text without Hebrew", () => {
++    assert.equal(isEnglishQuery("Spin"), true);
++    assert.equal(isEnglishQuery("סחרור"), false);
++    assert.equal(isEnglishQuery("Spin סחרור"), false);
++    assert.equal(isEnglishQuery("1984"), false);
++  });
++});
++
+ describe("mapSearchBooksResponse", () => {
+   it("maps contract search-books rows to display fields", () => {
+     const hits = mapSearchBooksResponse({
+@@ -141,6 +152,35 @@ describe("debounce", () => {
+ });
+ 
+ describe("wireSearchInput stale responses", () => {
++  it("routes an English query to search-english and not Simania", async () => {
++    const input = mockNode();
++    const panel = mockNode();
++    const calls = [];
++    wireSearchInput({
++      input,
++      panel,
++      callSearch: async () => {
++        calls.push("simania");
++        return { books: [] };
++      },
++      callEnglishSearch: async (query) => {
++        calls.push(["search-english", query]);
++        return {
++          books: [{ hardcover_id: 383752, title: "Spin", author: "Robert Charles Wilson", year: 2005, cover_url: null }],
++        };
++      },
++      onPick() {},
++    });
++
++    input.value = "Spin";
++    input.dispatch("input");
++    await delay(SEARCH_DEBOUNCE_MS + 40);
++
++    assert.deepEqual(calls, [["search-english", "Spin"]]);
++    assert.match(panel.innerHTML, /אנגלית/);
++    assert.match(panel.innerHTML, /dir="auto"/);
++  });
++
+   it("drops an older payload that arrives after a newer search", async () => {
+     const input = mockNode();
+     const panel = mockNode();
+@@ -481,6 +521,28 @@ describe("addBookToShelf", () => {
+     assert.equal(book.title, "מהשרת");
+     assert.equal(book.pending, false);
+   });
++
++  it("posts an English pick with hardcover_id and shelf_id only", async () => {
++    const ctx = fakeCtx(sampleLibrary([]));
++    const hit = mapSearchBook({
++      hardcover_id: 383752,
++      title: "Spin",
++      author: "Robert Charles Wilson",
++      year: 2005,
++      cover_url: null,
++    });
++    let posted;
++    await addBookToShelf(hit, "s1", {
++      ctx,
++      add: async (picked, shelfId) => {
++        posted = await buildAddBookRequest(picked, shelfId, async () => assert.fail("must not call Simania"));
++        return { book: { simania_id: -383752, title: "Spin", author: "Robert Charles Wilson", resolve_status: "hardcover" } };
++      },
++    });
++
++    assert.deepEqual(posted, { hardcover_id: 383752, shelf_id: "s1" });
++    assert.equal(Object.hasOwn(posted, "simania"), false);
++  });
+ });
+ 
+ describe("overlapping adds", () => {
+diff --git a/tests/web/simania.test.mjs b/tests/web/simania.test.mjs
+index c1a9dda..4d32083 100644
+--- a/tests/web/simania.test.mjs
++++ b/tests/web/simania.test.mjs
+@@ -43,6 +43,12 @@ describe("browser Simania client", () => {
+     assert.deepEqual(payload, { details: { title: "ספר" }, rating: null });
+   });
+ 
++  it("does not fetch Simania payloads for negative English edition IDs", async () => {
++    const calls = [];
++    assert.equal(await fetchSimaniaPayload(-383752, fakeFetch({}, calls)), null);
++    assert.equal(calls.length, 0);
++  });
++
+   it("matches title plus author, falls back to the title alone, and enforces Dice 0.45", async () => {
+     const calls = [];
+     const match = await matchHebrewBook("הנסיך הקטן", "סנט", fakeFetch({
