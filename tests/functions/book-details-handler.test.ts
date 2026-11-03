@@ -68,3 +68,51 @@ Deno.test("book-details does not resolve an edition that already has a result", 
   assertEquals(response.status, 200);
   assertEquals(resolved, 0);
 });
+
+Deno.test("book-details serves a negative English edition without Simania or resolution", async () => {
+  const english = edition({
+    simania_id: -383752,
+    work_id: "work-1",
+    resolve_status: "hardcover",
+    title: "Spin",
+  }) as EditionRow;
+  let englishId: number | null = null;
+  let simaniaCalls = 0;
+  let resolverCalls = 0;
+  const handler = createHandler({
+    requireUser: async () => "user-1",
+    serviceClient: () => new FakeDb(),
+    userClient: () => new FakeDb(),
+    ensureEnglishEdition: async (_db, hardcoverId) => {
+      englishId = hardcoverId;
+      return english;
+    },
+    ensureEdition: async () => {
+      simaniaCalls++;
+      return english;
+    },
+    ensureResolved: async () => {
+      resolverCalls++;
+      return english;
+    },
+  });
+
+  const response = await handler(
+    new Request("http://local/book-details", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer test",
+      },
+      body: JSON.stringify({ simania_id: -383752 }),
+    }),
+  );
+  const payload = await response.json();
+
+  assertEquals(response.status, 200);
+  assertEquals(englishId, 383752);
+  assertEquals(simaniaCalls, 0);
+  assertEquals(resolverCalls, 0);
+  assertEquals(payload.book.simania_id, -383752);
+  assertEquals(payload.book.resolve_status, "hardcover");
+});
