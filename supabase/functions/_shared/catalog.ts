@@ -354,6 +354,7 @@ export async function ensureResolved(
   edition: EditionRow,
   overrides: Partial<CatalogProviders> = {},
 ): Promise<EditionRow> {
+  if (edition.simania_id < 0) return edition;
   const api = { ...providers, ...overrides };
   const now = api.now();
   if (
@@ -451,6 +452,7 @@ export async function bookCard(
   }
   return {
     simania_id: edition.simania_id,
+    english_edition: edition.simania_id < 0,
     work_id: edition.work_id,
     resolve_status: edition.resolve_status,
     title: edition.title,
