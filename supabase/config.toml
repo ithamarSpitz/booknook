@@ -46,3 +46,6 @@ verify_jwt = true
 
 [functions.recommendations]
 verify_jwt = true
+
+[functions.search-english]
+verify_jwt = true
