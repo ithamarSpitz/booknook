@@ -7,6 +7,7 @@ import {
   suppliedSimania,
 } from "../_shared/catalog.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
+import { ensureEnglishEdition } from "../_shared/english.ts";
 import type { AddBookRequest, AddBookResponse } from "../_shared/types.ts";
 import {
   body,
@@ -21,6 +22,7 @@ type FunctionDeps = {
   serviceClient: () => CatalogDb;
   userClient: (req: Request) => CatalogDb;
   ensureEdition: typeof ensureEdition;
+  ensureEnglishEdition: typeof ensureEnglishEdition;
   ensureResolved: typeof ensureResolved;
 };
 
@@ -29,6 +31,7 @@ const defaults: FunctionDeps = {
   serviceClient,
   userClient,
   ensureEdition,
+  ensureEnglishEdition,
   ensureResolved,
 };
 
@@ -49,14 +52,21 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
     try {
       const userId = await deps.requireUser(req);
       const input = await body<Partial<AddBookRequest>>(req);
+      const hasSimaniaId = input.simania_id !== undefined;
+      const hasHardcoverId = input.hardcover_id !== undefined;
       if (
-        !Number.isSafeInteger(input.simania_id) ||
-        Number(input.simania_id) <= 0 ||
+        hasSimaniaId === hasHardcoverId ||
+        (hasSimaniaId &&
+          (!Number.isSafeInteger(input.simania_id) ||
+            Number(input.simania_id) <= 0)) ||
+        (hasHardcoverId &&
+          (!Number.isSafeInteger(input.hardcover_id) ||
+            Number(input.hardcover_id) <= 0)) ||
         typeof input.shelf_id !== "string" || !input.shelf_id.trim()
       ) {
         throw new HttpError(
           400,
-          "A valid Simania ID and shelf ID are required.",
+          "Exactly one valid book ID and a shelf ID are required.",
         );
       }
 
@@ -67,18 +77,26 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
       if (shelfResult.error) throw new Error(shelfResult.error.message);
       if (!shelfResult.data) throw new HttpError(404, "Shelf not found.");
 
-      let edition = await deps.ensureEdition(
-        catalogDb,
-        input.simania_id!,
-        suppliedProviders(suppliedSimania(input.simania)),
-      );
-      try {
-        edition = await deps.ensureResolved(catalogDb, edition);
-      } catch (error) {
-        console.error(
-          "Book resolution failed; shelving unresolved edition.",
-          error,
+      let edition;
+      if (hasHardcoverId) {
+        edition = await deps.ensureEnglishEdition(
+          catalogDb,
+          input.hardcover_id!,
         );
+      } else {
+        edition = await deps.ensureEdition(
+          catalogDb,
+          input.simania_id!,
+          suppliedProviders(suppliedSimania(input.simania)),
+        );
+        try {
+          edition = await deps.ensureResolved(catalogDb, edition);
+        } catch (error) {
+          console.error(
+            "Book resolution failed; shelving unresolved edition.",
+            error,
+          );
+        }
       }
 
       const insertResult = await callerDb.from("shelf_books").insert({
