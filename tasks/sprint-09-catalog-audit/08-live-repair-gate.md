@@ -4,7 +4,7 @@ stage: 4
 model_class: worker
 timeout_minutes: 35
 review: true
-allow_protected: false
+allow_protected: true
 depends_on:
   - S9-T6
   - S9-T7
