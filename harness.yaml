@@ -27,16 +27,28 @@ cursor:
 
 agy:
   enabled: true
+  # agy 1.4.12 rejects --effort for its Claude models (checked 2026-11-05), so reviews and
+  # escalation use Gemini, and the Opus attempt sets no effort.
+  implementation_sequence:
+    - model: gemini-3.8-flash-medium
+    - model: gemini-3.8-flash-high
+    - model: claude-opus-4-6-thinking
+  review_model: gemini-3.8-flash-high
+  review_effort: high
+  escalation_model: gemini-3.8-flash-high
+  escalation_effort: high
 
 claude:
   enabled: true
 
 providers:
+  # agy last-but-one until the harness lets it explore (exact allow rules deny ls/Get-ChildItem,
+  # which burns attempts; harness report items 11-13).
   priority:
-    - agy
     - codex
-    - cursor
     - claude
+    - agy
+    - cursor
 
 codex:
   enabled: true
