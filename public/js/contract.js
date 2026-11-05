@@ -9,6 +9,7 @@ export const SHELF_KINDS = Object.freeze({
 export const FUNCTIONS = Object.freeze({
   ADD_BOOK: "add-book",
   BOOK_DETAILS: "book-details",
+  SEARCH_ENGLISH: "search-english",
   LINK_EDITION: "link-edition",
   MATCH_BY_AUTHOR: "match-by-author",
   INVITE_USER: "invite-user",
@@ -50,8 +51,9 @@ export const RPCS = Object.freeze({
 /**
  * @typedef {Object} BookCard
  * @property {number} simania_id
+ * @property {boolean} english_edition
  * @property {string|null} work_id
- * @property {'pending'|'wikidata'|'nli'|'fuzzy'|'llm'|'not_found'} resolve_status
+ * @property {'pending'|'wikidata'|'nli'|'fuzzy'|'llm'|'not_found'|'hardcover'} resolve_status
  * @property {string} title
  * @property {string|null} author
  * @property {string|null} translator

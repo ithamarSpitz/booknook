@@ -43,6 +43,12 @@ describe("browser Simania client", () => {
     assert.deepEqual(payload, { details: { title: "ספר" }, rating: null });
   });
 
+  it("does not fetch Simania payloads for negative English edition IDs", async () => {
+    const calls = [];
+    assert.equal(await fetchSimaniaPayload(-383752, fakeFetch({}, calls)), null);
+    assert.equal(calls.length, 0);
+  });
+
   it("matches title plus author, falls back to the title alone, and enforces Dice 0.45", async () => {
     const calls = [];
     const match = await matchHebrewBook("הנסיך הקטן", "סנט", fakeFetch({

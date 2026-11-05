@@ -8,10 +8,19 @@ import { promptRating, shouldPromptRating } from "./my-rating.js";
 // response keeps the old search-books envelope so mapSearchResults is unchanged.
 const searchSimania = async (query) => ({ books: await searchBooks(query) });
 
+const HEBREW_LETTER = /[\u0590-\u05FF]/;
+const LATIN_LETTER = /[A-Za-z]/;
+
 export const SEARCH_DEBOUNCE_MS = 300;
 export const MIN_SEARCH_QUERY_LEN = 2;
 
 export const DUPLICATE_MSG = "הספר כבר בספרייה שלך";
+
+/** English-only queries go to Hardcover; Hebrew and mixed queries stay on Simania. */
+export function isEnglishQuery(text) {
+  const value = String(text ?? "").trim();
+  return LATIN_LETTER.test(value) && !HEBREW_LETTER.test(value);
+}
 
 /** @typedef {{
  *   api?: { callFunction: Function, getClient?: Function, getSession?: Function },
@@ -84,6 +93,9 @@ export function debounce(waitMs, fn) {
 
 /** @param {Record<string, unknown>} raw */
 export function mapSearchBook(raw) {
+  const hardcoverIdRaw = raw.hardcover_id;
+  const hardcoverIdNumber = hardcoverIdRaw == null ? null : Number(hardcoverIdRaw);
+  const hardcoverId = Number.isSafeInteger(hardcoverIdNumber) && hardcoverIdNumber > 0 ? hardcoverIdNumber : null;
   const id = raw.id ?? raw.bookId;
   const yearRaw = raw.year;
   let year = null;
@@ -93,7 +105,9 @@ export function mapSearchBook(raw) {
     if (Number.isFinite(n)) year = n;
   }
   return {
-    simania_id: typeof id === "number" ? id : Number(id),
+    simania_id: hardcoverId != null ? -hardcoverId : typeof id === "number" ? id : Number(id),
+    hardcover_id: hardcoverId,
+    english_edition: hardcoverId != null,
     title: String(raw.title ?? ""),
     author: raw.author != null ? String(raw.author) : null,
     year,
@@ -138,6 +152,7 @@ export function applyOptimisticAdd(state, shelfId, hit, pendingKey = nextPending
   if (!shelf) return next;
   shelf.books.push({
     simania_id: hit.simania_id,
+    english_edition: hit.english_edition === true,
     work_id: null,
     resolve_status: "pending",
     title: hit.title,
@@ -241,34 +256,62 @@ export function markPendingBooks(libRoot, state) {
 }
 
 /**
- * @param {number} simaniaId
- * @param {string} shelfId
+ * @param {string} name
+ * @param {Record<string, unknown>} body
  */
-async function callAddBook(simaniaId, shelfId) {
+async function callAuthenticatedFunction(name, body) {
   const api = await import("./api.js");
   const { FUNCTIONS_URL, SUPABASE_ANON_KEY } = await import("./config.js");
-  const [session, simania] = await Promise.all([api.getSession(), fetchSimaniaPayload(simaniaId)]);
+  const session = await api.getSession();
   const token = session?.access_token || SUPABASE_ANON_KEY;
-  const res = await fetch(`${FUNCTIONS_URL}/${FUNCTIONS.ADD_BOOK}`, {
+  const res = await fetch(`${FUNCTIONS_URL}/${name}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ simania_id: simaniaId, shelf_id: shelfId, simania }),
+    body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
-  if (res.status === 409) {
-    const err = new Error(DUPLICATE_MSG);
-    err.status = 409;
-    throw err;
-  }
   if (!res.ok) {
     const msg = typeof json.error === "string" ? json.error : `שגיאה (${res.status})`;
-    throw new Error(msg);
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
   }
   return json;
+}
+
+const searchEnglish = (query) => callAuthenticatedFunction(FUNCTIONS.SEARCH_ENGLISH, { query });
+
+/**
+ * @param {ReturnType<typeof mapSearchBook>} hit
+ * @param {string} shelfId
+ * @param {typeof fetchSimaniaPayload} [fetchPayload]
+ */
+export async function buildAddBookRequest(hit, shelfId, fetchPayload = fetchSimaniaPayload) {
+  return hit.english_edition
+    ? { hardcover_id: hit.hardcover_id, shelf_id: shelfId }
+    : {
+        simania_id: hit.simania_id,
+        shelf_id: shelfId,
+        simania: await fetchPayload(hit.simania_id),
+      };
+}
+
+/**
+ * @param {ReturnType<typeof mapSearchBook>} hit
+ * @param {string} shelfId
+ */
+async function callAddBook(hit, shelfId) {
+  const body = await buildAddBookRequest(hit, shelfId);
+  try {
+    return await callAuthenticatedFunction(FUNCTIONS.ADD_BOOK, body);
+  } catch (err) {
+    if (err && typeof err === "object" && err.status === 409) err.message = DUPLICATE_MSG;
+    throw err;
+  }
 }
 
 function renderResultItem(hit) {
@@ -278,9 +321,11 @@ function renderResultItem(hit) {
   const cover = hit.cover_url
     ? `<img src="${escapeHtml(hit.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
     : `<span class="search-hit-cover-ph" aria-hidden="true"></span>`;
+  const direction = hit.english_edition ? ` dir="auto"` : "";
+  const language = hit.english_edition ? `<small class="search-hit-language">אנגלית</small>` : "";
   return `<li><button type="button" class="search-hit" data-simania-id="${hit.simania_id}">
     ${cover}
-    <span class="search-hit-text"><strong>${title}</strong><span>${author}${year}</span></span>
+    <span class="search-hit-text">${language}<strong${direction}>${title}</strong><span${direction}>${author}${year}</span></span>
   </button></li>`;
 }
 
@@ -312,6 +357,7 @@ function setResultsPanel(panel, { status, hits = [], message = "" }) {
  *   panel: HTMLElement,
  *   onPick: (hit: ReturnType<typeof mapSearchBook>) => void,
  *   callSearch: (query: string) => Promise<unknown>,
+ *   callEnglishSearch?: (query: string) => Promise<unknown>,
  * }} opts
  */
 export function wireSearchInput(opts) {
@@ -330,7 +376,8 @@ export function wireSearchInput(opts) {
     }
     setResultsPanel(opts.panel, { status: "loading" });
     try {
-      const payload = await opts.callSearch(trimmed);
+      const search = isEnglishQuery(trimmed) ? (opts.callEnglishSearch ?? opts.callSearch) : opts.callSearch;
+      const payload = await search(trimmed);
       if (!gen.isLatest(token)) return;
       lastHits = mapSearchBooksResponse(payload);
       setResultsPanel(opts.panel, { status: "results", hits: lastHits });
@@ -384,7 +431,7 @@ function ensurePickerShell() {
     <h3 id="picker-title">הוספת ספר</h3>
     <p class="picker-shelf"></p>
     <form class="search add-book-search" action="#">
-      <input type="search" autocomplete="off" placeholder="חפש ספר בעברית…" aria-label="חיפוש ספר">
+      <input type="search" autocomplete="off" placeholder="חפש ספר בעברית או באנגלית…" aria-label="חיפוש ספר">
     </form>
     <div class="search-panel"></div>
   </div>`;
@@ -456,7 +503,7 @@ export async function addBookToShelf(hit, shelfId, options = {}) {
 
   const add = options.add ?? callAddBook;
   try {
-    const payload = await add(hit.simania_id, shelfId);
+    const payload = await add(hit, shelfId);
     const book = payload?.book;
     if (!book) throw new Error("תשובה לא תקינה מהשרת");
     ctx.setLibrary(fillBookFromAddResponse(ctx.getLibrary(), shelfId, pendingKey, book));
@@ -494,6 +541,7 @@ function wirePicker(ctx) {
       input,
       panel,
       callSearch: searchSimania,
+      callEnglishSearch: searchEnglish,
       onPick: (hit) => {
         if (presetShelfId) void addBookToShelf(hit, presetShelfId, { ctx });
       },
@@ -545,7 +593,7 @@ export async function mount(root, ctx) {
   const inner = root.querySelector(".screen-inner") ?? root;
   inner.innerHTML = `<header class="search-page-head"><h1>חיפוש ספרים</h1></header>
     <form class="search add-book-search search-page" action="#">
-      <input type="search" autocomplete="off" placeholder="חפש ספר בעברית…" aria-label="חיפוש ספר">
+      <input type="search" autocomplete="off" placeholder="חפש ספר בעברית או באנגלית…" aria-label="חיפוש ספר">
     </form>
     <div class="search-panel"></div>
     <div class="shelf-pick" hidden>
@@ -604,6 +652,7 @@ export async function mount(root, ctx) {
     input,
     panel,
     callSearch: searchSimania,
+    callEnglishSearch: searchEnglish,
     onPick: (hit) => showShelfPick(hit),
   });
 
