@@ -431,7 +431,7 @@ sprints:
       - npm run test:web
       - npm run verify:repair
   S10-relink:
-    name: Relink wrong-author editions; recommendations never use English editions; genre card reasons; shelf rating stars
+    name: Relink wrong-author editions; recommendations never use English editions; genre card reasons and Hebrew editions; shelf rating stars
     tasks:
       S10-T1:
         file: tasks/sprint-10-relink/01-page-original.md
@@ -484,6 +484,29 @@ sprints:
         file: tasks/sprint-10-relink/11-shelf-rating-stars.md
         stage: 1
         depends_on: []
+      S10-T12:
+        file: tasks/sprint-10-relink/12-genre-link-auth.md
+        stage: 1
+        depends_on: []
+      S10-T13:
+        file: tasks/sprint-10-relink/13-genre-hint-function.md
+        stage: 3
+        depends_on:
+        - S10-T6
+        - S10-T9
+      S10-T14:
+        file: tasks/sprint-10-relink/14-genre-localize-ui.md
+        stage: 4
+        depends_on:
+        - S10-T10
+        - S10-T11
+        - S10-T12
+        - S10-T13
+      S10-T15:
+        file: tasks/sprint-10-relink/15-genre-localization-gate.md
+        stage: 4
+        depends_on:
+        - S10-T13
     stage_verification:
       '1':
       - npm run check:functions
@@ -498,3 +521,8 @@ sprints:
       - npm run test:web
       - npm run verify:localization
       - npm run verify:repair
+      '4':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:localization

@@ -36,7 +36,8 @@ The genre path (step 5) already filters `simania_id > 0`.
 Contract: "Linking a localized edition" (last sentence) and the `recommendations` table (`simania_id` is null or positive).
 
 1. `linkedEdition()` considers only editions with `simania_id > 0`. With none, the card is English-only (null `simania_id`, a Hebrew hint as today). Keep the existing ordering among positive editions.
-2. Check the rest of `supabase/functions/recommendations/index.ts` for any other place that turns an edition linked to a work into a recommendation or genre `simania_id`. Make each one positive-only, and list them in your report.
+2. `hebrewAuthorFor()` (same file) takes the author of the most recently resolved edition of a work by the same English author, with no ID filter. English editions are the newest and carry the Latin name, so once a reader opened Daisy Jones & The Six, `Taylor Jenkins Reid` became its "Hebrew" author and Simania's author search found nothing. The catalog does hold `טיילור ג'נקינס-ריד` on 1006655 and 1008807. Read only positive-ID editions there. Test: a work by `Taylor Jenkins Reid` with an English edition (author `Taylor Jenkins Reid`, newest) and a Hebrew one (author `טיילור ג'נקינס-ריד`) gives the Hebrew name.
+3. Check the rest of `supabase/functions/recommendations/index.ts` for any other place that turns an edition linked to a work into a recommendation or genre `simania_id`. Make each one positive-only, and list them in your report.
 
 # Tests (add to `tests/functions/recommendations-handler.test.ts`, fakes only)
 
