@@ -141,6 +141,7 @@ export function mapStoredRecommendationRow(row, titleBySimaniaId) {
 
   return {
     work_id: String(row.work_id),
+    hardcover_id: work?.hardcover_id != null ? Number(work.hardcover_id) : null,
     simania_id: simaniaId,
     title,
     author,
@@ -152,7 +153,7 @@ export function mapStoredRecommendationRow(row, titleBySimaniaId) {
     dismissed: Boolean(row.dismissed),
     generated_at: String(row.generated_at ?? ""),
     english_only: englishOnly,
-    can_add: simaniaId != null,
+    can_add: true,
   };
 }
 
@@ -162,6 +163,7 @@ export function recommendationFromApiCard(card) {
   const simaniaId = c.simania_id != null ? Number(c.simania_id) : null;
   return {
     work_id: String(c.work_id ?? ""),
+    hardcover_id: c.hardcover_id != null ? Number(c.hardcover_id) : null,
     simania_id: simaniaId,
     title: String(c.title ?? ""),
     author: c.author != null ? String(c.author) : null,
@@ -173,7 +175,7 @@ export function recommendationFromApiCard(card) {
     dismissed: Boolean(c.dismissed),
     generated_at: String(c.generated_at ?? ""),
     english_only: simaniaId == null,
-    can_add: simaniaId != null,
+    can_add: true,
     hebrew_hint: simaniaId == null && c.hebrew_hint && typeof c.hebrew_hint === "object"
       ? {
         source: c.hebrew_hint.source === "nli" ? "nli" : "wikidata",
@@ -344,7 +346,7 @@ export async function loadStoredRecommendations(client) {
         title, author, cover_url
       ),
       works (
-        original_title, original_authors, hardcover_cover_url
+        hardcover_id, original_title, original_authors, hardcover_cover_url
       )`,
     )
     .eq("dismissed", false)
@@ -460,8 +462,8 @@ export function applyRecsCardChrome(overlay, rec) {
 
   if (moveLabel) {
     const tn = firstSignificantTextNode(moveLabel);
-    if (tn && !rec.english_only) tn.textContent = ` ${RECS_MOVE_LABEL} `;
-    moveLabel.hidden = Boolean(rec.english_only);
+    if (tn) tn.textContent = ` ${RECS_MOVE_LABEL} `;
+    moveLabel.hidden = false;
   }
 
   if (removeBtn) {
@@ -470,8 +472,8 @@ export function applyRecsCardChrome(overlay, rec) {
   }
 
   if (moveSelect) {
-    moveSelect.disabled = Boolean(rec.english_only);
-    if (!rec.english_only) session.placeholder = ensureShelfPlaceholder(moveSelect);
+    moveSelect.disabled = false;
+    session.placeholder = ensureShelfPlaceholder(moveSelect);
   }
 
   // The grid clamps the reason to a few lines; the card always shows all of it.
@@ -535,7 +537,7 @@ export function bindRecsCardActions(session, rec, handlers) {
   session.onChange = (event) => {
     if (event.target !== session.moveSelect) return;
     event.stopImmediatePropagation();
-    if (rec.english_only || rec.simania_id == null) return;
+    if (rec.simania_id == null && rec.hardcover_id == null) return;
     const shelfId = session.moveSelect?.value;
     if (!shelfId) return;
     handlers.onPickShelf(shelfId);
@@ -554,6 +556,17 @@ export function bindRecsCardActions(session, rec, handlers) {
 }
 
 /**
+ * @param {import('./contract.js').RecommendationCard} rec
+ * @param {string} shelfId
+ */
+export function addBookRequestForRecommendation(rec, shelfId) {
+  if (rec.simania_id != null) {
+    return { simania_id: rec.simania_id, shelf_id: shelfId };
+  }
+  return { hardcover_id: rec.hardcover_id, shelf_id: shelfId };
+}
+
+/**
  * @param {HTMLElement} overlay
  * @param {import('./contract.js').RecommendationCard} rec
  * @param {{
@@ -562,13 +575,13 @@ export function bindRecsCardActions(session, rec, handlers) {
  *   showToast: (msg: string) => void,
  *   card: { open: (book: import('./contract.js').BookCard, shelves: unknown[]) => void, close: () => void },
  *   onDismissed: (workId: string) => void,
- *   onAdded: (workId: string, shelfId: string, rec: import('./contract.js').RecommendationCard) => Promise<void>,
+ *   onAdded: (workId: string, shelfId: string, book: import('./contract.js').BookCard | import('./contract.js').RecommendationCard) => Promise<void>,
  *   restorePrevious: () => void,
  *   beginSession: (session: ReturnType<typeof applyRecsCardChrome>) => void,
  *   isCurrent: () => boolean,
  * }} deps
  */
-async function openRecommendationCard(overlay, rec, deps) {
+export async function openRecommendationCard(overlay, rec, deps) {
   let book;
   if (rec.can_add && rec.simania_id != null) {
     try {
@@ -604,12 +617,13 @@ async function openRecommendationCard(overlay, rec, deps) {
       added_at: null,
       finished_at: null,
       rating: null,
+      english_edition: rec.english_only,
     };
   }
   if (!book || !deps.isCurrent()) return;
 
   const lib = deps.getLibrary();
-  const shelves = rec.english_only ? [] : (lib?.shelves ?? []);
+  const shelves = lib?.shelves ?? [];
   deps.restorePrevious();
   deps.card.open(book, shelves);
 
@@ -618,19 +632,22 @@ async function openRecommendationCard(overlay, rec, deps) {
 
   bindRecsCardActions(session, rec, {
     onPickShelf: (shelfId) => {
-      if (!rec.simania_id || session.moveSelect?.disabled) return;
+      if ((rec.simania_id == null && rec.hardcover_id == null) || session.moveSelect?.disabled) return;
       session.moveSelect.disabled = true;
       void (async () => {
         try {
-          await deps.api.callFunction(FUNCTIONS.ADD_BOOK, {
-            simania_id: rec.simania_id,
-            shelf_id: shelfId,
-          });
+          const result = await deps.api.callFunction(
+            FUNCTIONS.ADD_BOOK,
+            addBookRequestForRecommendation(rec, shelfId),
+          );
+          const addedBook = result && typeof result === "object" && result.book
+            ? result.book
+            : rec;
           notifyShelvesChanged();
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             deps.card.close();
           }
-          await deps.onAdded(rec.work_id, shelfId, rec);
+          await deps.onAdded(rec.work_id, shelfId, addedBook);
         } catch (err) {
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             revertFailedShelfPick(session.moveSelect);
