@@ -507,6 +507,10 @@ sprints:
         stage: 4
         depends_on:
         - S10-T13
+      S10-T16:
+        file: tasks/sprint-10-relink/16-bare-edition-details.md
+        stage: 1
+        depends_on: []
     stage_verification:
       '1':
       - npm run check:functions

@@ -234,6 +234,8 @@ Request `BookDetailsRequest`: `{"simania_id":1234}`, optionally with `simania` a
 
 Perform the same 30-day detail/rating refresh (for a negative `simania_id`, the English edition, refresh from Hardcover and never call Simania or the resolver; `simania_id` may be negative here). If the edition is still `pending` (an earlier resolution hit a provider failure), also run the resolution procedure above. Never shelve. Fill shelf fields for the caller if shelved, otherwise set them all null. Unknown ID is `404`; Simania failure is `502`.
 
+**Bare editions (browser).** Edge Functions cannot reach Simania, so an edition first stored by `match-by-author` as a candidate has only `simania_id`, `title` and `author` (`details_at` null). Measured 2026-11-05: 10 linked positive editions, one of them on a genre shelf (1024882 הסוד של עוזרת הבית: an English cover on the tile, no cover, rating or description in the card). When the recommendation or genre book card (`openRecommendationCard`) loads a positive `simania_id` and the returned book has `cover_url`, `description` and `simania_rating` all null, the browser fetches the Simania payload itself (`fetchSimaniaPayload`), calls `book-details` again with `{ simania_id, simania }`, and shows that result. If either step fails, it keeps the first result silently. It does this at most once per card open.
+
 ### `recommendations`
 
 Request `RecommendationsRequest` is `{}` (unknown fields ignored). Response `RecommendationsResponse`:
