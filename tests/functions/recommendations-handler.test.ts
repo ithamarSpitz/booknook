@@ -7,6 +7,7 @@ import type {
   EditionRow,
   WorkRow,
 } from "../../supabase/functions/_shared/types.ts";
+import { GENRE_MAP } from "../../supabase/functions/_shared/genres.ts";
 import { HttpError } from "../../supabase/functions/_shared/utils.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -76,7 +77,9 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   }
   #selectRows(): unknown[] {
     let rows: Record<string, unknown>[] = [];
-    if (this.table === "shelf_books") rows = this.db.library as Record<string, unknown>[];
+    if (this.table === "shelf_books") {
+      rows = this.db.library as Record<string, unknown>[];
+    }
     if (this.table === "recommendations") {
       const dismissedOnly = this.#filters.some((filter) =>
         filter[0] === "dismissed" && filter[1] === true
@@ -147,6 +150,8 @@ type Filter =
 
 class FakeDb {
   replacement: Record<string, unknown>[] | null = null;
+  genreReplacement: Record<string, unknown>[] | null = null;
+  ordinaryResultWorkIds: Set<string> | null = null;
   constructor(
     public library: unknown[],
     public works: WorkRow[],
@@ -157,12 +162,21 @@ class FakeDb {
     return new FakeQuery(this, table);
   }
   rpc(
-    _name: string,
+    name: string,
     args: { p_rows: Record<string, unknown>[] },
   ): Promise<{ data: unknown[]; error: null }> {
+    if (name === "replace_genre_recommendations") {
+      this.genreReplacement = args.p_rows;
+      return Promise.resolve({ data: [], error: null });
+    }
     this.replacement = args.p_rows;
+    const rows = this.ordinaryResultWorkIds
+      ? args.p_rows.filter((row) =>
+        this.ordinaryResultWorkIds!.has(String(row.work_id))
+      )
+      : args.p_rows;
     return Promise.resolve({
-      data: args.p_rows.map((row) => ({
+      data: rows.map((row) => ({
         ...row,
         user_id: "user",
         dismissed: false,
@@ -187,6 +201,37 @@ function work(
     tags: {},
     hardcover_cover_url: null,
     refreshed_at: null,
+  };
+}
+
+function withGenre(value: WorkRow, tag: string): WorkRow {
+  value.tags = { Genre: [{ tag }] };
+  return value;
+}
+
+function linkedEdition(
+  simaniaId: number,
+  workId: string,
+  resolvedAt: string | null,
+): EditionRow {
+  return {
+    simania_id: simaniaId,
+    work_id: workId,
+    title: `Edition ${simaniaId}`,
+    author: null,
+    resolve_status: simaniaId < 0 ? "hardcover" : "wikidata",
+    resolved_at: resolvedAt,
+    translator: null,
+    publisher: null,
+    series: null,
+    category: null,
+    year: null,
+    pages: null,
+    description: null,
+    cover_url: null,
+    simania_rating: null,
+    simania_rating_count: null,
+    details_at: null,
   };
 }
 
@@ -260,6 +305,152 @@ Deno.test("zero seeds clears non-dismissed recommendations", async () => {
     "expected empty response",
   );
   assert(db.replacement?.length === 0, "expected empty replacement RPC");
+  assert(
+    db.genreReplacement?.length === 0,
+    "expected genre rows to be cleared",
+  );
+});
+
+Deno.test("genre shelves are ordered and choose recommendation, catalog, then null editions", async () => {
+  const fantasyCandidates = [101, 102, 103, 104];
+  const mysteryCandidates = [201, 202, 203, 204];
+  const fantasyOne = withGenre(
+    work("fantasy-1", 1, fantasyCandidates),
+    "Fantasy",
+  );
+  const fantasyTwo = withGenre(
+    work("fantasy-2", 2, fantasyCandidates),
+    "Fantasy",
+  );
+  const mysteryOne = withGenre(
+    work("mystery-1", 3, mysteryCandidates),
+    "Mystery",
+  );
+  const mysteryTwo = withGenre(
+    work("mystery-2", 4, mysteryCandidates),
+    "Mystery",
+  );
+  const candidates = [
+    ...fantasyCandidates.map((id) =>
+      withGenre(work(`candidate-${id}`, id), "Fantasy")
+    ),
+    ...mysteryCandidates.map((id) =>
+      withGenre(work(`candidate-${id}`, id), "Mystery")
+    ),
+  ];
+  const db = new FakeDb(
+    [
+      shelfBook(11, "read", fantasyOne, { rating: 5 }),
+      shelfBook(12, "read", fantasyTwo, { rating: 4 }),
+      shelfBook(13, "read", mysteryOne, { rating: 4 }),
+      shelfBook(14, "read", mysteryTwo, { rating: 3 }),
+    ],
+    [fantasyOne, fantasyTwo, mysteryOne, mysteryTwo, ...candidates],
+    [],
+    [
+      linkedEdition(1101, "candidate-101", "2026-01-01T00:00:00Z"),
+      linkedEdition(1201, "candidate-102", "2025-01-01T00:00:00Z"),
+      linkedEdition(1202, "candidate-102", "2026-02-01T00:00:00Z"),
+      linkedEdition(-103, "candidate-103", "2026-03-01T00:00:00Z"),
+    ],
+  );
+  db.ordinaryResultWorkIds = new Set(["candidate-101"]);
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => null,
+  });
+
+  assert(response.status === 200, "expected 200");
+  const rows = db.genreReplacement ?? [];
+  assert(rows.length === 8, "expected two four-book genre shelves");
+  assert(
+    rows[0].genre === GENRE_MAP[1].name,
+    "fantasy should be first by evidence",
+  );
+  assert(rows[4].genre === GENRE_MAP[4].name, "mystery should be second");
+  assert(
+    rows[0].shelf_position === 0 && rows[0].position === 0,
+    "wrong first position",
+  );
+  assert(
+    rows[4].shelf_position === 1 && rows[4].position === 0,
+    "wrong second shelf position",
+  );
+  assert(
+    rows[0].simania_id === 1101,
+    "ordinary recommendation edition should win",
+  );
+  assert(
+    rows[1].simania_id === 1202,
+    "most recently resolved catalog edition expected",
+  );
+  assert(rows[2].simania_id === null, "negative editions must not be selected");
+});
+
+Deno.test("reading shelf books seed genre shelves with weight 2.5", async () => {
+  const candidateIds = [301, 302, 303, 304];
+  const rated = withGenre(work("rated", 1, candidateIds), "Fantasy");
+  const reading = withGenre(work("reading", 2, candidateIds), "Fantasy");
+  const candidates = candidateIds.map((id) =>
+    withGenre(work(`candidate-${id}`, id), "Fantasy")
+  );
+  const db = new FakeDb(
+    [
+      shelfBook(21, "read", rated, { rating: 5 }),
+      shelfBook(22, "reading", reading),
+    ],
+    [rated, reading, ...candidates],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => null,
+  });
+
+  assert(response.status === 200, "expected 200");
+  assert(
+    db.genreReplacement?.length === 4,
+    "reading seed should qualify the genre",
+  );
+  assert(
+    db.genreReplacement?.[0].score === 7.5,
+    "reading seed should add weight 2.5",
+  );
+});
+
+Deno.test("genre step failure leaves the ordinary response unchanged", async () => {
+  const seed = work("seed", 1, [100]);
+  const candidate = work("candidate", 100);
+  const db = new FakeDb(
+    [shelfBook(31, "read", seed, { rating: 5 })],
+    [seed, candidate],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => null,
+    genreRecommendations: async () => {
+      throw new Error("genre failure");
+    },
+  });
+  const payload = await response.json();
+
+  assert(response.status === 200, "genre failure must not fail the request");
+  assert(
+    payload.recommendations.length === 1,
+    "ordinary card should be returned",
+  );
+  assert(
+    payload.recommendations[0].work_id === "candidate",
+    "ordinary response changed",
+  );
 });
 
 Deno.test("handler excludes shelved and dismissed works and retains an English-only result", async () => {
@@ -276,7 +467,11 @@ Deno.test("handler excludes shelved and dismissed works and retains an English-o
     authenticate: async () => "user",
     userDatabase: () => db as never,
     serviceDatabase: () => db as never,
-    hebrewHint: async () => ({ source: "wikidata", title: "נשמר", author: null }),
+    hebrewHint: async () => ({
+      source: "wikidata",
+      title: "נשמר",
+      author: null,
+    }),
   });
   const payload = await response.json();
   assert(response.status === 200, "expected 200");
@@ -547,7 +742,10 @@ Deno.test("bookCard marks negative IDs as English editions", async () => {
     details_at: "2026-11-03T00:00:00Z",
   };
   const card = await bookCard(new FakeDb([], []) as never, "user", current);
-  assert(card.english_edition === true, "negative ID should mark English edition");
+  assert(
+    card.english_edition === true,
+    "negative ID should mark English edition",
+  );
 });
 
 Deno.test("self-heal resolver failure does not fail the request", async () => {
@@ -591,7 +789,10 @@ Deno.test("self-heal skips when every shelved edition is linked", async () => {
     },
   });
   assert(response.status === 200, "expected 200");
-  assert(resolveCalls.length === 0, "resolver should not run without unlinked editions");
+  assert(
+    resolveCalls.length === 0,
+    "resolver should not run without unlinked editions",
+  );
 });
 
 Deno.test("English-only card uses catalog Hebrew author without Wikidata", async () => {
@@ -683,7 +884,10 @@ Deno.test("English-only card leaves hebrew_author null when Wikidata misses", as
     wikidataHebrewAuthor: async () => null,
   });
   const payload = await response.json();
-  assert(payload.recommendations[0].hebrew_author === null, "expected null author");
+  assert(
+    payload.recommendations[0].hebrew_author === null,
+    "expected null author",
+  );
 });
 
 Deno.test("localized recommendation card has null hebrew_author", async () => {
@@ -722,7 +926,10 @@ Deno.test("localized recommendation card has null hebrew_author", async () => {
     wikidataHebrewAuthor: async () => "לא",
   });
   const payload = await response.json();
-  assert(payload.recommendations[0].simania_id === 777, "expected localized card");
+  assert(
+    payload.recommendations[0].simania_id === 777,
+    "expected localized card",
+  );
   assert(
     payload.recommendations[0].hardcover_id === 100,
     "expected Hardcover ID",

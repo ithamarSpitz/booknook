@@ -18,8 +18,14 @@ import {
 } from "../_shared/bridges.ts";
 import { ensureResolved } from "../_shared/catalog.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
+import {
+  buildGenreShelves,
+  type GenreSeed,
+  missingCandidateIds,
+} from "../_shared/genres.ts";
 import type {
   EditionRow,
+  GenreRecommendationReplacement,
   HebrewHint,
   RecommendationCard,
   RecommendationReplacement,
@@ -37,6 +43,16 @@ import {
 
 type DbClient = ReturnType<typeof serviceClient>;
 
+type GenreRecommendationInput = {
+  db: DbClient;
+  userId: string;
+  library: LibraryItem[];
+  seeds: ReturnType<typeof selectSeeds>;
+  dismissed: ReadonlySet<string>;
+  ordinaryRecommendations: RecommendationRow[];
+  fetchHardcover: (ids: number[]) => Promise<HardcoverBook[]>;
+};
+
 export type RecommendationDependencies = {
   authenticate: (request: Request) => Promise<string>;
   userDatabase: (request: Request) => DbClient;
@@ -50,6 +66,7 @@ export type RecommendationDependencies = {
     cache: Map<string, string | null>,
   ) => Promise<string | null>;
   ensureResolved: typeof ensureResolved;
+  genreRecommendations: (input: GenreRecommendationInput) => Promise<void>;
 };
 
 export async function defaultHebrewHint(
@@ -95,9 +112,7 @@ export async function hebrewAuthorFor(
       const matchedWorkIds = (
         (worksResult.data ?? []) as Pick<WorkRow, "id" | "original_authors">[]
       )
-        .filter((work) =>
-          normalize(work.original_authors[0] ?? "") === key
-        )
+        .filter((work) => normalize(work.original_authors[0] ?? "") === key)
         .map((work) => work.id);
 
       if (matchedWorkIds.length) {
@@ -108,9 +123,11 @@ export async function hebrewAuthorFor(
           .order("resolved_at", { ascending: false });
         if (editionsResult.error) throw editionsResult.error;
 
-        for (const row of (editionsResult.data ?? []) as {
-          author: string | null;
-        }[]) {
+        for (
+          const row of (editionsResult.data ?? []) as {
+            author: string | null;
+          }[]
+        ) {
           const author = row.author?.trim();
           if (author) {
             resolved = author;
@@ -145,6 +162,7 @@ const defaults: RecommendationDependencies = {
   hebrewHint: defaultHebrewHint,
   wikidataHebrewAuthor,
   ensureResolved,
+  genreRecommendations: storeGenreRecommendations,
 };
 
 const SELF_HEAL_BUDGET_MS = 20_000;
@@ -203,7 +221,10 @@ async function selfHealShelvedEditions(
     try {
       await resolve(serviceDb, edition);
     } catch (error) {
-      console.warn(`Self-heal resolution failed for ${edition.simania_id}:`, error);
+      console.warn(
+        `Self-heal resolution failed for ${edition.simania_id}:`,
+        error,
+      );
     }
   }
 }
@@ -315,6 +336,156 @@ async function loadAndStoreMissingWorks(
   ];
 }
 
+function genreSeeds(
+  library: LibraryItem[],
+  seeds: ReturnType<typeof selectSeeds>,
+): GenreSeed[] {
+  const result: GenreSeed[] = [];
+  const seededWorks = new Set<string>();
+  for (const seed of seeds) {
+    if (!seed.work || seededWorks.has(seed.work.id)) continue;
+    seededWorks.add(seed.work.id);
+    result.push({
+      workId: seed.work.id,
+      weight: seed.weight,
+      tags: seed.work.tags,
+      similarIds: seed.work.similar_ids,
+    });
+  }
+  for (const item of library) {
+    if (
+      item.shelf_kind !== "reading" || !item.work ||
+      seededWorks.has(item.work.id)
+    ) continue;
+    seededWorks.add(item.work.id);
+    result.push({
+      workId: item.work.id,
+      weight: 2.5,
+      tags: item.work.tags,
+      similarIds: item.work.similar_ids,
+    });
+  }
+  return result;
+}
+
+export async function storeGenreRecommendations({
+  db,
+  userId,
+  library,
+  seeds,
+  dismissed,
+  ordinaryRecommendations,
+  fetchHardcover,
+}: GenreRecommendationInput): Promise<void> {
+  const genreSeedRows = genreSeeds(library, seeds);
+  if (!genreSeedRows.length) {
+    const cleared = await db.rpc("replace_genre_recommendations", {
+      p_user_id: userId,
+      p_rows: [],
+    });
+    if (cleared.error) fail(cleared.error);
+    return;
+  }
+
+  const candidateIds = [
+    ...new Set(
+      genreSeedRows.flatMap((seed) => seed.similarIds.slice(0, 40)),
+    ),
+  ];
+  const known = await loadWorks(db, candidateIds);
+  let worksByHardcoverId = new Map(
+    known.flatMap((work) =>
+      work.hardcover_id === null ? [] : [[work.hardcover_id, work] as const]
+    ),
+  );
+  const missingIds = missingCandidateIds(
+    genreSeedRows,
+    worksByHardcoverId,
+    100,
+  );
+  const allWorks = await loadAndStoreMissingWorks(
+    db,
+    missingIds,
+    known,
+    fetchHardcover,
+  );
+  worksByHardcoverId = new Map(
+    allWorks.flatMap((work) =>
+      work.hardcover_id === null ? [] : [[work.hardcover_id, work] as const]
+    ),
+  );
+
+  const excludedWorkIds = new Set([
+    ...dismissed,
+    ...library.flatMap((item) => item.work ? [item.work.id] : []),
+  ]);
+  const shelves = buildGenreShelves({
+    seeds: genreSeedRows,
+    worksByHardcoverId,
+    excludedWorkIds,
+  });
+  const shelfWorkIds = shelves.flatMap((shelf) =>
+    shelf.books.map((book) => book.workId)
+  );
+  const catalogEditionByWork = new Map<string, number>();
+  if (shelfWorkIds.length) {
+    const editions = await db.from("editions")
+      .select("simania_id,work_id,resolved_at")
+      .in("work_id", shelfWorkIds);
+    if (editions.error) fail(editions.error);
+    const rows = (editions.data ?? []) as Pick<
+      EditionRow,
+      "simania_id" | "work_id" | "resolved_at"
+    >[];
+    rows.sort((left, right) =>
+      (right.resolved_at ?? "").localeCompare(left.resolved_at ?? "")
+    );
+    for (const edition of rows) {
+      if (
+        edition.work_id && edition.simania_id > 0 && edition.resolved_at &&
+        !catalogEditionByWork.has(edition.work_id)
+      ) {
+        catalogEditionByWork.set(edition.work_id, edition.simania_id);
+      }
+    }
+  }
+  const recommendationEditionByWork = new Map(
+    ordinaryRecommendations.map((row) => [row.work_id, row.simania_id]),
+  );
+  const replacements: GenreRecommendationReplacement[] = shelves.flatMap(
+    (shelf, shelfPosition) =>
+      shelf.books.map((book, position) => ({
+        work_id: book.workId,
+        genre: shelf.genre,
+        shelf_position: shelfPosition,
+        position,
+        simania_id: recommendationEditionByWork.has(book.workId)
+          ? recommendationEditionByWork.get(book.workId) ?? null
+          : catalogEditionByWork.get(book.workId) ?? null,
+        score: book.score,
+      })),
+  );
+  const replaced = await db.rpc("replace_genre_recommendations", {
+    p_user_id: userId,
+    p_rows: replacements,
+  });
+  if (replaced.error) fail(replaced.error);
+}
+
+async function updateGenreRecommendationsSafely(
+  dependencies: RecommendationDependencies,
+  input: Omit<GenreRecommendationInput, "fetchHardcover">,
+): Promise<void> {
+  try {
+    await dependencies.genreRecommendations({
+      ...input,
+      fetchHardcover: dependencies.fetchHardcover,
+    });
+  } catch (error) {
+    console.warn("Genre recommendations failed:", error);
+  }
+}
+
 async function linkedEdition(
   db: DbClient,
   workId: string,
@@ -410,6 +581,14 @@ export async function handleRecommendations(
         p_rows: [],
       });
       if (replaced.error) fail(replaced.error);
+      await updateGenreRecommendationsSafely(dependencies, {
+        db: serviceDb,
+        userId,
+        library,
+        seeds,
+        dismissed,
+        ordinaryRecommendations: [],
+      });
       return json({ recommendations: [] });
     }
 
@@ -475,6 +654,16 @@ export async function handleRecommendations(
       p_rows: prepared.map((item) => item.replacement),
     });
     if (replacement.error) fail(replacement.error);
+    const ordinaryRecommendations =
+      (replacement.data ?? []) as RecommendationRow[];
+    await updateGenreRecommendationsSafely(dependencies, {
+      db: serviceDb,
+      userId,
+      library,
+      seeds,
+      dismissed,
+      ordinaryRecommendations,
+    });
     const preparedByWork = new Map(
       prepared.map((item) => [item.work.id, item]),
     );
@@ -490,7 +679,7 @@ export async function handleRecommendations(
         cache,
       ) => hebrewAuthorFor(db, author, dependencies, cache, authorLookups));
     const cards: RecommendationCard[] = await Promise.all(
-      ((replacement.data ?? []) as RecommendationRow[]).flatMap((row) => {
+      ordinaryRecommendations.flatMap((row) => {
         const item = preparedByWork.get(row.work_id);
         if (!item) return [];
         const edition = item.edition;
