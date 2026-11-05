@@ -347,7 +347,7 @@ No external-site URL is included.
 | `position` | `number \| null` | caller's `shelf_books.position`, else null |
 | `added_at` | `string \| null` | caller's `shelf_books.added_at`, else null |
 | `finished_at` | `string \| null` | caller's `shelf_books.finished_at`, else null |
-| `rating` | `number \| null` | caller's `shelf_books.rating`, else null; unused by scoring |
+| `rating` | `number \| null` | caller's `shelf_books.rating`, else null; unused by scoring. On the reader's own shelves, a tile with a non-null rating shows it as a row of 5 small stars just above the cover (in the row's top padding, as wide as the cover, `rating` filled from the right); an unrated tile shows nothing |
 
 ### `GenreShelf` and `GenreBook`
 
