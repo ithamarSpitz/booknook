@@ -6,7 +6,8 @@ supabase/.temp/
 .DS_Store
 
 
-# Harness runtime state
+# Harness runtime state (whole folder, as `harness init` writes it)
+.harness/
 .harness/state.json
 .harness/logs/
 .harness/reports/
