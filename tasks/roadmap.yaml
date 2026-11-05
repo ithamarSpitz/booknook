@@ -430,3 +430,43 @@ sprints:
       - npm run test:functions
       - npm run test:web
       - npm run verify:repair
+  S10-relink:
+    name: Relink wrong-author editions from Simania page evidence; audit false positives
+    tasks:
+      S10-T1:
+        file: tasks/sprint-10-relink/01-page-original.md
+        stage: 1
+        depends_on: []
+      S10-T3:
+        file: tasks/sprint-10-relink/03-audit-mismatch-checks.md
+        stage: 1
+        depends_on: []
+      S10-T2:
+        file: tasks/sprint-10-relink/02-proposal-page-author.md
+        stage: 2
+        depends_on:
+        - S10-T1
+      S10-T4:
+        file: tasks/sprint-10-relink/04-repair-relink.md
+        stage: 2
+        depends_on:
+        - S10-T3
+      S10-T5:
+        file: tasks/sprint-10-relink/05-live-relink-gate.md
+        stage: 3
+        depends_on:
+        - S10-T2
+        - S10-T4
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      '2':
+      - npm run check:functions
+      - npm run test:functions
+      '3':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:localization
+      - npm run verify:repair
