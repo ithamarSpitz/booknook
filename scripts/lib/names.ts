@@ -1,0 +1,148 @@
+// Name sound score (docs/contract.md, "Operator scripts: catalog audit and
+// link repair"). Pure and deterministic: no network, no database.
+
+const HEBREW_LETTERS: Record<string, string> = {
+  "ב": "b",
+  "ג": "g",
+  "ד": "d",
+  "ו": "v",
+  "ז": "z",
+  "ח": "h",
+  "ט": "t",
+  "כ": "k",
+  "ך": "k",
+  "ק": "k",
+  "ל": "l",
+  "מ": "m",
+  "ם": "m",
+  "נ": "n",
+  "ן": "n",
+  "ס": "s",
+  "ש": "s",
+  "צ": "s",
+  "ץ": "s",
+  "פ": "p",
+  "ף": "p",
+  "ר": "r",
+  "ת": "t",
+};
+
+// Letters whose sound changes when followed by a geresh.
+const HEBREW_GERESH: Record<string, string> = {
+  "ג": "j",
+  "צ": "ch",
+  "ץ": "ch",
+};
+
+// Hebrew geresh (U+05F3) and the apostrophes commonly typed in its place.
+const GERESH = new Set(["׳", "'", "’", "`"]);
+
+const SOUND_CLASSES: Record<string, string> = {
+  b: "p",
+  p: "p",
+  f: "p",
+  v: "p",
+  w: "p",
+  g: "k",
+  k: "k",
+  c: "k",
+  q: "k",
+  x: "k",
+  j: "k",
+  d: "t",
+  t: "t",
+  s: "s",
+  z: "s",
+  h: "h",
+  l: "l",
+  m: "m",
+  n: "n",
+  r: "r",
+};
+
+/** Latin consonant skeleton of a Hebrew-script name. */
+export function hebrewSkeleton(name: string): string {
+  const chars = Array.from(name ?? "");
+  let out = "";
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    const next = chars[i + 1];
+    if (next !== undefined && GERESH.has(next) && ch in HEBREW_GERESH) {
+      out += HEBREW_GERESH[ch];
+      i++;
+      continue;
+    }
+    // א ה ע י, geresh and anything unmapped drop.
+    out += HEBREW_LETTERS[ch] ?? "";
+  }
+  return out;
+}
+
+/** Consonant skeleton of a Latin-script name. */
+export function latinSkeleton(name: string): string {
+  return (name ?? "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/ph/g, "f")
+    .replace(/th/g, "t")
+    .replace(/ch/g, "k")
+    .replace(/sh/g, "s")
+    .replace(/ck/g, "k")
+    .replace(/c(?=[eiy])/g, "s")
+    .replace(/[aeiouy]/g, "")
+    .replace(/[^a-z]/g, "");
+}
+
+function soundKey(skeleton: string): string {
+  let out = "";
+  for (const ch of skeleton) {
+    const cls = SOUND_CLASSES[ch];
+    if (cls === undefined) continue;
+    if (out[out.length - 1] !== cls) out += cls;
+  }
+  return out;
+}
+
+function bigrams(text: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i + 1 < text.length; i++) out.push(text.slice(i, i + 2));
+  return out;
+}
+
+function bigramDice(a: string, b: string): number {
+  if (a === "" || b === "") return 0;
+  const left = bigrams(a);
+  const right = bigrams(b);
+  // A one-letter key has no bigrams; only an identical key can match it.
+  if (left.length === 0 || right.length === 0) return a === b ? 1 : 0;
+  const counts = new Map<string, number>();
+  for (const gram of left) counts.set(gram, (counts.get(gram) ?? 0) + 1);
+  let shared = 0;
+  for (const gram of right) {
+    const count = counts.get(gram) ?? 0;
+    if (count > 0) {
+      shared++;
+      counts.set(gram, count - 1);
+    }
+  }
+  return (2 * shared) / (left.length + right.length);
+}
+
+/**
+ * Deterministic 0..1 score that a Hebrew-script name and a Latin-script name
+ * are the same person; the maximum over `latinNames`. Empty input gives 0.
+ */
+export function nameSoundScore(
+  hebrewName: string,
+  latinNames: string[],
+): number {
+  const hebrew = soundKey(hebrewSkeleton(hebrewName));
+  if (hebrew === "" || !Array.isArray(latinNames)) return 0;
+  let best = 0;
+  for (const latin of latinNames) {
+    const score = bigramDice(hebrew, soundKey(latinSkeleton(latin)));
+    if (score > best) best = score;
+  }
+  return best;
+}
