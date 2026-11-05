@@ -76,6 +76,23 @@ export const RPCS = Object.freeze({
  */
 
 /**
+ * @typedef {Object} GenreBook
+ * @property {string} work_id
+ * @property {number} hardcover_id
+ * @property {number|null} simania_id
+ * @property {string} title
+ * @property {string|null} author
+ * @property {string|null} cover_url
+ * @property {boolean} english_only
+ */
+
+/**
+ * @typedef {Object} GenreShelf
+ * @property {string} genre
+ * @property {GenreBook[]} books
+ */
+
+/**
  * @typedef {Object} RecommendationCard
  * @property {string} work_id
  * @property {number|null} simania_id

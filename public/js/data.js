@@ -36,6 +36,47 @@ export function mapLibraryRows(shelves, shelfBookRows) {
   return orderedShelves;
 }
 
+/** @param {unknown} relation */
+function firstRelatedRow(relation) {
+  return Array.isArray(relation) ? (relation[0] ?? {}) : (relation ?? {});
+}
+
+/**
+ * @param {Array<Record<string, any>>} rows
+ * @returns {import('./contract.js').GenreShelf[]}
+ */
+export function mapGenreRows(rows) {
+  const shelves = new Map();
+  const orderedRows = [...rows].sort(
+    (a, b) => a.shelf_position - b.shelf_position || a.position - b.position,
+  );
+
+  for (const row of orderedRows) {
+    const work = firstRelatedRow(row.works);
+    const edition = firstRelatedRow(row.editions);
+    let shelf = shelves.get(row.genre);
+    if (!shelf) {
+      shelf = { genre: row.genre, books: [] };
+      shelves.set(row.genre, shelf);
+    }
+
+    const originalAuthors = Array.isArray(work.original_authors)
+      ? work.original_authors.join(", ") || null
+      : null;
+    shelf.books.push({
+      work_id: row.work_id,
+      hardcover_id: work.hardcover_id,
+      simania_id: row.simania_id,
+      title: edition.title ?? work.original_title,
+      author: edition.author ?? originalAuthors,
+      cover_url: edition.cover_url ?? work.hardcover_cover_url ?? null,
+      english_only: row.simania_id === null,
+    });
+  }
+
+  return [...shelves.values()];
+}
+
 /** @param {Record<string, unknown>} row */
 export function rowToBookCard(row) {
   const rawEdition = row.editions ?? row.edition ?? {};
@@ -252,6 +293,21 @@ export async function loadLibrary(client) {
 
   const shelves = mapLibraryRows(shelvesRes.data ?? [], enriched);
   return { displayName, shelves };
+}
+
+/** @param {import('@supabase/supabase-js').SupabaseClient} client */
+export async function loadGenreShelves(client) {
+  const { data, error } = await client
+    .from("genre_recommendations")
+    .select(
+      `work_id, simania_id, genre, shelf_position, position,
+      works (hardcover_id, original_title, original_authors, hardcover_cover_url),
+      editions (title, author, cover_url)`,
+    )
+    .order("shelf_position")
+    .order("position");
+  if (error) return [];
+  return mapGenreRows(data ?? []);
 }
 
 /** @param {import('@supabase/supabase-js').SupabaseClient} client */

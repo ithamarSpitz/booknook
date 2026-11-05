@@ -12,7 +12,9 @@ import {
   createCustomShelf,
   deleteShelf,
   libraryTitle,
+  loadGenreShelves,
   loadLibrary,
+  mapGenreRows,
   moveShelf,
   mapLibraryRows,
   moveBook,
@@ -128,6 +130,92 @@ describe("data.js helpers", () => {
     assert.equal(mapped.every((s) => s.books.every((b) => b.simania_id !== 3)), true);
   });
 
+  it("mapGenreRows orders shelves and books and maps edition and work fallbacks", () => {
+    const rows = [
+      {
+        genre: "Fantasy",
+        shelf_position: 1,
+        position: 1,
+        work_id: "work-3",
+        simania_id: null,
+        works: {
+          hardcover_id: 103,
+          original_title: "English title",
+          original_authors: ["First Author", "Second Author"],
+          hardcover_cover_url: "work-cover-3",
+        },
+        editions: null,
+      },
+      {
+        genre: "Mystery",
+        shelf_position: 0,
+        position: 1,
+        work_id: "work-2",
+        simania_id: 22,
+        works: {
+          hardcover_id: 102,
+          original_title: "Work title 2",
+          original_authors: ["Work author 2"],
+          hardcover_cover_url: "work-cover-2",
+        },
+        editions: { title: "Edition title 2", author: "Edition author 2", cover_url: "edition-cover-2" },
+      },
+      {
+        genre: "Fantasy",
+        shelf_position: 1,
+        position: 0,
+        work_id: "work-1",
+        simania_id: 11,
+        works: {
+          hardcover_id: 101,
+          original_title: "Work title 1",
+          original_authors: ["Work author 1"],
+          hardcover_cover_url: "work-cover-1",
+        },
+        editions: [{ title: "Edition title 1", author: "Edition author 1", cover_url: "edition-cover-1" }],
+      },
+    ];
+
+    assert.deepEqual(mapGenreRows(rows), [
+      {
+        genre: "Mystery",
+        books: [{
+          work_id: "work-2",
+          hardcover_id: 102,
+          simania_id: 22,
+          title: "Edition title 2",
+          author: "Edition author 2",
+          cover_url: "edition-cover-2",
+          english_only: false,
+        }],
+      },
+      {
+        genre: "Fantasy",
+        books: [
+          {
+            work_id: "work-1",
+            hardcover_id: 101,
+            simania_id: 11,
+            title: "Edition title 1",
+            author: "Edition author 1",
+            cover_url: "edition-cover-1",
+            english_only: false,
+          },
+          {
+            work_id: "work-3",
+            hardcover_id: 103,
+            simania_id: null,
+            title: "English title",
+            author: "First Author, Second Author",
+            cover_url: "work-cover-3",
+            english_only: true,
+          },
+        ],
+      },
+    ]);
+    assert.deepEqual(mapGenreRows([]), []);
+  });
+
   it("applyOptimisticBookMove moves and reindexes", () => {
     const state = sampleState();
     const next = applyOptimisticBookMove(state, {
@@ -193,6 +281,64 @@ describe("data.js helpers", () => {
 });
 
 describe("data.js client", () => {
+  it("loadGenreShelves selects embedded work and edition data in one ordered query", async () => {
+    const calls = [];
+    const query = {
+      select(columns) {
+        calls.push(["select", columns]);
+        return this;
+      },
+      order(column) {
+        calls.push(["order", column]);
+        if (column === "position") {
+          return Promise.resolve({
+            data: [{
+              genre: "Fantasy",
+              shelf_position: 0,
+              position: 0,
+              work_id: "work-1",
+              simania_id: null,
+              works: { hardcover_id: 1, original_title: "Title", original_authors: [], hardcover_cover_url: null },
+              editions: null,
+            }],
+            error: null,
+          });
+        }
+        return this;
+      },
+    };
+    const client = {
+      from(table) {
+        calls.push(["from", table]);
+        return query;
+      },
+    };
+
+    const shelves = await loadGenreShelves(client);
+    assert.equal(shelves[0].books[0].title, "Title");
+    assert.deepEqual(calls, [
+      ["from", "genre_recommendations"],
+      ["select", `work_id, simania_id, genre, shelf_position, position,
+      works (hardcover_id, original_title, original_authors, hardcover_cover_url),
+      editions (title, author, cover_url)`],
+      ["order", "shelf_position"],
+      ["order", "position"],
+    ]);
+  });
+
+  it("loadGenreShelves returns an empty optional section on query error", async () => {
+    const query = {
+      select() { return this; },
+      order(column) {
+        return column === "position"
+          ? Promise.resolve({ data: null, error: new Error("denied") })
+          : this;
+      },
+    };
+    const client = { from: () => query };
+    assert.deepEqual(await loadGenreShelves(client), []);
+  });
+
   it("loadLibrary joins shelves and shelf books", async () => {
     const client = {
       from(table) {
