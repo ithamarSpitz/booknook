@@ -4,6 +4,10 @@ All functions: POST with a JSON body, CORS for the web origin, JWT verified (`ve
 
 No Edge Function calls Simania in production: Simania's Cloudflare answers 403 to Supabase server IPs. The browser (`public/js/simania.js`) searches Simania and fetches edition details, and passes them to functions as an optional `simania` field `{ details, rating }`. When that field is absent a function tries Simania directly (works only off-cloud) and otherwise keeps an existing cached row.
 
+## Operator scripts
+
+`npm run audit:catalog` audits production without writing, and `npm run repair:links -- --apply` applies approved link repairs. They run on an operator machine because Simania blocks Edge Functions from its book pages and does not provide browser CORS access. The apply mode only links editions whose `work_id` is still null and records `resolve_status = 'original_title'`; it never relinks an edition.
+
 ## Search (browser only)
 
 The `search-books` function was removed. Search runs in the browser: under 2 characters returns `[]` without a call, otherwise one Simania `books_search` with `limit: 8`. `search_cache` is no longer written.
