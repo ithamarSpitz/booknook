@@ -25,10 +25,18 @@ cursor:
     reviewer: cursor-grok-4.6-high
     escalation: claude-opus-5-thinking-high
 
+agy:
+  enabled: true
+
+claude:
+  enabled: true
+
 providers:
   priority:
+    - agy
     - codex
     - cursor
+    - claude
 
 codex:
   enabled: true
