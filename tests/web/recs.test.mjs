@@ -563,6 +563,90 @@ describe("shared card chrome", () => {
     assert.deepEqual(addedBook, { simania_id: 97171, title: "סחרור" });
   });
 
+  function reusableCardDeps(calls, onAdded) {
+    let session = null;
+    return {
+      api: {
+        callFunction: async (name, body) => {
+          calls.push([name, body]);
+          return { book: { simania_id: body.simania_id ?? -body.hardcover_id, title: "Spin" } };
+        },
+        getClient: () => ({
+          from() {
+            calls.push(["dismiss"]);
+            return { update: () => ({ eq: async () => ({ error: null }) }) };
+          },
+        }),
+      },
+      getLibrary: () => ({ shelves: [{ id: "want", name: "רוצה לקרוא" }] }),
+      showToast: () => {},
+      card: { open: () => {}, close: () => {} },
+      onDismissed: () => calls.push(["onDismissed"]),
+      onAdded,
+      restorePrevious: () => restoreRecsCardChrome(session),
+      beginSession: (s) => {
+        session = s;
+      },
+      isCurrent: () => true,
+      session: () => session,
+    };
+  }
+
+  const genreItem = {
+    work_id: "genre-work",
+    hardcover_id: 383752,
+    simania_id: null,
+    title: "Spin",
+    author: "Robert Charles Wilson",
+    cover_url: null,
+    english_only: true,
+    can_add: true,
+  };
+
+  it("allowDismiss: false hides the dismiss button, ignores it, and restores it", async () => {
+    const overlay = createFakeOverlay();
+    const calls = [];
+    const deps = reusableCardDeps(calls, async () => {});
+    await openRecommendationCard(overlay, genreItem, deps, { allowDismiss: false });
+    assert.equal(overlay._remove.hidden, true);
+    assert.equal(overlay._move.hidden, false);
+    dispatch(overlay, "click", {
+      target: overlay._remove,
+      stopImmediatePropagation() {},
+      preventDefault() {},
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.some(([name]) => name === "dismiss" || name === "onDismissed"), false);
+    restoreRecsCardChrome(deps.session());
+    assert.equal(overlay._remove.hidden, false);
+    assert.equal(overlay._remove.textContent, LIBRARY_REMOVE_LABEL);
+  });
+
+  it("the recommendations path still shows the dismiss button by default", async () => {
+    const overlay = createFakeOverlay();
+    const calls = [];
+    await openRecommendationCard(overlay, genreItem, reusableCardDeps(calls, async () => {}));
+    assert.equal(overlay._remove.hidden, false);
+    assert.equal(overlay._remove.textContent, RECS_REMOVE_LABEL);
+    assert.deepEqual(calls, [], "English-only recommendation cards open without book-details");
+  });
+
+  it("the reusable path adds an English-only item by hardcover_id", async () => {
+    const overlay = createFakeOverlay([{ id: "want", name: "רוצה לקרוא" }]);
+    const calls = [];
+    let added;
+    const addedDone = new Promise((resolve) => { added = resolve; });
+    const deps = reusableCardDeps(calls, async (workId, shelfId) => added([workId, shelfId]));
+    await openRecommendationCard(overlay, genreItem, deps, { allowDismiss: false, englishDetails: true });
+    overlay._select.value = "want";
+    dispatch(overlay, "change", { target: overlay._select, stopImmediatePropagation() {} });
+    assert.deepEqual(await addedDone, ["genre-work", "want"]);
+    assert.deepEqual(calls, [
+      ["book-details", { simania_id: -383752 }],
+      ["add-book", { hardcover_id: 383752, shelf_id: "want" }],
+    ]);
+  });
+
   it("recs.css hides [hidden] .bk-move despite display:flex in base", () => {
     assert.match(recsCss, /\.bk-move\[hidden\]\s*\{[^}]*display:\s*none\s*!important/);
   });

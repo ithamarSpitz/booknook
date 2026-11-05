@@ -443,7 +443,8 @@ export function canCompleteRecsWrite(session, isCurrent) {
  * @param {HTMLElement} overlay
  * @param {import('./contract.js').RecommendationCard} rec
  */
-export function applyRecsCardChrome(overlay, rec) {
+export function applyRecsCardChrome(overlay, rec, options = {}) {
+  const allowDismiss = options.allowDismiss !== false;
   const moveLabel = overlay.querySelector(".bk-move");
   const moveSelect = overlay.querySelector(".bk-move select");
   const removeBtn = overlay.querySelector(".bk-remove");
@@ -458,6 +459,7 @@ export function applyRecsCardChrome(overlay, rec) {
     onChange: null,
     onClick: null,
     restored: false,
+    allowDismiss,
   };
 
   if (moveLabel) {
@@ -469,6 +471,7 @@ export function applyRecsCardChrome(overlay, rec) {
   if (removeBtn) {
     removeBtn.textContent = RECS_REMOVE_LABEL;
     removeBtn.disabled = false;
+    removeBtn.hidden = !allowDismiss;
   }
 
   if (moveSelect) {
@@ -521,6 +524,7 @@ export function restoreRecsCardChrome(session) {
   if (session.removeBtn) {
     session.removeBtn.textContent = LIBRARY_REMOVE_LABEL;
     session.removeBtn.disabled = false;
+    session.removeBtn.hidden = false;
   }
   if (session.moveSelect) session.moveSelect.disabled = false;
   session.note?.remove?.();
@@ -544,7 +548,7 @@ export function bindRecsCardActions(session, rec, handlers) {
   };
   session.onClick = (event) => {
     const btn = session.removeBtn;
-    if (!btn) return;
+    if (!btn || session.allowDismiss === false) return;
     const t = event.target;
     if (t !== btn && !btn.contains?.(t)) return;
     event.stopImmediatePropagation();
@@ -567,6 +571,12 @@ export function addBookRequestForRecommendation(rec, shelfId) {
 }
 
 /**
+ * Card-opening path shared by the recommendations screen and the library's
+ * genre shelves. `rec` needs `work_id`, `hardcover_id`, `simania_id`, `title`,
+ * `author`, `cover_url`, `english_only` (and `can_add`).
+ * Options: `allowDismiss` (default true) shows "לא מעניין אותי";
+ * `englishDetails` loads an English-only book through `book-details` with
+ * `simania_id = -hardcover_id`, falling back to the item's own fields.
  * @param {HTMLElement} overlay
  * @param {import('./contract.js').RecommendationCard} rec
  * @param {{
@@ -581,7 +591,8 @@ export function addBookRequestForRecommendation(rec, shelfId) {
  *   isCurrent: () => boolean,
  * }} deps
  */
-export async function openRecommendationCard(overlay, rec, deps) {
+export async function openRecommendationCard(overlay, rec, deps, options = {}) {
+  const allowDismiss = options.allowDismiss !== false;
   let book;
   if (rec.can_add && rec.simania_id != null) {
     try {
@@ -594,6 +605,17 @@ export async function openRecommendationCard(overlay, rec, deps) {
       return;
     }
   } else {
+    if (options.englishDetails && rec.english_only && rec.hardcover_id != null) {
+      try {
+        const res = await deps.api.callFunction(FUNCTIONS.BOOK_DETAILS, { simania_id: -rec.hardcover_id });
+        book = res && typeof res === "object" && res.book ? res.book : undefined;
+      } catch {
+        book = undefined;
+      }
+      if (!deps.isCurrent()) return;
+    }
+  }
+  if (book === undefined) {
     book = {
       simania_id: rec.simania_id,
       work_id: rec.work_id,
@@ -627,7 +649,7 @@ export async function openRecommendationCard(overlay, rec, deps) {
   deps.restorePrevious();
   deps.card.open(book, shelves);
 
-  const session = applyRecsCardChrome(overlay, rec);
+  const session = applyRecsCardChrome(overlay, rec, { allowDismiss });
   deps.beginSession(session);
 
   bindRecsCardActions(session, rec, {
@@ -659,7 +681,7 @@ export async function openRecommendationCard(overlay, rec, deps) {
       })();
     },
     onDismiss: () => {
-      if (session.removeBtn?.disabled) return;
+      if (!allowDismiss || session.removeBtn?.disabled) return;
       if (session.removeBtn) session.removeBtn.disabled = true;
       void (async () => {
         const client = deps.api.getClient();
