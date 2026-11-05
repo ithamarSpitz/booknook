@@ -7,9 +7,11 @@ import {
   addBookToShelf,
   addErrorMessage,
   applyOptimisticAdd,
+  buildAddBookRequest,
   createSearchGeneration,
   debounce,
   fillBookFromAddResponse,
+  isEnglishQuery,
   mapSearchBook,
   mapSearchBooksResponse,
   markPendingBooks,
@@ -80,6 +82,15 @@ function fakeCtx(initial) {
   };
 }
 
+describe("English query detection", () => {
+  it("uses English search only for Latin text without Hebrew", () => {
+    assert.equal(isEnglishQuery("Spin"), true);
+    assert.equal(isEnglishQuery("סחרור"), false);
+    assert.equal(isEnglishQuery("Spin סחרור"), false);
+    assert.equal(isEnglishQuery("1984"), false);
+  });
+});
+
 describe("mapSearchBooksResponse", () => {
   it("maps contract search-books rows to display fields", () => {
     const hits = mapSearchBooksResponse({
@@ -141,6 +152,35 @@ describe("debounce", () => {
 });
 
 describe("wireSearchInput stale responses", () => {
+  it("routes an English query to search-english and not Simania", async () => {
+    const input = mockNode();
+    const panel = mockNode();
+    const calls = [];
+    wireSearchInput({
+      input,
+      panel,
+      callSearch: async () => {
+        calls.push("simania");
+        return { books: [] };
+      },
+      callEnglishSearch: async (query) => {
+        calls.push(["search-english", query]);
+        return {
+          books: [{ hardcover_id: 383752, title: "Spin", author: "Robert Charles Wilson", year: 2005, cover_url: null }],
+        };
+      },
+      onPick() {},
+    });
+
+    input.value = "Spin";
+    input.dispatch("input");
+    await delay(SEARCH_DEBOUNCE_MS + 40);
+
+    assert.deepEqual(calls, [["search-english", "Spin"]]);
+    assert.match(panel.innerHTML, /אנגלית/);
+    assert.match(panel.innerHTML, /dir="auto"/);
+  });
+
   it("drops an older payload that arrives after a newer search", async () => {
     const input = mockNode();
     const panel = mockNode();
@@ -480,6 +520,28 @@ describe("addBookToShelf", () => {
     const book = ctx.getLibrary().shelves[0].books[0];
     assert.equal(book.title, "מהשרת");
     assert.equal(book.pending, false);
+  });
+
+  it("posts an English pick with hardcover_id and shelf_id only", async () => {
+    const ctx = fakeCtx(sampleLibrary([]));
+    const hit = mapSearchBook({
+      hardcover_id: 383752,
+      title: "Spin",
+      author: "Robert Charles Wilson",
+      year: 2005,
+      cover_url: null,
+    });
+    let posted;
+    await addBookToShelf(hit, "s1", {
+      ctx,
+      add: async (picked, shelfId) => {
+        posted = await buildAddBookRequest(picked, shelfId, async () => assert.fail("must not call Simania"));
+        return { book: { simania_id: -383752, title: "Spin", author: "Robert Charles Wilson", resolve_status: "hardcover" } };
+      },
+    });
+
+    assert.deepEqual(posted, { hardcover_id: 383752, shelf_id: "s1" });
+    assert.equal(Object.hasOwn(posted, "simania"), false);
   });
 });
 

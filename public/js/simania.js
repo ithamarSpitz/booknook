@@ -104,9 +104,10 @@ function objectResult(value, keys) {
 /**
  * Raw Simania details and rating for one book, as the Edge Functions expect in
  * the `simania` request field. Rating failure is tolerated; details are required.
- * @returns {Promise<{details: Record<string, unknown>, rating: Record<string, unknown> | null}>}
+ * @returns {Promise<{details: Record<string, unknown>, rating: Record<string, unknown> | null} | null>}
  */
 export async function fetchSimaniaPayload(simaniaId, fetchImpl = fetch) {
+  if (Number(simaniaId) < 0) return null;
   const [details, rating] = await Promise.all([
     callTool("books_get_details", { bookId: simaniaId }, fetchImpl),
     callTool("books_get_rating", { bookId: simaniaId }, fetchImpl).catch(() => null),
