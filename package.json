@@ -14,6 +14,7 @@
     "check:harness": "harness validate",
     "verify:integration": "node scripts/verify-integration.mjs",
     "verify:resolution": "deno run --allow-net --allow-env --allow-read scripts/verify-resolution.ts",
+    "verify:english": "deno run --allow-net --allow-env --allow-read scripts/verify-english.ts",
     "verify:localization": "deno run --allow-net --allow-env --allow-read scripts/verify-localization.ts"
   },
   "devDependencies": {
