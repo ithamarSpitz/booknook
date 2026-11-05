@@ -37,14 +37,18 @@ export function createCard(overlay, deps) {
   let shelves = [];
 
   function renderRating(book) {
+    const englishEdition = Boolean(book.english_edition || (book.simania_id && book.simania_id < 0));
     const count = book.simania_rating_count ?? 0;
     const rating = book.simania_rating ?? 0;
     if (!count) {
-      ratingEl.innerHTML = "<small>אין עדיין דירוגים בסימניה</small>";
+      ratingEl.innerHTML = englishEdition
+        ? "<small>אין עדיין דירוגים ב־Hardcover</small>"
+        : "<small>אין עדיין דירוגים בסימניה</small>";
       return;
     }
     const width = (rating / 5) * 100;
-    ratingEl.innerHTML = `<span class="stars"><span class="fill" style="width:${width}%"></span></span><b>${rating}</b><small>(${count.toLocaleString("he-IL")} דירוגים בסימניה)</small>`;
+    const label = englishEdition ? "דירוגים ב־Hardcover" : "דירוגים בסימניה";
+    ratingEl.innerHTML = `<span class="stars"><span class="fill" style="width:${width}%"></span></span><b>${rating}</b><small>(${count.toLocaleString("he-IL")} ${label})</small>`;
   }
 
   // The reader's own rating, only for books on their shelves (not recommendations).
@@ -98,6 +102,9 @@ export function createCard(overlay, deps) {
     shelfEl.textContent = book.shelf_name || "";
     titleEl.textContent = book.title;
     authorEl.textContent = book.author || "";
+    titleEl.setAttribute("dir", "auto");
+    authorEl.setAttribute("dir", "auto");
+    descEl.setAttribute("dir", "auto");
     renderRating(book);
     renderMyRating(book);
     renderMeta(book);

@@ -68,7 +68,7 @@ function bookTile(book) {
   const author = escapeHtml(book.author || "");
   const cover = book.cover_url
     ? `<img class="cover" src="${escapeHtml(book.cover_url)}" alt="${title}" loading="lazy" referrerpolicy="no-referrer" draggable="false">`
-    : `<span class="cover" aria-hidden="true"></span>`;
+    : `<span class="cover cover-fallback" dir="auto">${title}</span>`;
   return `<div class="book" tabindex="0" data-simania-id="${book.simania_id}">
     ${cover}
     <span class="t"><b dir="auto">${title}</b><small dir="auto">${author}</small></span>

@@ -8,6 +8,7 @@ import {
   LIBRARY_REMOVE_LABEL,
   RECS_MOVE_LABEL,
   RECS_REMOVE_LABEL,
+  addBookRequestForRecommendation,
   applyRecsCardChrome,
   applyRecommendationRefresh,
   bindRecsCardActions,
@@ -15,6 +16,7 @@ import {
   canCompleteRecsWrite,
   hasRecommendationSeeds,
   mapStoredRecommendationRow,
+  openRecommendationCard,
   removeRecommendationByWorkId,
   restoreRecsCardChrome,
   revertFailedShelfPick,
@@ -190,6 +192,7 @@ describe("mapStoredRecommendationRow", () => {
         dismissed: false,
         generated_at: "2026-01-01T00:00:00Z",
         works: {
+          hardcover_id: 123,
           original_title: "Piranesi",
           original_authors: ["Susanna Clarke"],
           hardcover_cover_url: "https://hc",
@@ -198,7 +201,8 @@ describe("mapStoredRecommendationRow", () => {
       new Map(),
     );
     assert.equal(card.english_only, true);
-    assert.equal(card.can_add, false);
+    assert.equal(card.can_add, true);
+    assert.equal(card.hardcover_id, 123);
     assert.equal(card.title, "Piranesi");
     assert.equal(card.author, "Susanna Clarke");
     assert.equal(card.cover_url, "https://hc");
@@ -422,21 +426,141 @@ describe("shared card chrome", () => {
     assert.equal(overlay.querySelector(".bk-rec-reason"), null);
   });
 
-  it("hides add-to-shelf for English-only and removes the note on restore", () => {
+  it("shows add-to-shelf for English-only and removes the note on restore", () => {
     const overlay = createFakeOverlay();
     const session = applyRecsCardChrome(overlay, {
       work_id: "en",
+      hardcover_id: 123,
       simania_id: null,
       english_only: true,
-      can_add: false,
+      can_add: true,
     });
-    assert.equal(overlay._move.hidden, true);
-    assert.equal(overlay._select.disabled, true);
+    assert.equal(overlay._move.hidden, false);
+    assert.equal(overlay._select.disabled, false);
+    assert.equal(overlay._select.childNodes[0].value, "");
     assert.equal(overlay.querySelector(".bk-rec-note")?.textContent, ENGLISH_ONLY_NOTE);
     restoreRecsCardChrome(session);
     assert.equal(overlay._move.hidden, false);
     assert.equal(overlay.querySelector(".bk-rec-note"), null);
     assert.equal(overlay._remove.textContent, LIBRARY_REMOVE_LABEL);
+  });
+
+  it("builds the provider-specific add-book payload", () => {
+    assert.deepEqual(
+      addBookRequestForRecommendation(
+        { simania_id: null, hardcover_id: 383752 },
+        "want",
+      ),
+      { hardcover_id: 383752, shelf_id: "want" },
+    );
+    assert.deepEqual(
+      addBookRequestForRecommendation(
+        { simania_id: 97171, hardcover_id: 383752 },
+        "reading",
+      ),
+      { simania_id: 97171, shelf_id: "reading" },
+    );
+  });
+
+  it("posts hardcover_id without Simania data when an English-only card is added", async () => {
+    const overlay = createFakeOverlay();
+    const calls = [];
+    let addedBook;
+    let added;
+    const addedDone = new Promise((resolve) => { added = resolve; });
+    await openRecommendationCard(overlay, {
+      work_id: "english-work",
+      hardcover_id: 383752,
+      simania_id: null,
+      title: "Spin",
+      author: "Robert Charles Wilson",
+      cover_url: null,
+      english_only: true,
+      can_add: true,
+    }, {
+      api: {
+        callFunction: async (name, body) => {
+          calls.push([name, body]);
+          return { book: { simania_id: -383752, title: "Spin" } };
+        },
+        getClient: () => null,
+      },
+      getLibrary: () => ({ shelves: [{ id: "want", name: "רוצה לקרוא" }] }),
+      showToast: () => {},
+      card: { open: () => {}, close: () => {} },
+      onDismissed: () => {},
+      onAdded: async (_workId, _shelfId, book) => {
+        addedBook = book;
+        added();
+      },
+      restorePrevious: () => {},
+      beginSession: () => {},
+      isCurrent: () => true,
+    });
+
+    overlay._select.value = "want";
+    dispatch(overlay, "change", {
+      target: overlay._select,
+      stopImmediatePropagation() {},
+    });
+    await addedDone;
+    assert.deepEqual(calls, [[
+      "add-book",
+      { hardcover_id: 383752, shelf_id: "want" },
+    ]]);
+    assert.deepEqual(addedBook, { simania_id: -383752, title: "Spin" });
+  });
+
+  it("posts simania_id when a localized card is added", async () => {
+    const overlay = createFakeOverlay();
+    const calls = [];
+    let addedBook;
+    let added;
+    const addedDone = new Promise((resolve) => { added = resolve; });
+    await openRecommendationCard(overlay, {
+      work_id: "localized-work",
+      hardcover_id: 383752,
+      simania_id: 97171,
+      title: "סחרור",
+      author: "רוברט צ'ארלס וילסון",
+      cover_url: null,
+      english_only: false,
+      can_add: true,
+    }, {
+      api: {
+        callFunction: async (name, body) => {
+          calls.push([name, body]);
+          if (name === "book-details") {
+            return { book: { simania_id: 97171, title: "סחרור" } };
+          }
+          return { book: { simania_id: 97171, title: "סחרור" } };
+        },
+        getClient: () => null,
+      },
+      getLibrary: () => ({ shelves: [{ id: "reading", name: "קורא עכשיו" }] }),
+      showToast: () => {},
+      card: { open: () => {}, close: () => {} },
+      onDismissed: () => {},
+      onAdded: async (_workId, _shelfId, book) => {
+        addedBook = book;
+        added();
+      },
+      restorePrevious: () => {},
+      beginSession: () => {},
+      isCurrent: () => true,
+    });
+
+    overlay._select.value = "reading";
+    dispatch(overlay, "change", {
+      target: overlay._select,
+      stopImmediatePropagation() {},
+    });
+    await addedDone;
+    assert.deepEqual(calls, [
+      ["book-details", { simania_id: 97171 }],
+      ["add-book", { simania_id: 97171, shelf_id: "reading" }],
+    ]);
+    assert.deepEqual(addedBook, { simania_id: 97171, title: "סחרור" });
   });
 
   it("recs.css hides [hidden] .bk-move despite display:flex in base", () => {
