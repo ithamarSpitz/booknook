@@ -431,7 +431,7 @@ sprints:
       - npm run test:web
       - npm run verify:repair
   S10-relink:
-    name: Relink wrong-author editions from Simania page evidence; audit false positives
+    name: Relink wrong-author editions; recommendations never use English editions; genre card reasons
     tasks:
       S10-T1:
         file: tasks/sprint-10-relink/01-page-original.md
@@ -457,6 +457,29 @@ sprints:
         depends_on:
         - S10-T2
         - S10-T4
+      S10-T6:
+        file: tasks/sprint-10-relink/06-recs-positive-edition.md
+        stage: 1
+        depends_on: []
+      S10-T7:
+        file: tasks/sprint-10-relink/07-positive-edition-constraint.md
+        stage: 1
+        depends_on: []
+      S10-T8:
+        file: tasks/sprint-10-relink/08-genre-because-db.md
+        stage: 1
+        depends_on: []
+      S10-T9:
+        file: tasks/sprint-10-relink/09-genre-because-function.md
+        stage: 2
+        depends_on:
+        - S10-T6
+        - S10-T8
+      S10-T10:
+        file: tasks/sprint-10-relink/10-genre-because-card.md
+        stage: 3
+        depends_on:
+        - S10-T9
     stage_verification:
       '1':
       - npm run check:functions
