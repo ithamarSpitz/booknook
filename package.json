@@ -15,7 +15,10 @@
     "verify:integration": "node scripts/verify-integration.mjs",
     "verify:resolution": "deno run --allow-net --allow-env --allow-read scripts/verify-resolution.ts",
     "verify:english": "deno run --allow-net --allow-env --allow-read scripts/verify-english.ts",
-    "verify:localization": "deno run --allow-net --allow-env --allow-read scripts/verify-localization.ts"
+    "verify:localization": "deno run --allow-net --allow-env --allow-read scripts/verify-localization.ts",
+    "audit:catalog": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/audit-catalog.ts",
+    "repair:links": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/repair-links.ts",
+    "verify:repair": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/verify-repair.ts"
   },
   "devDependencies": {
     "deno": "^2.9.6",

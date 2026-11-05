@@ -7,9 +7,9 @@ This is the binding interface for sprint S1. SQL, JSON, and TypeScript names are
 | PostgreSQL / TypeScript type | Exact values |
 |---|---|
 | `shelf_kind` / `ShelfKind` | `reading`, `read`, `want`, `stopped`, `custom` |
-| `resolve_status` / `ResolveStatus` | `pending`, `wikidata`, `nli`, `fuzzy`, `llm`, `not_found`, `hardcover` |
+| `resolve_status` / `ResolveStatus` | `pending`, `wikidata`, `nli`, `fuzzy`, `llm`, `not_found`, `hardcover`, `original_title` |
 
-`llm` is reserved and is never produced in this build. `hardcover` marks an English edition (below). Simania display text is stored and returned unchanged; normalization is only for matching.
+`llm` is reserved and is never produced in this build. `hardcover` marks an English edition (below). `original_title` marks an edition linked by the off-cloud repair script (below). Simania display text is stored and returned unchanged; normalization is only for matching.
 
 ## Database rows
 
@@ -285,6 +285,26 @@ Computed in the same `recommendations` run, after the ordinary cards, and stored
 Request `MatchByAuthorRequest`: `{"work_id":"...","candidates":[{"simania_id":97171,"title":"סחרור","author":"רוברט צ'רלס וילסון"}]}`; at most 8 candidates (`400` otherwise). Response `MatchByAuthorResponse`: `{"simania_id":97171,"resolve_status":"wikidata"}` or `{"simania_id":null,"resolve_status":null}`.
 
 The caller must have a non-dismissed recommendation for `work_id` (`404`). Read the work's `hardcover_id`. For each candidate in order: if an `editions` row exists and is linked, compare its work; otherwise insert a minimal `pending` edition row (`simania_id`, `title`, `author`; other display fields null, `details_at` null) when absent and resolve it with the resolution procedure above. Accept the first candidate whose linked work has exactly the recommended `hardcover_id`. Resolve sequentially and start no new candidate after 25 seconds. Candidates that resolve to other works stay linked to those works (useful catalog data). Never link an edition to a work its own resolution did not produce. Provider failures leave that candidate `pending` and are not an error.
+
+### Operator scripts: catalog audit and link repair (off-cloud)
+
+Two scripts run from an operator machine, never from an Edge Function or the browser. They read production with the database password from `BOOKNOOK_ENV_FILE` (`TORIMITOR_DB_PASSWORD`; host `aws-1-eu-central-1.pooler.supabase.com:5432`, user `postgres.zheosjpootcwvuazwjzh`, database `postgres`) and `HARDCOVER_API_KEY` from the same file. Secrets are never printed. Off-cloud they may call Simania directly, including the public book page `https://simania.co.il/bookdetails.php?item_id=<id>`, which Edge Functions cannot reach (Cloudflare `403`) and browsers cannot read (no CORS).
+
+**Original title from the Simania page.** `pageOriginalTitle(html)`: the Latin original title Simania shows for a translated edition, or null. Sources in order: the JSON-LD `alternativeHeadline` value; else the first element rendered with `"style":{"direction":"ltr"}` right after the Hebrew title (in the page's escaped React payload, `\"direction\":\"ltr\"},\"children\":\"<text>\"`). Unescape, trim, then cut a trailing ` + <companion title>` part. Return null when the value has no Latin letter or contains Hebrew letters. Hebrew originals (no such element) return null.
+
+**Name sound score.** `nameSoundScore(hebrewName, latinNames)`: deterministic 0..1 score that a Hebrew-script name and a Latin-script name are the same person. Build a consonant skeleton for each: Hebrew letters map to Latin consonants (`ב`→b, `ג`→g, `ג'`→j, `ד`→d, `ו`→v, `ז`→z, `ח`→h, `ט`→t, `כ ך ק`→k, `ל`→l, `מ ם`→m, `נ ן`→n, `ס ש`→s, `צ ץ`→s, `צ'`→ch, `פ ף`→p, `ר`→r, `ת`→t; `א ה ע י` and geresh drop); Latin names are lower-cased with `ph`→f, `th`→t, `ch`→k, `sh`→s, `ck`→k, `c` before `e i y`→s, vowels and `y` dropped. Then both skeletons map letters to sound classes (`b p f v w`→p, `g k c q x j`→k, `d t`→t, `s z`→s, `h`, `l`, `m`, `n`, `r` keep their own class), collapse repeated letters, and compare with letter-bigram Dice. The score is the maximum over `latinNames`. Measured on production's 138 linked editions: at `0.5`, 112 true pairs pass and 5 of 136 wrong pairs pass, so the score is only ever used together with an exact title match, never alone.
+
+**Link proposal** for one unlinked positive edition (`work_id` null): read `pageOriginalTitle`; none → no proposal (`reason: "no_original_title"`). English author: `wikidataEnglishAuthor(edition.author)`. Search Hardcover with the original title and keep candidates whose title Dice with it is at least `0.9`. With an English author, accept the single best candidate whose authors match it (`similarity > 0.45`). Without one, accept a candidate only if exactly one candidate has `nameSoundScore(edition.author, its authors) >= 0.5`; zero or several → no proposal (`reason: "no_author_match"` / `"ambiguous"`). Provider failure → no proposal (`reason: "provider_error"`).
+
+**`npm run audit:catalog`** (`scripts/audit-catalog.ts`): read-only (the session sets `default_transaction_read_only = on`). Prints three sections, and with `--json` one JSON object `{english_only_with_hebrew, author_mismatches, unlinked}`:
+1. `english_only_with_hebrew`: non-dismissed recommendations with null `simania_id` for which the browser author path (`searchByAuthor` + `matchHebrewBook` + `verifyTitleMatch` from `public/js`, as in the localization gate) finds a Hebrew Simania edition: user display name, `hardcover_id`, English title, proposed `simania_id` and Hebrew title.
+2. `author_mismatches`: linked positive editions whose Hebrew `author` does not match the work: flagged only when `nameSoundScore(edition.author, work.original_authors) < 0.5` and `wikidataEnglishAuthor(edition.author)` is null or matches none of `work.original_authors` (`similarity > 0.45`). Prints `simania_id`, Hebrew title and author, `hardcover_id`, English title and authors.
+3. `unlinked`: shelved positive editions with null `work_id`, each with its link proposal or reason.
+Exit `0` after printing (findings are a report, not a failure); exit `2` on a database or provider failure that prevented a section.
+
+**`npm run repair:links`** (`scripts/repair-links.ts`): computes the `unlinked` proposals; dry-run by default (prints what it would change). With `--apply`, for each proposal in one transaction per edition: upsert the Hardcover work exactly as the resolver does, then set `work_id`, `resolve_status = 'original_title'`, `resolved_at = now()` only where `work_id` is still null (never relink). It never changes recommendations or author mismatches (those are reported for a human).
+
+`resolve_status` gains the value `original_title` (linked by the repair script from Simania's original title).
 
 ### `link-edition`
 

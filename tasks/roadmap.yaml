@@ -368,3 +368,65 @@ sprints:
         depends_on:
         - D-T2
         - D-T3
+  S9-catalog-audit:
+    name: Catalog audit and repair of unlinked translations (off-cloud operator scripts)
+    tasks:
+      S9-T1:
+        file: tasks/sprint-09-catalog-audit/01-original-title-status.md
+        stage: 1
+        depends_on: []
+      S9-T2:
+        file: tasks/sprint-09-catalog-audit/02-name-sound-score.md
+        stage: 1
+        depends_on: []
+      S9-T3:
+        file: tasks/sprint-09-catalog-audit/03-page-original-title.md
+        stage: 1
+        depends_on: []
+      S9-T4:
+        file: tasks/sprint-09-catalog-audit/04-link-proposal.md
+        stage: 2
+        depends_on:
+        - S9-T2
+        - S9-T3
+      S9-T5:
+        file: tasks/sprint-09-catalog-audit/05-prod-db.md
+        stage: 2
+        depends_on:
+        - S9-T1
+      S9-T6:
+        file: tasks/sprint-09-catalog-audit/06-audit-catalog.md
+        stage: 3
+        depends_on:
+        - S9-T2
+        - S9-T4
+        - S9-T5
+      S9-T7:
+        file: tasks/sprint-09-catalog-audit/07-repair-links.md
+        stage: 3
+        depends_on:
+        - S9-T1
+        - S9-T4
+        - S9-T5
+      S9-T8:
+        file: tasks/sprint-09-catalog-audit/08-live-repair-gate.md
+        stage: 4
+        depends_on:
+        - S9-T6
+        - S9-T7
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      '2':
+      - npm run check:functions
+      - npm run test:functions
+      '3':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run verify:localization
+      '4':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:repair

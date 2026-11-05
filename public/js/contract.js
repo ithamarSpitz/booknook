@@ -53,7 +53,7 @@ export const RPCS = Object.freeze({
  * @property {number} simania_id
  * @property {boolean} english_edition
  * @property {string|null} work_id
- * @property {'pending'|'wikidata'|'nli'|'fuzzy'|'llm'|'not_found'|'hardcover'} resolve_status
+ * @property {'pending'|'wikidata'|'nli'|'fuzzy'|'llm'|'not_found'|'hardcover'|'original_title'} resolve_status
  * @property {string} title
  * @property {string|null} author
  * @property {string|null} translator

@@ -12,7 +12,8 @@ export type ResolveStatus =
   | "fuzzy"
   | "llm"
   | "not_found"
-  | "hardcover";
+  | "hardcover"
+  | "original_title";
 
 export interface ProfileRow {
   id: string;
