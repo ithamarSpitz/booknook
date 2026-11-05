@@ -126,6 +126,9 @@
   .add-slot span{background:rgba(255,255,255,.7);padding:6px 16px;border-radius:999px;transition:background .2s}
   .add-slot:hover span{background:#fff}
   .add-slot + .board{margin:0 -24px;background-position:-1500px 0}
+  /* genre recommendation shelves: same carved label, a quieter "מומלצים בשבילך" in place of the count */
+  .genre-shelf .book{cursor:pointer}
+  .genre-shelf .shelf-head span{font-weight:600;opacity:.8}
   @media(hover:none){.knob{display:none}}
   .burger{position:absolute;right:22px;top:50%;width:40px;height:40px;margin-top:-20px;display:grid;place-items:center;border:0;border-radius:8px;background:transparent;color:#5a3714;cursor:pointer}
   .burger:hover{background:rgba(255,255,255,.45)}

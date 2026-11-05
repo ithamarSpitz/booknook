@@ -19,11 +19,35 @@ import {
 } from "./data.js";
 import * as addBook from "./add-book.js";
 import * as firstRun from "./first-run.js";
+import { openRecommendationCard, restoreRecsCardChrome } from "./recs.js";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
 
 let chromeWired = false;
+
+export const GENRE_SHELF_LABEL = "מומלצים בשבילך";
+
+/**
+ * Genre shelves are loaded once per library screen mount (route visit). Redraws
+ * call `mount` again while the screen is open; those reuse this data.
+ * @type {{ shelves: { genre: string, books: object[] }[] | null } | null}
+ */
+let genreSession = null;
+let genreCardSession = null;
+let genreCardGeneration = 0;
+
+/**
+ * Drops a work from every genre shelf (it is now on the reader's shelves).
+ * Shelves left empty are dropped.
+ * @param {{ genre: string, books: { work_id: string }[] }[]} shelves
+ * @param {string} workId
+ */
+export function removeGenreBook(shelves, workId) {
+  return shelves
+    .map((s) => ({ ...s, books: s.books.filter((b) => b.work_id !== workId) }))
+    .filter((s) => s.books.length);
+}
 
 /** @param {HTMLElement} row */
 export function booksInRow(row) {
@@ -52,7 +76,7 @@ export function bookDropIndex(row, bookEl, clientX) {
 
 /** @param {HTMLElement} caseEl @param {HTMLElement} shelfEl */
 export function shelfPositionInCase(caseEl, shelfEl) {
-  const ids = [...caseEl.querySelectorAll(":scope > .shelf")].map((s) => s.dataset.shelfId);
+  const ids = [...caseEl.querySelectorAll(":scope > .shelf:not(.genre-shelf)")].map((s) => s.dataset.shelfId);
   return shelfIndexById(ids, shelfEl.dataset.shelfId ?? "");
 }
 
@@ -92,6 +116,32 @@ function shelfSection(shelf) {
   </section>`;
 }
 
+function genreBookTile(book) {
+  const title = escapeHtml(book.title ?? "");
+  const author = escapeHtml(book.author || "");
+  const cover = book.cover_url
+    ? `<img class="cover" src="${escapeHtml(book.cover_url)}" alt="${title}" loading="lazy" referrerpolicy="no-referrer" draggable="false">`
+    : `<span class="cover cover-fallback" dir="auto">${title}</span>`;
+  return `<div class="book" tabindex="0" data-work-id="${escapeHtml(book.work_id)}">
+    ${cover}
+    <span class="t"><b dir="auto">${title}</b><small dir="auto">${author}</small></span>
+  </div>`;
+}
+
+/** @param {{ genre: string, books: object[] }} shelf */
+export function genreShelfSection(shelf) {
+  const genre = escapeHtml(shelf.genre);
+  return `<section class="shelf genre-shelf" data-genre="${genre}">
+    <div class="shelf-head"><h2>${genre}</h2><span>${GENRE_SHELF_LABEL}</span></div>
+    <div class="rowwrap">
+      <button type="button" class="edge prev" aria-label="הקודם"><span class="knob">${EDGE_SVG}</span></button>
+      <div class="row">${shelf.books.map(genreBookTile).join("")}</div>
+      <button type="button" class="edge next" aria-label="הבא"><span class="knob">${EDGE_SVG}</span></button>
+    </div>
+    <div class="board"></div>
+  </section>`;
+}
+
 function crownHtml(title) {
   return `<div class="crown"><button type="button" class="burger" id="menu-open" aria-label="פתח תפריט"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><h1>${escapeHtml(title)}</h1></div>`;
 }
@@ -105,9 +155,10 @@ function renderCase(root, state) {
     return;
   }
   const shelvesHtml = state.shelves.map(shelfSection).join("");
+  const genreHtml = (genreSession?.shelves ?? []).map(genreShelfSection).join("");
   caseEl.innerHTML = `${crownHtml(title)}
     ${shelvesHtml}
-    <button type="button" class="add-slot" id="add-shelf"><span>+ מדף חדש</span></button><div class="board"></div>`;
+    <button type="button" class="add-slot" id="add-shelf"><span>+ מדף חדש</span></button><div class="board"></div>${genreHtml}`;
 }
 
 function wireRowScroll(wrap) {
@@ -162,15 +213,17 @@ function paint(root, ctx) {
   if (!state) return;
   // Redraws rebuild every row; keep each shelf where the reader had scrolled it.
   const rowScroll = new Map();
-  root.querySelectorAll(".shelf[data-shelf-id]").forEach((shelf) => {
+  const rowKey = (shelf) =>
+    shelf.hasAttribute("data-genre") ? `genre:${shelf.getAttribute("data-genre")}` : shelf.getAttribute("data-shelf-id");
+  root.querySelectorAll(".shelf[data-shelf-id], .shelf[data-genre]").forEach((shelf) => {
     const row = shelf.querySelector(".row");
-    if (row) rowScroll.set(shelf.getAttribute("data-shelf-id"), row.scrollLeft);
+    if (row) rowScroll.set(rowKey(shelf), row.scrollLeft);
   });
   const pageY = window.scrollY;
   renderCase(root, state);
-  root.querySelectorAll(".shelf[data-shelf-id]").forEach((shelf) => {
+  root.querySelectorAll(".shelf[data-shelf-id], .shelf[data-genre]").forEach((shelf) => {
     const row = shelf.querySelector(".row");
-    const left = rowScroll.get(shelf.getAttribute("data-shelf-id"));
+    const left = rowScroll.get(rowKey(shelf));
     if (row && left) row.scrollLeft = left;
   });
   if (pageY) window.scrollTo(0, pageY);
@@ -186,7 +239,85 @@ function paint(root, ctx) {
   root.querySelectorAll(".rowwrap").forEach(wireRowScroll);
 }
 
+function restoreGenreCard() {
+  restoreRecsCardChrome(genreCardSession);
+  genreCardSession = null;
+}
+
+function openGenreBookFromEl(bookEl, root, ctx) {
+  const session = genreSession;
+  const workId = bookEl.dataset.workId;
+  const item = session?.shelves?.flatMap((s) => s.books).find((b) => b.work_id === workId);
+  const overlay = typeof document !== "undefined" ? document.getElementById("bk") : null;
+  if (!item || !overlay || !ctx.card) return;
+  const token = ++genreCardGeneration;
+  return openRecommendationCard(
+    overlay,
+    { ...item, can_add: true },
+    {
+      api: ctx.api,
+      getLibrary: ctx.getLibrary,
+      showToast: ctx.showToast,
+      card: ctx.card,
+      restorePrevious: restoreGenreCard,
+      beginSession: (s) => {
+        genreCardSession = s;
+      },
+      isCurrent: () => token === genreCardGeneration && genreSession === session,
+      onDismissed: () => {},
+      onAdded: async (id, shelfId, added) => {
+        // Now on the reader's shelves: drop it from the genre shelf at once.
+        if (genreSession === session && session.shelves) {
+          session.shelves = removeGenreBook(session.shelves, id);
+          paint(root, ctx);
+        }
+        try {
+          if (ctx.reloadLibrary) await ctx.reloadLibrary();
+          else {
+            ctx.setLibrary(await ctx.data.loadLibrary(ctx.api.getClient()));
+            paint(root, ctx);
+          }
+        } catch (err) {
+          ctx.showToast?.(err instanceof Error ? err.message : "לא הצלחנו לטעון את הספרייה");
+        }
+        const kind = ctx.getLibrary?.()?.shelves.find((s) => s.id === shelfId)?.kind;
+        if (added?.simania_id && shouldPromptRating(kind, null)) {
+          promptRating(ctx, { simania_id: added.simania_id, title: added.title });
+        }
+      },
+    },
+    { allowDismiss: false, englishDetails: true },
+  );
+}
+
+/** Starts this mount's single genre-shelf load. A failure or empty result shows nothing. */
+function startGenreSession(root, ctx) {
+  const session = { shelves: null };
+  genreSession = session;
+  const load = ctx.data?.loadGenreShelves;
+  if (typeof load !== "function") return;
+  void (async () => {
+    let shelves = [];
+    try {
+      shelves = (await load(ctx.api.getClient())) ?? [];
+    } catch {
+      shelves = [];
+    }
+    if (genreSession !== session) return;
+    session.shelves = Array.isArray(shelves) ? shelves.filter((s) => s?.books?.length) : [];
+    if (session.shelves.length) paint(root, ctx);
+  })();
+}
+
+function endGenreSession(session) {
+  if (genreSession !== session) return;
+  genreSession = null;
+  genreCardGeneration += 1;
+  restoreGenreCard();
+}
+
 function openBookFromEl(bookEl, ctx) {
+  restoreGenreCard();
   const lib = ctx.getLibrary();
   if (!lib) return;
   const id = Number(bookEl.dataset.simaniaId);
@@ -315,14 +446,30 @@ export async function mount(root, ctx) {
     }
   }
 
+  // A route mount (screen shown, no genre session yet) loads the genre shelves
+  // once, after the library; redraws while the screen stays open reuse them.
+  if (!genreSession && !root.hidden) startGenreSession(root, ctx);
+  const session = genreSession;
+  const cleanup = () => {
+    setMenu(false);
+    if (session) endGenreSession(session);
+  };
+
   paint(root, ctx);
 
   if (root.dataset.libraryWired === "1") {
-    return () => setMenu(false);
+    return cleanup;
   }
   root.dataset.libraryWired = "1";
   wireChrome();
   setupDrag(root, ctx);
+
+  const overlay = typeof document !== "undefined" ? document.getElementById("bk") : null;
+  if (overlay && typeof MutationObserver !== "undefined") {
+    new MutationObserver(() => {
+      if (!overlay.classList.contains("on")) restoreGenreCard();
+    }).observe(overlay, { attributes: true, attributeFilter: ["class"] });
+  }
 
   root.addEventListener("click", (e) => {
     if (e.target.closest("#menu-open")) {
@@ -340,6 +487,12 @@ export async function mount(root, ctx) {
       if (shelfId) void addBook.open(shelfId, ctx);
       return;
     }
+    const genreBook = e.target.closest(".genre-shelf .book");
+    if (genreBook) {
+      void openGenreBookFromEl(genreBook, root, ctx);
+      return;
+    }
+    if (e.target.closest(".genre-shelf")) return;
     const book = e.target.closest(".book:not(.plus)");
     if (book) {
       openBookFromEl(book, ctx);
@@ -358,6 +511,12 @@ export async function mount(root, ctx) {
 
   root.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
+    const genreBook = e.target.closest?.(".genre-shelf .book");
+    if (genreBook) {
+      e.preventDefault();
+      void openGenreBookFromEl(genreBook, root, ctx);
+      return;
+    }
     const book = e.target.closest?.(".book:not(.plus)");
     if (book) {
       e.preventDefault();
@@ -365,7 +524,7 @@ export async function mount(root, ctx) {
     }
   });
 
-  return () => setMenu(false);
+  return cleanup;
 }
 
 /**
@@ -464,7 +623,7 @@ function setupDrag(root, ctx) {
   };
 
   const shelfAt = (y) =>
-    [...caseEl.querySelectorAll(":scope > .shelf")].find((s) => {
+    [...caseEl.querySelectorAll(":scope > .shelf:not(.genre-shelf)")].find((s) => {
       const r = layoutRect(s);
       return y >= r.top && y < r.bottom;
     });
@@ -625,7 +784,13 @@ function setupDrag(root, ctx) {
   };
 
   root.addEventListener("pointerdown", (e) => {
-    if (e.button > 0 || drag || document.body.classList.contains("menu-open") || e.target.closest(".bk")) {
+    if (
+      e.button > 0 ||
+      drag ||
+      document.body.classList.contains("menu-open") ||
+      e.target.closest(".bk") ||
+      e.target.closest(".genre-shelf")
+    ) {
       return;
     }
     const book = e.target.closest(".book:not(.plus)");
