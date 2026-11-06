@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyOptimisticBookMove,
+  applyOptimisticRating,
   applyOptimisticShelfMove,
   bookDropIndexFromCenters,
   bookTilesWithoutPlus,
@@ -88,6 +89,7 @@ describe("router", () => {
 
 // --- genre recommendation shelves (library.js) -----------------------------
 
+const library = await import("../../public/js/library.js");
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 async function settle(times = 6) {
   for (let i = 0; i < times; i += 1) await tick();
@@ -202,6 +204,60 @@ const readerShelves = [
   { id: "read", name: "קראתי", kind: "read", position: 1, books: [] },
 ];
 
+describe("reader shelf tile ratings", () => {
+  const book = {
+    simania_id: 17,
+    title: "ספר",
+    author: "סופרת",
+    cover_url: null,
+    rating: 4,
+  };
+
+  it("renders a rated book as five SVG stars filled from the right", () => {
+    const html = library.bookTile(book);
+    assert.equal((html.match(/<span class="tile-stars"/g) ?? []).length, 1);
+    assert.equal((html.match(/<svg/g) ?? []).length, 5);
+    assert.equal((html.match(/class="on"/g) ?? []).length, 4);
+    assert.match(html, /aria-label="דירוג: 4 מתוך 5"/);
+    assert.ok(html.indexOf("tile-stars") < html.indexOf("cover"), "stars precede the cover");
+  });
+
+  it("renders no star element for null or otherwise invalid ratings", () => {
+    for (const rating of [null, 0, 2.5, 6, "4", undefined]) {
+      assert.equal(library.bookTile({ ...book, rating }).includes("tile-stars"), false);
+    }
+  });
+
+  it("does not add stars to genre or plus tiles", () => {
+    const genreHtml = library.genreShelfSection({
+      genre: "מתח",
+      books: [{ work_id: "w", title: "ספר", author: null, cover_url: null, rating: 5 }],
+    });
+    const ownEmptyShelf = library.shelfSection({
+      id: "s",
+      name: "מדף",
+      kind: "reading",
+      books: [],
+    });
+    assert.equal(genreHtml.includes("tile-stars"), false);
+    assert.match(ownEmptyShelf, /class="book plus"/);
+    assert.equal(ownEmptyShelf.includes("tile-stars"), false);
+  });
+
+  it("reflects an optimistic rating on the next repaint", () => {
+    const state = {
+      displayName: "",
+      shelves: [{ id: "s", name: "מדף", kind: "reading", position: 0, books: [{ ...book, rating: 1 }] }],
+    };
+    const before = library.shelfSection(state.shelves[0]);
+    const next = applyOptimisticRating(state, book.simania_id, 5);
+    const after = library.shelfSection(next.shelves[0]);
+    assert.equal((before.match(/class="on"/g) ?? []).length, 1);
+    assert.equal((after.match(/class="on"/g) ?? []).length, 5);
+    assert.match(after, /aria-label="דירוג: 5 מתוך 5"/);
+  });
+});
+
 const genreShelves = [
   {
     genre: "מדע בדיוני",
@@ -251,7 +307,6 @@ function createLibraryCtx(lib) {
 }
 
 describe("genre shelves on the library screen", async () => {
-  const library = await import("../../public/js/library.js");
   const { SHELVES_CHANGED } = await import("../../public/js/events.js");
   const lib = { displayName: "", shelves: readerShelves };
 

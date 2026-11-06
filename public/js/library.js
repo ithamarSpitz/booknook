@@ -1,4 +1,4 @@
-import { notifyShelvesChanged } from "./events.js";
+import { notifyShelvesChanged, SHELVES_CHANGED } from "./events.js";
 import { promptRating, shouldPromptRating } from "./my-rating.js";
 import { SHELF_KINDS } from "./contract.js";
 import {
@@ -87,19 +87,30 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
-function bookTile(book) {
+function tileStars(rating) {
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) return "";
+  const stars = Array.from({ length: 5 }, (_, index) => {
+    const on = index < rating ? ' class="on"' : "";
+    return `<svg${on} viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.8 2.8 5.7 6.3.9-4.6 4.5 1.1 6.3-5.6-3-5.6 3 1.1-6.3-4.6-4.5 6.3-.9z"/></svg>`;
+  }).join("");
+  return `<span class="tile-stars" role="img" aria-label="דירוג: ${rating} מתוך 5">${stars}</span>`;
+}
+
+export function bookTile(book) {
   const title = escapeHtml(book.title);
   const author = escapeHtml(book.author || "");
+  const stars = tileStars(book.rating);
   const cover = book.cover_url
     ? `<img class="cover" src="${escapeHtml(book.cover_url)}" alt="${title}" loading="lazy" referrerpolicy="no-referrer" draggable="false">`
     : `<span class="cover cover-fallback" dir="auto">${title}</span>`;
   return `<div class="book" tabindex="0" data-simania-id="${book.simania_id}">
+    ${stars}
     ${cover}
     <span class="t"><b dir="auto">${title}</b><small dir="auto">${author}</small></span>
   </div>`;
 }
 
-function shelfSection(shelf) {
+export function shelfSection(shelf) {
   const custom = shelf.kind === SHELF_KINDS.CUSTOM;
   const editBtn = custom
     ? `<button type="button" class="edit" aria-label="שנה שם מדף">${EDIT_SVG}</button><button type="button" class="shelf-delete" aria-label="מחק מדף">×</button>`
@@ -463,6 +474,9 @@ export async function mount(root, ctx) {
   root.dataset.libraryWired = "1";
   wireChrome();
   setupDrag(root, ctx);
+  document.addEventListener(SHELVES_CHANGED, () => {
+    if (!root.hidden) paint(root, ctx);
+  });
 
   const overlay = typeof document !== "undefined" ? document.getElementById("bk") : null;
   if (overlay && typeof MutationObserver !== "undefined") {
