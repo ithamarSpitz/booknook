@@ -33,8 +33,11 @@ function proposal(
   };
 }
 
-function repairPlan(simaniaId = 1): RepairPlan {
+function repairPlan(
+  simaniaId = 1,
+): Extract<RepairPlan, { kind: "link" }> {
   return {
+    kind: "link",
     simania_id: simaniaId,
     title: "כותרת",
     author: "מחבר",
@@ -60,6 +63,7 @@ Deno.test("planRepairs keeps ok proposals, reports other reasons, and is sequent
   const plans = await planRepairs({
     sql: {} as Sql,
     shelvedUnlinkedEditions: () => Promise.resolve(rows),
+    linkedEditionsWithWorks: () => Promise.resolve([]),
     proposeLink: async (edition) => {
       calls.push(edition.simania_id);
       active += 1;
@@ -81,14 +85,87 @@ Deno.test("planRepairs keeps ok proposals, reports other reasons, and is sequent
   assertEquals(maxActive, 1);
 });
 
+Deno.test("planRepairs adds only actionable relinks to a different Hardcover book", async () => {
+  const linked = [
+    {
+      simania_id: 11,
+      work_id: "old-work-11",
+      title: "כותרת א",
+      author: "מחבר",
+      hardcover_id: 201,
+      original_title: "Wrong A",
+      original_authors: ["Wrong Author"],
+    },
+    {
+      simania_id: 12,
+      work_id: "old-work-12",
+      title: "כותרת ב",
+      author: "מחבר",
+      hardcover_id: 202,
+      original_title: "Wrong B",
+      original_authors: ["Wrong Author"],
+    },
+    {
+      simania_id: 13,
+      work_id: "old-work-13",
+      title: "כותרת ג",
+      author: "מחבר",
+      hardcover_id: 203,
+      original_title: "Wrong C",
+      original_authors: ["Wrong Author"],
+    },
+  ];
+  const reports: number[] = [];
+  const plans = await planRepairs({
+    sql: {} as Sql,
+    shelvedUnlinkedEditions: () => Promise.resolve([]),
+    linkedEditionsWithWorks: () => Promise.resolve(linked),
+    findAuthorMismatches: () =>
+      Promise.resolve([
+        {
+          ...linked[0],
+          proposal: proposal(11, "ok"),
+          reason: "ok",
+        },
+        {
+          ...linked[1],
+          proposal: {
+            ...proposal(12, "ok"),
+            book: book(202, "Same book"),
+          },
+          reason: "ok",
+        },
+        {
+          ...linked[2],
+          proposal: proposal(13, "no_author_match"),
+          reason: "no_author_match",
+        },
+      ]),
+    reportMismatch: (finding) => reports.push(finding.simania_id),
+  });
+
+  assertEquals(plans, [{
+    kind: "relink",
+    ...linked[0],
+    book: book(111, "Original"),
+    proposal: proposal(11, "ok") as Extract<
+      RepairPlan,
+      { kind: "relink" }
+    >["proposal"],
+  }]);
+  assertEquals(reports, [12, 13]);
+});
+
 function fakeTransactionalSql(updateRows: unknown[]) {
   const statements: string[] = [];
+  const valuesByStatement: unknown[][] = [];
   let call = 0;
   const tx = (strings: TemplateStringsArray, ...values: unknown[]) => {
     statements.push(strings.reduce(
       (text, part, index) => text + part + (index < values.length ? "?" : ""),
       "",
     ));
+    valuesByStatement.push(values);
     call += 1;
     return Promise.resolve(call === 1 ? [{ id: "work-uuid" }] : updateRows);
   };
@@ -100,7 +177,7 @@ function fakeTransactionalSql(updateRows: unknown[]) {
       return result;
     },
   } as unknown as Sql;
-  return { sql, statements };
+  return { sql, statements, valuesByStatement };
 }
 
 Deno.test("applyRepair upserts work then conditionally updates edition in one transaction", async () => {
@@ -131,8 +208,57 @@ Deno.test("applyRepair reports skipped when the guarded update touches no row", 
   assertEquals(result.status, "skipped");
 });
 
+Deno.test("applyRepair relinks only from the old work in one transaction", async () => {
+  const fake = fakeTransactionalSql([{ simania_id: 11 }]);
+  const plan: RepairPlan = {
+    kind: "relink",
+    simania_id: 11,
+    work_id: "old-work-uuid",
+    title: "כותרת",
+    author: "מחבר",
+    hardcover_id: 201,
+    original_title: "Wrong title",
+    original_authors: ["Wrong Author"],
+    book: book(111, "Original"),
+    proposal: proposal(11, "ok") as Extract<
+      RepairPlan,
+      { kind: "relink" }
+    >["proposal"],
+  };
+
+  const result = await applyRepair(fake.sql, plan, new Date());
+
+  assertEquals(result.status, "linked");
+  assertEquals(fake.statements[0], "BEGIN");
+  assertMatch(fake.statements[1], /insert into public\.works/i);
+  assertMatch(fake.statements[2], /and work_id = \?/i);
+  assertEquals(/work_id is null/i.test(fake.statements[2]), false);
+  assertEquals(fake.valuesByStatement[1].includes("old-work-uuid"), true);
+  assertEquals(fake.statements[3], "COMMIT");
+});
+
+Deno.test("applyRepair reports skipped when a relink no longer has the old work", async () => {
+  const fake = fakeTransactionalSql([]);
+  const link = repairPlan(14);
+  const plan: RepairPlan = {
+    kind: "relink",
+    simania_id: 14,
+    work_id: "old-work-uuid",
+    title: link.title,
+    author: link.author,
+    hardcover_id: 204,
+    original_title: "Wrong title",
+    original_authors: ["Wrong Author"],
+    book: link.book,
+    proposal: link,
+  };
+  const result = await applyRepair(fake.sql, plan, new Date());
+  assertEquals(result.status, "skipped");
+});
+
 Deno.test("dry run opens read-only and never applies a repair", async () => {
   const openOptions: Array<{ readOnly?: boolean }> = [];
+  const logs: string[] = [];
   let applies = 0;
   let ended = 0;
   const sql = {
@@ -147,7 +273,19 @@ Deno.test("dry run opens read-only and never applies a repair", async () => {
       openOptions.push(options ?? {});
       return Promise.resolve(sql);
     },
-    planRepairs: () => Promise.resolve([repairPlan()]),
+    planRepairs: () =>
+      Promise.resolve([repairPlan(), {
+        kind: "relink",
+        simania_id: 11,
+        work_id: "old-work-uuid",
+        title: "כותרת",
+        author: "מחבר",
+        hardcover_id: 201,
+        original_title: "Wrong title",
+        original_authors: ["Wrong Author"],
+        book: book(111, "Original"),
+        proposal: repairPlan(11),
+      }]),
     applyRepair: () => {
       applies += 1;
       return Promise.resolve({
@@ -156,11 +294,19 @@ Deno.test("dry run opens read-only and never applies a repair", async () => {
         work_id: "work-uuid",
       });
     },
-    log: () => {},
+    log: (message) => logs.push(message),
   });
 
   assertEquals(code, 0);
   assertEquals(openOptions, [{ readOnly: true }]);
   assertEquals(applies, 0);
   assertEquals(ended, 1);
+  assertEquals(JSON.parse(logs[1]), {
+    kind: "relink",
+    simania_id: 11,
+    title: "כותרת",
+    from: { hardcover_id: 201, title: "Wrong title" },
+    to: { hardcover_id: 101, title: "Original" },
+    evidence: { english_author: "English Author" },
+  });
 });

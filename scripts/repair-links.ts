@@ -6,6 +6,12 @@ import {
 import { type LinkProposal, proposeLink } from "./lib/link-proposal.ts";
 import { nameSoundScore } from "./lib/names.ts";
 import {
+  type AuthorMismatchFinding,
+  findAuthorMismatches,
+  type LinkedEdition,
+} from "./audit-catalog.ts";
+import {
+  linkedEditionsWithWorks,
   loadOperatorEnv,
   openProdDb,
   shelvedUnlinkedEditions,
@@ -18,9 +24,16 @@ export interface RepairEdition {
   translator?: string | null;
 }
 
-export type RepairPlan =
+type AcceptedProposal = LinkProposal & {
+  original_title: string;
+  book: HardcoverBook;
+  reason: "ok";
+};
+
+export type LinkRepairPlan =
   & Omit<LinkProposal, "book" | "original_title" | "reason">
   & {
+    kind: "link";
     title: string;
     author: string | null;
     translator: string | null;
@@ -29,13 +42,27 @@ export type RepairPlan =
     reason: "ok";
   };
 
+export type RelinkRepairPlan = Omit<LinkedEdition, "work_id"> & {
+  kind: "relink";
+  work_id: string;
+  book: HardcoverBook;
+  proposal: AcceptedProposal;
+};
+
+export type RepairPlan = LinkRepairPlan | RelinkRepairPlan;
+
 export interface PlanRepairDeps {
   sql: Sql;
   shelvedUnlinkedEditions?: (sql: Sql) => Promise<RepairEdition[]>;
+  linkedEditionsWithWorks?: (sql: Sql) => Promise<LinkedEdition[]>;
   proposeLink?: (
     edition: RepairEdition,
   ) => Promise<LinkProposal>;
+  findAuthorMismatches?: (
+    editions: LinkedEdition[],
+  ) => Promise<AuthorMismatchFinding[]>;
   report?: (edition: RepairEdition, proposal: LinkProposal) => void;
+  reportMismatch?: (finding: AuthorMismatchFinding) => void;
 }
 
 /** Build actionable repairs in stable edition order; non-actions are reported. */
@@ -63,12 +90,45 @@ export async function planRepairs(
     }
     plans.push({
       ...proposal,
+      kind: "link",
       title: edition.title,
       author: edition.author,
       translator: edition.translator ?? null,
       original_title: proposal.original_title,
       book: proposal.book,
       reason: "ok",
+    });
+  }
+
+  const listLinked = deps.linkedEditionsWithWorks ??
+    (linkedEditionsWithWorks as unknown as (
+      sql: Sql,
+    ) => Promise<LinkedEdition[]>);
+  const findMismatches = deps.findAuthorMismatches ?? findAuthorMismatches;
+  const reportMismatch = deps.reportMismatch ?? reportUnrepairableMismatch;
+  const mismatches = await findMismatches(await listLinked(deps.sql));
+
+  for (const finding of mismatches) {
+    const proposal = finding.proposal;
+    if (
+      finding.work_id === undefined || proposal?.reason !== "ok" ||
+      proposal.book === null || proposal.original_title === null ||
+      proposal.book.id === finding.hardcover_id
+    ) {
+      reportMismatch(finding);
+      continue;
+    }
+    plans.push({
+      kind: "relink",
+      simania_id: finding.simania_id,
+      work_id: finding.work_id,
+      title: finding.title,
+      author: finding.author,
+      hardcover_id: finding.hardcover_id,
+      original_title: finding.original_title,
+      original_authors: finding.original_authors,
+      book: proposal.book,
+      proposal: proposal as AcceptedProposal,
     });
   }
 
@@ -114,6 +174,7 @@ export async function applyRepair(
   now: Date,
 ): Promise<RepairResult> {
   return await sql.begin(async (tx) => {
+    const proposal = plan.kind === "relink" ? plan.proposal : plan;
     const works = await tx<{ id: string }[]>`
       insert into public.works (
         hardcover_id,
@@ -124,12 +185,12 @@ export async function applyRepair(
         hardcover_cover_url,
         refreshed_at
       ) values (
-        ${plan.book.id},
-        ${plan.book.title},
-        ${authors(plan.book)},
-        ${plan.book.cached_similar_book_ids ?? []},
-        ${JSON.stringify(cachedTags(plan.book))}::jsonb,
-        ${coverUrl(plan.book)},
+        ${proposal.book.id},
+        ${proposal.book.title},
+        ${authors(proposal.book)},
+        ${proposal.book.cached_similar_book_ids ?? []},
+        ${JSON.stringify(cachedTags(proposal.book))}::jsonb,
+        ${coverUrl(proposal.book)},
         ${now}
       )
       on conflict (hardcover_id) do update set
@@ -144,16 +205,27 @@ export async function applyRepair(
     const workId = works[0]?.id;
     if (!workId) throw new Error("Work upsert returned no id.");
 
-    const editions = await tx<{ simania_id: number }[]>`
-      update public.editions
-      set
-        work_id = ${workId},
-        resolve_status = 'original_title',
-        resolved_at = ${now}
-      where simania_id = ${plan.simania_id}
-        and work_id is null
-      returning simania_id
-    `;
+    const editions = plan.kind === "relink"
+      ? await tx<{ simania_id: number }[]>`
+        update public.editions
+        set
+          work_id = ${workId},
+          resolve_status = 'original_title',
+          resolved_at = ${now}
+        where simania_id = ${plan.simania_id}
+          and work_id = ${plan.work_id}
+        returning simania_id
+      `
+      : await tx<{ simania_id: number }[]>`
+        update public.editions
+        set
+          work_id = ${workId},
+          resolve_status = 'original_title',
+          resolved_at = ${now}
+        where simania_id = ${plan.simania_id}
+          and work_id is null
+        returning simania_id
+      `;
 
     return {
       simania_id: plan.simania_id,
@@ -227,16 +299,50 @@ function reportRejectedProposal(
   }));
 }
 
+function reportUnrepairableMismatch(finding: AuthorMismatchFinding): void {
+  console.log(JSON.stringify({
+    kind: "relink",
+    simania_id: finding.simania_id,
+    title: finding.title,
+    hardcover_id: finding.hardcover_id,
+    reason: finding.reason,
+  }));
+}
+
 function printPlan(plan: RepairPlan, log: (message: string) => void): void {
-  const evidence = plan.english_author === null
-    ? { sound_score: nameSoundScore(plan.author ?? "", authors(plan.book)) }
-    : { english_author: plan.english_author };
+  const proposal = plan.kind === "relink" ? plan.proposal : plan;
+  const evidence = proposal.english_author === null
+    ? {
+      sound_score: nameSoundScore(
+        plan.author ?? "",
+        authors(proposal.book),
+      ),
+    }
+    : { english_author: proposal.english_author };
+  if (plan.kind === "relink") {
+    log(JSON.stringify({
+      kind: "relink",
+      simania_id: plan.simania_id,
+      title: plan.title,
+      from: {
+        hardcover_id: plan.hardcover_id,
+        title: plan.original_title,
+      },
+      to: {
+        hardcover_id: proposal.book.id,
+        title: proposal.book.title,
+      },
+      evidence,
+    }));
+    return;
+  }
   log(JSON.stringify({
+    kind: "link",
     simania_id: plan.simania_id,
     title: plan.title,
     original_title: plan.original_title,
-    hardcover_id: plan.book.id,
-    hardcover_title: plan.book.title,
+    hardcover_id: proposal.book.id,
+    hardcover_title: proposal.book.title,
     evidence,
   }));
 }
