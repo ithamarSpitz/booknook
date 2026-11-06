@@ -154,6 +154,16 @@ export interface HebrewHint {
   author: string | null;
 }
 
+export interface GenreHintRequest {
+  work_id: string;
+}
+
+export interface GenreHintResponse {
+  work_id: string;
+  hebrew_hint: HebrewHint | null;
+  hebrew_author: string | null;
+}
+
 export interface LinkEditionRequest {
   work_id: string;
   simania_id: number;
