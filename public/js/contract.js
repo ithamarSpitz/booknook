@@ -84,6 +84,8 @@ export const RPCS = Object.freeze({
  * @property {string|null} author
  * @property {string|null} cover_url
  * @property {boolean} english_only
+ * @property {number[]} because
+ * @property {string[]} because_titles
  */
 
 /**

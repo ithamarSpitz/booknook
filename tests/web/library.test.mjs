@@ -96,6 +96,17 @@ async function settle(times = 6) {
 }
 
 function createGenreOverlay() {
+  const inserted = [];
+  const parentElement = {
+    firstChild: null,
+    insertBefore(node) {
+      inserted.unshift(node);
+      node.remove = () => {
+        const index = inserted.indexOf(node);
+        if (index >= 0) inserted.splice(index, 1);
+      };
+    },
+  };
   const doc = {
     createElement: () => ({ setAttribute() {}, remove() {}, className: "", textContent: "" }),
   };
@@ -113,7 +124,7 @@ function createGenreOverlay() {
     textContent: "הסר מהספרייה",
     hidden: false,
     disabled: false,
-    parentElement: { insertBefore() {}, firstChild: null },
+    parentElement,
     contains: (t) => t === removeBtn,
   };
   const moveLabel = { ownerDocument: doc, childNodes: [], hidden: false };
@@ -122,13 +133,22 @@ function createGenreOverlay() {
     [".bk-move select", select],
     [".bk-remove", removeBtn],
   ]);
+  let open = false;
+  const observers = [];
   return {
     ownerDocument: doc,
     listeners,
     _select: select,
     _remove: removeBtn,
-    classList: { contains: () => true },
-    querySelector: (sel) => nodes.get(sel) ?? null,
+    _setOpen(value) {
+      open = value;
+      for (const callback of observers) callback();
+    },
+    _observe(callback) { observers.push(callback); },
+    classList: { contains: (name) => name === "on" && open },
+    querySelector: (sel) => sel === ".bk-rec-reason"
+      ? inserted.find((node) => node.className === "bk-rec-reason") ?? null
+      : nodes.get(sel) ?? null,
     addEventListener: (type, fn, capture) => listeners.push({ type, fn, capture: Boolean(capture) }),
     removeEventListener: (type, fn) => {
       const i = listeners.findIndex((l) => l.type === type && l.fn === fn);
@@ -142,6 +162,7 @@ function installFakeDom(overlay) {
     document: globalThis.document,
     window: globalThis.window,
     addEventListener: globalThis.addEventListener,
+    MutationObserver: globalThis.MutationObserver,
   };
   const docListeners = [];
   globalThis.document = {
@@ -158,10 +179,16 @@ function installFakeDom(overlay) {
   };
   globalThis.window = { scrollY: 0, scrollTo() {} };
   globalThis.addEventListener = () => {};
+  globalThis.MutationObserver = class {
+    constructor(callback) { this.callback = callback; }
+    observe(target) { target._observe(this.callback); }
+    disconnect() {}
+  };
   return () => {
     globalThis.document = previous.document;
     globalThis.window = previous.window;
     globalThis.addEventListener = previous.addEventListener;
+    globalThis.MutationObserver = previous.MutationObserver;
   };
 }
 
@@ -262,14 +289,14 @@ const genreShelves = [
   {
     genre: "מדע בדיוני",
     books: [
-      { work_id: "w1", hardcover_id: 11, simania_id: 501, title: "סחרור", author: "וילסון", cover_url: null, english_only: false },
-      { work_id: "w2", hardcover_id: 12, simania_id: null, title: "Spin", author: "Robert Charles Wilson", cover_url: "https://x/c.jpg", english_only: true },
+      { work_id: "w1", hardcover_id: 11, simania_id: 501, title: "סחרור", author: "וילסון", cover_url: null, english_only: false, because: [101], because_titles: ["החברה הגאונה"] },
+      { work_id: "w2", hardcover_id: 12, simania_id: null, title: "Spin", author: "Robert Charles Wilson", cover_url: "https://x/c.jpg", english_only: true, because: [], because_titles: [] },
     ],
   },
   {
     genre: "פנטזיה",
     books: [
-      { work_id: "w3", hardcover_id: 13, simania_id: 503, title: "ההוביט", author: null, cover_url: null, english_only: false },
+      { work_id: "w3", hardcover_id: 13, simania_id: 503, title: "ההוביט", author: null, cover_url: null, english_only: false, because: [], because_titles: [] },
     ],
   },
 ];
@@ -391,11 +418,17 @@ describe("genre shelves on the library screen", async () => {
     }
   });
 
-  it("opens a genre book with only the reader's shelves and no dismiss button", async () => {
+  it("opens a genre book with its recommendation reason and removes it on close", async () => {
     const overlay = createGenreOverlay();
     const restore = installFakeDom(overlay);
     const root = createLibraryRoot();
     const { ctx, calls } = createLibraryCtx(lib);
+    const recordOpen = ctx.card.open;
+    ctx.card.open = (...args) => {
+      recordOpen(...args);
+      overlay._setOpen(true);
+    };
+    ctx.card.close = () => overlay._setOpen(false);
     try {
       const cleanup = await library.mount(root, ctx);
       await settle();
@@ -405,6 +438,9 @@ describe("genre shelves on the library screen", async () => {
       assert.equal(calls.cardOpens.length, 1);
       assert.deepEqual(calls.cardOpens[0].shelves.map((s) => s.id), ["reading", "read"]);
       assert.equal(overlay._remove.hidden, true);
+      assert.match(overlay.querySelector(".bk-rec-reason")?.textContent ?? "", /החברה הגאונה/);
+      ctx.card.close();
+      assert.equal(overlay.querySelector(".bk-rec-reason"), null);
       cleanup();
       assert.equal(overlay._remove.hidden, false, "library card chrome restored");
     } finally {
