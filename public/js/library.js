@@ -1,6 +1,6 @@
 import { notifyShelvesChanged, SHELVES_CHANGED } from "./events.js";
 import { promptRating, shouldPromptRating } from "./my-rating.js";
-import { SHELF_KINDS } from "./contract.js";
+import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
 import {
   applyOptimisticBookMove,
   applyOptimisticDeleteShelf,
@@ -19,7 +19,7 @@ import {
 } from "./data.js";
 import * as addBook from "./add-book.js";
 import * as firstRun from "./first-run.js";
-import { openRecommendationCard, restoreRecsCardChrome } from "./recs.js";
+import { localizeRecommendations, openRecommendationCard, restoreRecsCardChrome } from "./recs.js";
 
 const EDGE_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5"/></svg>`;
 const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>`;
@@ -27,6 +27,11 @@ const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><p
 let chromeWired = false;
 
 export const GENRE_SHELF_LABEL = "מומלצים בשבילך";
+export const GENRE_LOCALIZE_TRIED_KEY = "booknook.genreLocalizeTried";
+
+const GENRE_LOCALIZE_LIMIT = 12;
+const GENRE_LOCALIZE_CONCURRENCY = 2;
+const GENRE_LOCALIZE_RETRY_MS = 14 * 24 * 60 * 60 * 1000;
 
 /**
  * Genre shelves are loaded once per library screen mount (route visit). Redraws
@@ -127,16 +132,20 @@ export function shelfSection(shelf) {
   </section>`;
 }
 
-function genreBookTile(book) {
+function genreBookContent(book) {
   const title = escapeHtml(book.title ?? "");
   const author = escapeHtml(book.author || "");
   const cover = book.cover_url
     ? `<img class="cover" src="${escapeHtml(book.cover_url)}" alt="${title}" loading="lazy" referrerpolicy="no-referrer" draggable="false">`
     : `<span class="cover cover-fallback" dir="auto">${title}</span>`;
-  return `<div class="book" tabindex="0" data-work-id="${escapeHtml(book.work_id)}">
-    ${cover}
+  return `${cover}
     <span class="t"><b dir="auto">${title}</b><small dir="auto">${author}</small></span>
-  </div>`;
+  `;
+}
+
+function genreBookTile(book) {
+  return `<div class="book" tabindex="0" data-work-id="${escapeHtml(book.work_id)}">
+    ${genreBookContent(book)}</div>`;
 }
 
 /** @param {{ genre: string, books: object[] }} shelf */
@@ -151,6 +160,115 @@ export function genreShelfSection(shelf) {
     </div>
     <div class="board"></div>
   </section>`;
+}
+
+/**
+ * Applies a localization result to the mount's genre data and its one tile.
+ * No row or shelf is rebuilt, so horizontal and page scroll positions remain.
+ * @param {HTMLElement} root
+ * @param {{ shelves: { books: object[] }[] | null }} session
+ * @param {string} workId
+ * @param {{ simania_id: number, title: string, author: string|null, cover_url: string|null }} patch
+ */
+export function updateGenreBookInPlace(root, session, workId, patch) {
+  const book = session.shelves?.flatMap((shelf) => shelf.books).find((item) => item.work_id === workId);
+  if (!book) return;
+  Object.assign(book, patch, { english_only: false });
+  const tile = [...root.querySelectorAll(".genre-shelf .book")].find((item) => item.dataset.workId === workId);
+  if (tile) tile.innerHTML = genreBookContent(book);
+}
+
+/**
+ * Runs the bounded browser localization queue for one mounted genre session.
+ * Exported so ordering, persistence and cancellation can be tested without a DOM.
+ * @param {{ genre: string, books: object[] }[]} shelves
+ * @param {{
+ *   callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>,
+ *   isCurrent: () => boolean,
+ *   onLinked: (workId: string, patch: object) => void,
+ *   storage?: Storage|null,
+ *   now?: () => number,
+ *   localize?: typeof localizeRecommendations,
+ * }} deps
+ */
+export async function localizeGenreBooks(shelves, deps) {
+  const now = deps.now ?? Date.now;
+  let storage = deps.storage ?? null;
+  if (deps.storage === undefined) {
+    try {
+      storage = globalThis.localStorage;
+    } catch {
+      storage = null;
+    }
+  }
+  let storageAvailable = storage != null;
+  let tried = {};
+  if (storageAvailable) {
+    try {
+      if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") {
+        throw new Error("Storage unavailable");
+      }
+      const value = storage.getItem(GENRE_LOCALIZE_TRIED_KEY);
+      const parsed = value ? JSON.parse(value) : {};
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid tried map");
+      tried = parsed;
+    } catch {
+      storageAvailable = false;
+      tried = {};
+    }
+  }
+
+  const cutoff = now() - GENRE_LOCALIZE_RETRY_MS;
+  const queue = shelves
+    .flatMap((shelf) => shelf.books)
+    .filter((book) => book?.english_only && !(Date.parse(tried[book.work_id]) >= cutoff))
+    .slice(0, GENRE_LOCALIZE_LIMIT);
+  const localize = deps.localize ?? localizeRecommendations;
+
+  async function one(book) {
+    if (storageAvailable) {
+      try {
+        tried[book.work_id] = new Date(now()).toISOString();
+        storage.setItem(GENRE_LOCALIZE_TRIED_KEY, JSON.stringify(tried));
+      } catch {
+        storageAvailable = false;
+      }
+    }
+    const hint = await deps.callFunction(FUNCTIONS.GENRE_HINT, { work_id: book.work_id });
+    if (!deps.isCurrent() || !hint || typeof hint !== "object") return;
+    const hebrewHint = hint.hebrew_hint ?? null;
+    const hebrewAuthor = hint.hebrew_author ?? null;
+    if (!hebrewHint && !hebrewAuthor) return;
+    await localize(
+      [{
+        work_id: book.work_id,
+        title: book.title,
+        english_only: true,
+        hebrew_hint: hebrewHint,
+        hebrew_author: hebrewAuthor,
+      }],
+      {
+        callFunction: deps.callFunction,
+        isCurrent: deps.isCurrent,
+        onLinked: (workId, linkedPatch) => {
+          if (deps.isCurrent()) deps.onLinked(workId, linkedPatch);
+        },
+        concurrency: 1,
+      },
+    );
+  }
+
+  const workers = Array.from({ length: Math.min(GENRE_LOCALIZE_CONCURRENCY, queue.length) }, async () => {
+    while (queue.length && deps.isCurrent()) {
+      const book = queue.shift();
+      try {
+        await one(book);
+      } catch (err) {
+        console.warn(`Could not localize ${book.title}:`, err);
+      }
+    }
+  });
+  await Promise.all(workers);
 }
 
 function crownHtml(title) {
@@ -316,7 +434,16 @@ function startGenreSession(root, ctx) {
     }
     if (genreSession !== session) return;
     session.shelves = Array.isArray(shelves) ? shelves.filter((s) => s?.books?.length) : [];
-    if (session.shelves.length) paint(root, ctx);
+    if (session.shelves.length) {
+      paint(root, ctx);
+      if (typeof ctx.api?.callFunction === "function") {
+        void localizeGenreBooks(session.shelves, {
+          callFunction: (name, body) => ctx.api.callFunction(name, body),
+          isCurrent: () => genreSession === session,
+          onLinked: (workId, patch) => updateGenreBookInPlace(root, session, workId, patch),
+        });
+      }
+    }
   })();
 }
 

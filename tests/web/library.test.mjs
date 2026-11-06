@@ -163,6 +163,7 @@ function installFakeDom(overlay) {
     window: globalThis.window,
     addEventListener: globalThis.addEventListener,
     MutationObserver: globalThis.MutationObserver,
+    localStorage: globalThis.localStorage,
   };
   const docListeners = [];
   globalThis.document = {
@@ -184,11 +185,18 @@ function installFakeDom(overlay) {
     observe(target) { target._observe(this.callback); }
     disconnect() {}
   };
+  globalThis.localStorage = {
+    getItem: (key) => key === library.GENRE_LOCALIZE_TRIED_KEY
+      ? JSON.stringify({ w2: new Date().toISOString() })
+      : null,
+    setItem() {},
+  };
   return () => {
     globalThis.document = previous.document;
     globalThis.window = previous.window;
     globalThis.addEventListener = previous.addEventListener;
     globalThis.MutationObserver = previous.MutationObserver;
+    globalThis.localStorage = previous.localStorage;
   };
 }
 
@@ -489,5 +497,168 @@ describe("genre shelves on the library screen", async () => {
     const next = library.removeGenreBook(genreShelves, "w3");
     assert.deepEqual(next.map((s) => s.genre), ["מדע בדיוני"]);
     assert.equal(genreShelves[1].books.length, 1, "input not mutated");
+  });
+});
+
+function englishGenreShelves(count) {
+  const books = Array.from({ length: count }, (_, index) => ({
+    work_id: `english-${index + 1}`,
+    hardcover_id: index + 1,
+    simania_id: null,
+    title: `English ${index + 1}`,
+    author: "Author",
+    cover_url: `https://example.test/${index + 1}.jpg`,
+    english_only: true,
+    because: [],
+    because_titles: [],
+  }));
+  return [
+    { genre: "ראשון", books: books.slice(0, 7) },
+    { genre: "שני", books: books.slice(7) },
+  ];
+}
+
+describe("genre shelf localization", () => {
+  it("attempts at most 12 English books in shelf and position order, two at a time", async () => {
+    const attempts = [];
+    let active = 0;
+    let maximumActive = 0;
+    await library.localizeGenreBooks(englishGenreShelves(14), {
+      storage: null,
+      isCurrent: () => true,
+      onLinked() {},
+      callFunction: async (name, body) => {
+        assert.equal(name, "genre-hint");
+        attempts.push(body.work_id);
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await tick();
+        active -= 1;
+        return { hebrew_hint: null, hebrew_author: null };
+      },
+    });
+    assert.deepEqual(attempts, Array.from({ length: 12 }, (_, index) => `english-${index + 1}`));
+    assert.equal(maximumActive, 2);
+  });
+
+  it("skips a work tried within 14 days, while throwing storage skips and records nothing", async () => {
+    const now = Date.parse("2026-11-07T12:00:00.000Z");
+    const storedAttempts = [];
+    const storage = {
+      getItem: () => JSON.stringify({
+        "english-1": new Date(now - 13 * 24 * 60 * 60 * 1000).toISOString(),
+        "english-2": new Date(now - 15 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+      setItem() {},
+    };
+    await library.localizeGenreBooks(englishGenreShelves(3), {
+      storage,
+      now: () => now,
+      isCurrent: () => true,
+      onLinked() {},
+      callFunction: async (_name, body) => {
+        storedAttempts.push(body.work_id);
+        return {};
+      },
+    });
+    assert.deepEqual(storedAttempts, ["english-2", "english-3"]);
+
+    const throwingAttempts = [];
+    let writes = 0;
+    await library.localizeGenreBooks(englishGenreShelves(3), {
+      storage: {
+        getItem() { throw new Error("blocked"); },
+        setItem() { writes += 1; throw new Error("blocked"); },
+      },
+      now: () => now,
+      isCurrent: () => true,
+      onLinked() {},
+      callFunction: async (_name, body) => {
+        throwingAttempts.push(body.work_id);
+        return {};
+      },
+    });
+    assert.deepEqual(throwingAttempts, ["english-1", "english-2", "english-3"]);
+    assert.equal(writes, 0);
+  });
+
+  it("updates only a linked book's tile and keeps its work id", async () => {
+    const shelves = englishGenreShelves(2);
+    const session = { shelves };
+    const firstTile = { dataset: { workId: "english-1" }, innerHTML: "first-before" };
+    const secondTile = { dataset: { workId: "english-2" }, innerHTML: "second-before" };
+    const root = { querySelectorAll: () => [firstTile, secondTile] };
+    await library.localizeGenreBooks(shelves, {
+      storage: null,
+      isCurrent: () => true,
+      callFunction: async (_name, body) => body.work_id === "english-1"
+        ? { hebrew_hint: { title: "כותרת", author: "מחבר" }, hebrew_author: "מחבר" }
+        : {},
+      localize: async (items, deps) => {
+        deps.onLinked(items[0].work_id, {
+          simania_id: 987746,
+          title: "אלינור אוליפנט ממש בסדר",
+          author: "גייל הונימן",
+          cover_url: "https://example.test/hebrew.jpg",
+        });
+      },
+      onLinked: (workId, linkedPatch) => library.updateGenreBookInPlace(root, session, workId, linkedPatch),
+    });
+    assert.equal(firstTile.dataset.workId, "english-1");
+    assert.match(firstTile.innerHTML, /אלינור אוליפנט ממש בסדר/);
+    assert.match(firstTile.innerHTML, /https:\/\/example\.test\/hebrew\.jpg/);
+    assert.equal(secondTile.innerHTML, "second-before");
+    assert.deepEqual(shelves[0].books[0], {
+      ...englishGenreShelves(2)[0].books[0],
+      simania_id: 987746,
+      title: "אלינור אוליפנט ממש בסדר",
+      author: "גייל הונימן",
+      cover_url: "https://example.test/hebrew.jpg",
+      english_only: false,
+    });
+  });
+
+  it("stops scheduling further attempts after unmount", async () => {
+    let current = true;
+    const attempts = [];
+    const releases = [];
+    const running = library.localizeGenreBooks(englishGenreShelves(6), {
+      storage: null,
+      isCurrent: () => current,
+      onLinked() {},
+      callFunction: (_name, body) => {
+        attempts.push(body.work_id);
+        return new Promise((resolve) => releases.push(() => resolve({})));
+      },
+    });
+    await tick();
+    assert.deepEqual(attempts, ["english-1", "english-2"]);
+    current = false;
+    releases.forEach((release) => release());
+    await running;
+    assert.deepEqual(attempts, ["english-1", "english-2"]);
+  });
+
+  it("warns on a rejected genre hint and continues with the next book", async () => {
+    const attempts = [];
+    const warnings = [];
+    const previousWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    try {
+      await library.localizeGenreBooks(englishGenreShelves(3), {
+        storage: null,
+        isCurrent: () => true,
+        onLinked() {},
+        callFunction: async (_name, body) => {
+          attempts.push(body.work_id);
+          if (body.work_id === "english-1") throw new Error("hint failed");
+          return {};
+        },
+      });
+    } finally {
+      console.warn = previousWarn;
+    }
+    assert.deepEqual(attempts, ["english-1", "english-2", "english-3"]);
+    assert.equal(warnings.length, 1);
   });
 });

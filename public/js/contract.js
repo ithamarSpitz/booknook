@@ -10,6 +10,7 @@ export const FUNCTIONS = Object.freeze({
   ADD_BOOK: "add-book",
   BOOK_DETAILS: "book-details",
   SEARCH_ENGLISH: "search-english",
+  GENRE_HINT: "genre-hint",
   LINK_EDITION: "link-edition",
   MATCH_BY_AUTHOR: "match-by-author",
   INVITE_USER: "invite-user",
