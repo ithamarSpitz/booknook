@@ -27,6 +27,7 @@ export interface EnglishOnlyRecommendation {
 
 export interface LinkedEdition {
   simania_id: number;
+  work_id?: string;
   title: string;
   author: string | null;
   hardcover_id: number;
@@ -55,13 +56,9 @@ export interface EnglishOnlyFinding {
   error?: "provider_error";
 }
 
-export interface AuthorMismatchFinding {
-  simania_id: number;
-  hebrew_title: string;
-  hebrew_author: string | null;
-  hardcover_id: number;
-  english_title: string;
-  english_authors: string[];
+export interface AuthorMismatchFinding extends LinkedEdition {
+  proposal: LinkProposal | null;
+  reason: LinkProposal["reason"];
   error?: "provider_error";
 }
 
@@ -132,15 +129,77 @@ async function defaultLocalize(
   };
 }
 
-function mismatchFinding(edition: LinkedEdition): AuthorMismatchFinding {
+function providerErrorMismatch(
+  edition: LinkedEdition,
+): AuthorMismatchFinding {
   return {
-    simania_id: edition.simania_id,
-    hebrew_title: edition.title,
-    hebrew_author: edition.author,
-    hardcover_id: edition.hardcover_id,
-    english_title: edition.original_title,
-    english_authors: edition.original_authors,
+    ...edition,
+    proposal: null,
+    reason: "provider_error",
+    error: "provider_error",
   };
+}
+
+export async function findAuthorMismatches(
+  editions: LinkedEdition[],
+  deps: Pick<
+    AuditDeps,
+    | "nameSoundScore"
+    | "wikidataEnglishAuthor"
+    | "similarity"
+    | "proposeLink"
+  > = {},
+): Promise<AuthorMismatchFinding[]> {
+  const soundScore = deps.nameSoundScore ?? nameSoundScore;
+  const englishAuthor = deps.wikidataEnglishAuthor ?? wikidataEnglishAuthor;
+  const compare = deps.similarity ?? similarity;
+  const makeProposal = deps.proposeLink ?? proposeLink;
+  const findings: AuthorMismatchFinding[] = [];
+
+  // Deliberately sequential: Wikidata, Simania, and Hardcover are rate limited.
+  for (const edition of editions) {
+    const editionAuthor = edition.author ?? "";
+    if (
+      edition.original_authors.some((author) =>
+        compare(editionAuthor, author) > 0.45
+      )
+    ) {
+      continue;
+    }
+    if (soundScore(editionAuthor, edition.original_authors) >= 0.5) continue;
+
+    try {
+      const translated = await englishAuthor(editionAuthor);
+      if (
+        translated !== null &&
+        edition.original_authors.some((author) =>
+          compare(translated, author) > 0.45
+        )
+      ) {
+        continue;
+      }
+
+      const proposal = await makeProposal(edition);
+      if (
+        proposal.reason === "ok" && proposal.book !== null &&
+        proposal.book.id === edition.hardcover_id
+      ) {
+        continue;
+      }
+      findings.push({
+        ...edition,
+        proposal,
+        reason: proposal.reason,
+        ...(proposal.reason === "provider_error"
+          ? { error: "provider_error" as const }
+          : {}),
+      });
+    } catch {
+      findings.push(providerErrorMismatch(edition));
+    }
+  }
+
+  return findings;
 }
 
 function requiredSql(sql: Sql | undefined): Sql {
@@ -151,9 +210,6 @@ function requiredSql(sql: Sql | undefined): Sql {
 export async function runAudit(deps: AuditDeps = {}): Promise<AuditReport> {
   const localize = deps.localize ?? defaultLocalize;
   const makeProposal = deps.proposeLink ?? proposeLink;
-  const englishAuthor = deps.wikidataEnglishAuthor ?? wikidataEnglishAuthor;
-  const soundScore = deps.nameSoundScore ?? nameSoundScore;
-  const compare = deps.similarity ?? similarity;
 
   // Query failures are deliberately not caught: a database failure stops the run.
   const recommendations: EnglishOnlyRecommendation[] = deps
@@ -192,23 +248,7 @@ export async function runAudit(deps: AuditDeps = {}): Promise<AuditReport> {
     }
   }
 
-  const mismatches: AuthorMismatchFinding[] = [];
-  for (const edition of linked) {
-    if (soundScore(edition.author ?? "", edition.original_authors) >= 0.5) {
-      continue;
-    }
-
-    try {
-      const translated = await englishAuthor(edition.author ?? "");
-      const authorMatches = translated !== null &&
-        edition.original_authors.some((author) =>
-          compare(translated, author) > 0.45
-        );
-      if (!authorMatches) mismatches.push(mismatchFinding(edition));
-    } catch {
-      mismatches.push({ ...mismatchFinding(edition), error: "provider_error" });
-    }
-  }
+  const mismatches = await findAuthorMismatches(linked, deps);
 
   const unlinked: UnlinkedFinding[] = [];
   for (const edition of unlinkedEditions) {
@@ -254,12 +294,15 @@ export function formatAudit(report: AuditReport, json = false): string {
 
   lines.push("author_mismatches");
   for (const row of report.author_mismatches) {
+    const proposed = row.proposal?.book === null || row.proposal === null
+      ? row.reason
+      : `Hardcover ${row.proposal.book.id} | ${row.proposal.book.title}`;
     lines.push(
-      `  Simania ${row.simania_id} | ${row.hebrew_title} | ${
-        row.hebrew_author ?? "(no author)"
-      } | Hardcover ${row.hardcover_id} | ${row.english_title} | ${
-        row.english_authors.join(", ")
-      }${row.error ? ` | error: ${row.error}` : ""}`,
+      `  Simania ${row.simania_id} | ${row.title} | ${
+        row.author ?? "(no author)"
+      } | Hardcover ${row.hardcover_id} | ${row.original_title} | ${
+        row.original_authors.join(", ")
+      } | ${proposed}${row.error ? ` | error: ${row.error}` : ""}`,
     );
   }
   if (report.author_mismatches.length === 0) lines.push("  (none)");
