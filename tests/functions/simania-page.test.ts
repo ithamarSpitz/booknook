@@ -1,6 +1,7 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
   fetchSimaniaPage,
+  pageOriginal,
   pageOriginalTitle,
   simaniaPageUrl,
 } from "../../scripts/lib/simania-page.ts";
@@ -65,6 +66,61 @@ Deno.test("pageOriginalTitle returns null for a value with Hebrew letters", () =
 Deno.test("pageOriginalTitle returns null without Latin letters or a source", () => {
   assertEquals(pageOriginalTitle(ltrPayload("1984")), null);
   assertEquals(pageOriginalTitle("<html><body>nothing here</body></html>"), null);
+});
+
+Deno.test("pageOriginal reads a Latin author after the original title", async () => {
+  assertEquals(await fixture("997264.html").then(pageOriginal), {
+    title: "Educated",
+    author: "Tara Westover",
+  });
+});
+
+Deno.test("pageOriginal removes a trailing numbered series parenthetical", async () => {
+  assertEquals(await fixture("962126.html").then(pageOriginal), {
+    title: "Fifty Shades of Grey",
+    author: null,
+  });
+});
+
+Deno.test("pageOriginal reads an all-caps title without an author", async () => {
+  assertEquals(await fixture("981260.html").then(pageOriginal), {
+    title: "THE NIGHTINGALE",
+    author: null,
+  });
+});
+
+Deno.test("pageOriginal preserves older fixture results", async () => {
+  for (
+    const [name, title] of [
+      ["905132.html", "Under the Dome"],
+      ["1026572.html", "The Housemaid is Watching"],
+      ["1024649.html", "Margo's Got Money Troubles"],
+    ] as const
+  ) {
+    assertEquals(pageOriginal(await fixture(name)), { title, author: null });
+  }
+  assertEquals(pageOriginal(await fixture("659042.html")), null);
+});
+
+Deno.test("pageOriginal splits only the last author separator", () => {
+  assertEquals(pageOriginal(ltrPayload("A / B / Jane Roe")), {
+    title: "A / B",
+    author: "Jane Roe",
+  });
+});
+
+Deno.test("pageOriginal rejects a numeric author while retaining the title", () => {
+  assertEquals(pageOriginal(ltrPayload("Title / 1999")), {
+    title: "Title",
+    author: null,
+  });
+});
+
+Deno.test("pageOriginal applies companion and series cuts in order", () => {
+  assertEquals(pageOriginal(ltrPayload("Saga (Book #2) + Companion")), {
+    title: "Saga",
+    author: null,
+  });
 });
 
 Deno.test("simaniaPageUrl builds the book page URL", () => {

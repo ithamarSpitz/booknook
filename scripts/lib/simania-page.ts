@@ -30,15 +30,22 @@ const SOURCES: Source[] = [
   },
 ];
 
-// The Latin original title Simania shows for a translated edition, or null.
-export function pageOriginalTitle(html: string): string | null {
+// The Latin original title and optional author Simania shows for a translated edition.
+export function pageOriginal(
+  html: string,
+): { title: string; author: string | null } | null {
   for (const source of SOURCES) {
     const raw = readSource(html, source);
     if (raw === null) continue;
-    const title = cleanTitle(raw);
-    if (title !== null) return title;
+    const original = cleanOriginal(raw);
+    if (original !== null) return original;
   }
   return null;
+}
+
+// The Latin original title Simania shows for a translated edition, or null.
+export function pageOriginalTitle(html: string): string | null {
+  return pageOriginal(html)?.title ?? null;
 }
 
 export function simaniaPageUrl(id: number): string {
@@ -136,10 +143,28 @@ function parseJsonString(body: string): string | null {
   }
 }
 
-function cleanTitle(value: string): string | null {
+function cleanOriginal(
+  value: string,
+): { title: string; author: string | null } | null {
   let title = value.trim();
   const companion = title.indexOf(" + ");
   if (companion >= 0) title = title.slice(0, companion).trim();
+
+  let author: string | null = null;
+  const authorSeparator = title.lastIndexOf(" / ");
+  if (authorSeparator >= 0) {
+    const candidate = title.slice(authorSeparator + 3).trim();
+    title = title.slice(0, authorSeparator).trim();
+    if (
+      LATIN_LETTER.test(candidate) &&
+      !HEBREW_LETTER.test(candidate) &&
+      !/\d/.test(candidate)
+    ) {
+      author = candidate;
+    }
+  }
+
+  title = title.replace(/\s*\([^)]*#\d+[^)]*\)\s*$/, "").trim();
   if (!LATIN_LETTER.test(title) || HEBREW_LETTER.test(title)) return null;
-  return title;
+  return { title, author };
 }
