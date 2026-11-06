@@ -43,8 +43,10 @@ function dbFailure(error: { message?: string }): never {
 function validateCandidates(
   candidates: unknown,
 ): candidates is AuthorCandidate[] {
-  if (!Array.isArray(candidates) || candidates.length < 1 ||
-    candidates.length > 8) {
+  if (
+    !Array.isArray(candidates) || candidates.length < 1 ||
+    candidates.length > 8
+  ) {
     return false;
   }
   return candidates.every((item) => {
@@ -56,8 +58,10 @@ function validateCandidates(
       return false;
     }
     if (typeof title !== "string" || !title.trim()) return false;
-    if ("author" in row && row.author !== null &&
-      typeof row.author !== "string") {
+    if (
+      "author" in row && row.author !== null &&
+      typeof row.author !== "string"
+    ) {
       return false;
     }
     return true;
@@ -90,7 +94,10 @@ async function readEdition(
   db: CatalogDb,
   simaniaId: number,
 ): Promise<EditionRow | null> {
-  const result = await db.from("editions").select("*").eq("simania_id", simaniaId)
+  const result = await db.from("editions").select("*").eq(
+    "simania_id",
+    simaniaId,
+  )
     .maybeSingle();
   if (result.error) dbFailure(result.error);
   return (result.data as EditionRow | null) ?? null;
@@ -106,7 +113,10 @@ async function hardcoverForEdition(
     row = await resolve(db, row);
   }
   if (!row.work_id) return { hardcoverId: null, edition: row };
-  const work = await db.from("works").select("hardcover_id").eq("id", row.work_id)
+  const work = await db.from("works").select("hardcover_id").eq(
+    "id",
+    row.work_id,
+  )
     .single();
   if (work.error) dbFailure(work.error);
   return {
@@ -170,11 +180,19 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
         );
       }
 
-      const own = await deps.userClient(req).from("recommendations")
+      const callerDb = deps.userClient(req);
+      const ownRecommendation = await callerDb.from("recommendations")
         .select("work_id").eq("user_id", userId).eq("work_id", input.work_id)
         .eq("dismissed", false).maybeSingle();
-      if (own.error) dbFailure(own.error);
-      if (!own.data) throw new HttpError(404, "Recommendation not found.");
+      if (ownRecommendation.error) dbFailure(ownRecommendation.error);
+      const ownGenreRecommendation = await callerDb.from(
+        "genre_recommendations",
+      ).select("work_id").eq("user_id", userId).eq("work_id", input.work_id)
+        .maybeSingle();
+      if (ownGenreRecommendation.error) dbFailure(ownGenreRecommendation.error);
+      if (!ownRecommendation.data && !ownGenreRecommendation.data) {
+        throw new HttpError(404, "Recommendation not found.");
+      }
 
       const db = deps.serviceClient();
       const work = await db.from("works").select("hardcover_id").eq(

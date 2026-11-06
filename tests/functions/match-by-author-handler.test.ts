@@ -37,6 +37,8 @@ function setup(
     editions?: Record<string, unknown>[];
     works?: Record<string, unknown>[];
     dismissed?: boolean;
+    recommendation?: boolean;
+    genreRecommendation?: boolean;
     ensureResolved?: (
       db: FakeDb,
       row: Record<string, unknown>,
@@ -47,12 +49,19 @@ function setup(
   const db = new FakeDb({
     works: options.works ?? [work()],
     editions: options.editions ?? [],
-    recommendations: [{
+    recommendations: options.recommendation === false ? [] : [{
       user_id: "user-1",
       work_id: "work-1",
       simania_id: null,
       dismissed: options.dismissed ?? false,
     }],
+    genre_recommendations: options.genreRecommendation
+      ? [{
+        user_id: "user-1",
+        work_id: "work-1",
+        simania_id: null,
+      }]
+      : [],
   });
   const resolveCalls: number[] = [];
   const ensureResolved = options.ensureResolved ??
@@ -165,30 +174,45 @@ Deno.test("match-by-author returns nulls and skips a failing candidate", async (
 
 Deno.test("match-by-author rejects bad input and missing recommendations", async () => {
   const { handler } = setup();
-  assertEquals((await handler(request({
-    work_id: "work-1",
-    candidates: Array.from({ length: 9 }, (_, i) => candidate(i + 1, `t${i}`)),
-  }))).status, 400);
-  assertEquals((await handler(request({
-    work_id: "work-1",
-    candidates: [candidate(1, "  ")],
-  }))).status, 400);
+  assertEquals(
+    (await handler(request({
+      work_id: "work-1",
+      candidates: Array.from(
+        { length: 9 },
+        (_, i) => candidate(i + 1, `t${i}`),
+      ),
+    }))).status,
+    400,
+  );
+  assertEquals(
+    (await handler(request({
+      work_id: "work-1",
+      candidates: [candidate(1, "  ")],
+    }))).status,
+    400,
+  );
 
   const noRec = setup({ dismissed: true });
-  assertEquals((await noRec.handler(request({
-    work_id: "work-1",
-    candidates: [candidate(1, "א")],
-  }))).status, 404);
+  assertEquals(
+    (await noRec.handler(request({
+      work_id: "work-1",
+      candidates: [candidate(1, "א")],
+    }))).status,
+    404,
+  );
 
   const unauth = createHandler({
     requireUser: async () => {
       throw new HttpError(401, "Authentication required.");
     },
   });
-  assertEquals((await unauth(request({
-    work_id: "work-1",
-    candidates: [candidate(1, "א")],
-  }))).status, 401);
+  assertEquals(
+    (await unauth(request({
+      work_id: "work-1",
+      candidates: [candidate(1, "א")],
+    }))).status,
+    401,
+  );
 });
 
 Deno.test("match-by-author stops resolving after the 25 second budget", async () => {
@@ -220,4 +244,29 @@ Deno.test("match-by-author stops resolving after the 25 second budget", async ()
     },
   });
   assertEquals(resolveCalls, [1]);
+});
+
+Deno.test("match-by-author authorizes a genre recommendation", async () => {
+  const { handler } = setup({
+    recommendation: false,
+    genreRecommendation: true,
+  });
+  const response = await handler(request({
+    work_id: "work-1",
+    candidates: [candidate(1, "title")],
+  }));
+  assertEquals(response.status, 200);
+  assertEquals(await response.json(), {
+    simania_id: null,
+    resolve_status: null,
+  });
+});
+
+Deno.test("match-by-author returns 404 with neither recommendation row", async () => {
+  const { handler } = setup({ recommendation: false });
+  const response = await handler(request({
+    work_id: "work-1",
+    candidates: [candidate(1, "title")],
+  }));
+  assertEquals(response.status, 404);
 });
