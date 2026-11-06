@@ -7,7 +7,7 @@ import {
 } from "../../supabase/functions/_shared/hardcover.ts";
 import { similarity } from "../../supabase/functions/_shared/utils.ts";
 import { nameSoundScore } from "./names.ts";
-import { fetchSimaniaPage, pageOriginalTitle } from "./simania-page.ts";
+import { fetchSimaniaPage, pageOriginal } from "./simania-page.ts";
 
 export interface ProposalDeps {
   fetchPage(id: number): Promise<string>;
@@ -45,10 +45,10 @@ export async function proposeLink(
   let englishAuthor: string | null = null;
 
   try {
-    originalTitle = pageOriginalTitle(
+    const original = pageOriginal(
       await providers.fetchPage(edition.simania_id),
     );
-    if (originalTitle === null) {
+    if (original === null) {
       return proposal(
         edition.simania_id,
         null,
@@ -58,14 +58,19 @@ export async function proposeLink(
       );
     }
 
-    englishAuthor = await providers.wikidataEnglishAuthor(edition.author ?? "");
+    originalTitle = original.title;
+    englishAuthor = original.author ??
+      await providers.wikidataEnglishAuthor(edition.author ?? "");
     const searchedIds = (await providers.searchIds(originalTitle)).slice(0, 8);
     const searchedIdSet = new Set(searchedIds);
     const candidates = (await providers.books(searchedIds))
       .filter((book) => searchedIdSet.has(book.id))
       .map((book) => ({
         book,
-        titleScore: similarity(originalTitle, book.title),
+        titleScore: Math.max(
+          similarity(originalTitle, book.title),
+          similarity(originalTitle, mainTitle(book.title)),
+        ),
       }))
       .filter(({ titleScore }) => titleScore >= 0.9);
 
@@ -127,6 +132,11 @@ export async function proposeLink(
       "provider_error",
     );
   }
+}
+
+function mainTitle(title: string): string {
+  const separator = title.indexOf(": ");
+  return separator < 0 ? title : title.slice(0, separator);
 }
 
 function proposal(

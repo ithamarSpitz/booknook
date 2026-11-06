@@ -160,3 +160,74 @@ Deno.test("proposeLink maps a page fetch failure to provider_error", async () =>
     reason: "provider_error",
   });
 });
+
+Deno.test("proposeLink uses Educated's page author and accepts its subtitle", async () => {
+  let wikidataCalls = 0;
+  const candidates = [
+    {
+      ...book(44186, "Educated: A Memoir", undefined, 2168),
+      cached_contributors: [
+        { author: { name: "Tara Westover" } },
+        { author: { name: "Julia Whelan" } },
+      ],
+    },
+    book(1018039, "Educated", "Nellie Wilson"),
+    book(802966, "Educated", "Sabrina Kade"),
+  ];
+  const deps = dependencies({
+    originalTitle: "Educated / Tara Westover",
+    candidates,
+  });
+  deps.wikidataEnglishAuthor = () => {
+    wikidataCalls++;
+    return Promise.resolve("Wrong Author");
+  };
+
+  const result = await proposeLink(
+    { simania_id: 997264, title: "Educated", author: "טארה וסטאובר" },
+    deps,
+  );
+
+  assertEquals(summary(result), {
+    simania_id: 997264,
+    original_title: "Educated",
+    english_author: "Tara Westover",
+    book_id: 44186,
+    reason: "ok",
+  });
+  assertEquals(wikidataCalls, 0);
+});
+
+Deno.test("proposeLink uses The Midnight Library's page author", async () => {
+  const result = await proposeLink(
+    { simania_id: 1002037, title: "ספריית חצות", author: "מאט הייג" },
+    dependencies({
+      originalTitle: "The Midnight Library / Matt Haig",
+      candidates: [book(428018, "The Midnight Library", "Matt Haig")],
+    }),
+  );
+
+  assertEquals(result.book?.id, 428018);
+  assertEquals(result.reason, "ok");
+});
+
+Deno.test("proposeLink calls Wikidata when the page has no author", async () => {
+  let wikidataCalls = 0;
+  const deps = dependencies({
+    originalTitle: "Under the Dome",
+    candidates: [book(384966, "Under the Dome", "Stephen King")],
+  });
+  deps.wikidataEnglishAuthor = () => {
+    wikidataCalls++;
+    return Promise.resolve("Stephen King");
+  };
+
+  const result = await proposeLink(
+    { simania_id: 905132, title: "מתחת לכיפה", author: "סטיבן קינג" },
+    deps,
+  );
+
+  assertEquals(result.book?.id, 384966);
+  assertEquals(result.english_author, "Stephen King");
+  assertEquals(wikidataCalls, 1);
+});
