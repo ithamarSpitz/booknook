@@ -2,6 +2,7 @@ import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
   type AuditDeps,
   type EnglishOnlyRecommendation,
+  findAuthorMismatches,
   formatAudit,
   runAudit,
 } from "../../scripts/audit-catalog.ts";
@@ -102,12 +103,178 @@ Deno.test("author_mismatches applies sound and Wikidata author checks", async ()
 
   assertEquals(report.author_mismatches, [{
     simania_id: 10,
-    hebrew_title: "אורורה",
-    hebrew_author: "טוני קפ",
+    title: "אורורה",
+    author: "טוני קפ",
     hardcover_id: 372879,
-    english_title: "Aurora",
-    english_authors: ["Kim Stanley Robinson"],
+    original_title: "Aurora",
+    original_authors: ["Kim Stanley Robinson"],
+    proposal: {
+      simania_id: 10,
+      original_title: null,
+      english_author: null,
+      book: null,
+      reason: "no_original_title",
+    },
+    reason: "no_original_title",
   }]);
+});
+
+Deno.test("findAuthorMismatches clears direct author matches before providers and accepts a confirming proposal", async () => {
+  const wikidataCalls: number[] = [];
+  const proposalCalls: number[] = [];
+  const editions = [
+    {
+      simania_id: 1,
+      title: "Not That Kind of Girl",
+      author: "Lena Dunham",
+      hardcover_id: 1,
+      original_title: "Not That Kind of Girl",
+      original_authors: ["Lena Dunham"],
+    },
+    {
+      simania_id: 2,
+      title: "ספר",
+      author: "גלית דיסטל אטבריאן",
+      hardcover_id: 2,
+      original_title: "ספר",
+      original_authors: ["גלית דיסטל אטבריאן"],
+    },
+    {
+      simania_id: 3,
+      title: "1984",
+      author: "George Orwell",
+      hardcover_id: 3,
+      original_title: "1984",
+      original_authors: ["Fido Nesti", "George Orwell"],
+    },
+    {
+      simania_id: 1002037,
+      title: "ספריית חצות",
+      author: "מאט הייג",
+      hardcover_id: 428018,
+      original_title: "The Midnight Library",
+      original_authors: ["Matt Haig"],
+    },
+  ];
+
+  const findings = await findAuthorMismatches(editions, {
+    similarity: (left, right) => left === right ? 1 : 0,
+    nameSoundScore: () => 0,
+    wikidataEnglishAuthor: () => {
+      wikidataCalls.push(1002037);
+      return Promise.resolve(null);
+    },
+    proposeLink: (edition) => {
+      proposalCalls.push(edition.simania_id);
+      return Promise.resolve({
+        simania_id: edition.simania_id,
+        original_title: "The Midnight Library",
+        english_author: "Matt Haig",
+        book: { id: 428018, title: "The Midnight Library" },
+        reason: "ok",
+      });
+    },
+  });
+
+  assertEquals(findings, []);
+  assertEquals(wikidataCalls, [1002037]);
+  assertEquals(proposalCalls, [1002037]);
+});
+
+Deno.test("findAuthorMismatches includes the input row and the proposed replacement", async () => {
+  const proposal: LinkProposal = {
+    simania_id: 981260,
+    original_title: "The Nightingale",
+    english_author: "Kristin Hannah",
+    book: { id: 212769, title: "The Nightingale" },
+    reason: "ok",
+  };
+  const findings = await findAuthorMismatches([{
+    simania_id: 981260,
+    work_id: "work-1912461",
+    title: "הזמיר",
+    author: "כריסטין האנה",
+    hardcover_id: 1912461,
+    original_title: "עת הזמיר",
+    original_authors: ["Haim Be'er", "חיים באר"],
+  }], {
+    similarity: (left, right) => left === right ? 1 : 0,
+    nameSoundScore: () => 0,
+    wikidataEnglishAuthor: () => Promise.resolve("Kristin Hannah"),
+    proposeLink: () => Promise.resolve(proposal),
+  });
+
+  assertEquals(findings, [{
+    simania_id: 981260,
+    work_id: "work-1912461",
+    title: "הזמיר",
+    author: "כריסטין האנה",
+    hardcover_id: 1912461,
+    original_title: "עת הזמיר",
+    original_authors: ["Haim Be'er", "חיים באר"],
+    proposal,
+    reason: "ok",
+  }]);
+});
+
+Deno.test("findAuthorMismatches lists a rejected proposal with its reason", async () => {
+  const findings = await findAuthorMismatches([{
+    simania_id: 40,
+    title: "כותרת",
+    author: "סופר",
+    hardcover_id: 400,
+    original_title: "Wrong Book",
+    original_authors: ["Other Writer"],
+  }], {
+    similarity: () => 0,
+    nameSoundScore: () => 0,
+    wikidataEnglishAuthor: () => Promise.resolve(null),
+    proposeLink: (edition) =>
+      Promise.resolve({
+        simania_id: edition.simania_id,
+        original_title: null,
+        english_author: null,
+        book: null,
+        reason: "no_original_title",
+      }),
+  });
+
+  assertEquals(findings[0].reason, "no_original_title");
+  assertEquals(findings[0].proposal?.reason, "no_original_title");
+});
+
+Deno.test("findAuthorMismatches records a thrown proposal and continues sequentially", async () => {
+  const calls: number[] = [];
+  const editions = [50, 51].map((simania_id) => ({
+    simania_id,
+    title: `title-${simania_id}`,
+    author: `author-${simania_id}`,
+    hardcover_id: simania_id,
+    original_title: `original-${simania_id}`,
+    original_authors: [`writer-${simania_id}`],
+  }));
+  const findings = await findAuthorMismatches(editions, {
+    similarity: () => 0,
+    nameSoundScore: () => 0,
+    wikidataEnglishAuthor: () => Promise.resolve(null),
+    proposeLink: (edition) => {
+      calls.push(edition.simania_id);
+      if (edition.simania_id === 50) throw new Error("provider failed");
+      return Promise.resolve({
+        simania_id: edition.simania_id,
+        original_title: null,
+        english_author: null,
+        book: null,
+        reason: "no_original_title",
+      });
+    },
+  });
+
+  assertEquals(calls, [50, 51]);
+  assertEquals(findings[0].error, "provider_error");
+  assertEquals(findings[0].proposal, null);
+  assertEquals(findings[0].reason, "provider_error");
+  assertEquals(findings[1].reason, "no_original_title");
 });
 
 Deno.test("unlinked includes every shelved edition with its proposal or reason", async () => {
