@@ -536,3 +536,22 @@ sprints:
       - npm run test:functions
       - npm run test:web
       - npm run verify:localization
+  S11-refresh-all:
+    name: Operator refresh of every reader's recommendations and genre shelves after a deploy
+    tasks:
+      S11-T1:
+        file: tasks/sprint-11-refresh-all/01-operator-session.md
+        stage: 1
+        depends_on: []
+      S11-T2:
+        file: tasks/sprint-11-refresh-all/02-refresh-all.md
+        stage: 2
+        depends_on:
+        - S11-T1
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      '2':
+      - npm run check:functions
+      - npm run test:functions

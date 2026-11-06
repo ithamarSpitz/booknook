@@ -319,6 +319,18 @@ Relinks: it also plans a relink for each `author_mismatches` entry whose proposa
 
 `resolve_status` gains the value `original_title` (linked by the repair script from Simania's original title).
 
+**`npm run refresh:all`** (`scripts/refresh-all.ts`): after a deploy, brings every reader's recommendations and genre shelves up to date before anyone opens the app, doing exactly what that reader's browser would do.
+- **Credentials.** The service-role and anon keys come at runtime from the Supabase CLI already signed in on the operator machine (`npx supabase projects api-keys --project-ref zheosjpootcwvuazwjzh -o json`). They are held in memory only, never printed, logged or written. The URL is `https://zheosjpootcwvuazwjzh.supabase.co`.
+- **Acting as a reader.** For each reader (`auth.admin.listUsers`, joined to `profiles`), get a session the way an emailed magic link would: `auth.admin.generateLink({ type: "magiclink", email })`, which sends no email, then `auth.verifyOtp({ type: "magiclink", token_hash })` with the anon key. Use that access token for the function calls below. It is never printed. Readers are processed sequentially.
+- **Steps per reader, in order:**
+  1. `POST recommendations` (the normal full run, including genre shelves).
+  2. `localizeRecommendations` (from `public/js/recs.js`) over that response's English-only cards, concurrency 1.
+  3. For each English-only `genre_recommendations` row: `genre-hint`, then `localizeRecommendations` on that book. There is no 12-book cap and no device memory.
+  4. For each positive edition on that reader's recommendation, genre or shelf rows with `details_at` null: `fetchSimaniaPayload` from this machine, then `book-details { simania_id, simania }`.
+  5. Print per reader: English-only cards before and after, genre English-only before and after, books linked, and editions filled.
+- **Errors.** A failure on one book is counted and skipped. A failure to get credentials or a session stops with exit `2`, naming the step but no secret.
+- **Dry run.** The default is a dry run: it gets the keys, lists the readers and prints the "before" counts, read-only, with no sessions and no function calls. `--apply` runs the steps.
+
 ### `link-edition`
 
 Request `LinkEditionRequest`: `{"work_id":"78e9c71d-d6f2-4ea4-bcbb-42e4ec9300cf","simania_id":1234,"source":"wikidata","simania":{"details":{"title":"ספר"},"rating":null}}`. Response `LinkEditionResponse`: `{"work_id":"78e9c71d-...","simania_id":1234,"title":"ספר","author":null,"cover_url":null}`; the browser applies it to the card, which becomes `english_only: false, can_add: true`.
