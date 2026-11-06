@@ -109,6 +109,7 @@ export function linkedEditionsWithWorks(sql: Sql) {
   return sql`
     select
       e.simania_id,
+      w.id as work_id,
       e.title,
       e.author,
       w.hardcover_id,

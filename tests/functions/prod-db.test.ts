@@ -177,3 +177,9 @@ Deno.test("query helpers each issue one statement against their required tables"
     }
   }
 });
+
+Deno.test("linked editions query returns the current work id", async () => {
+  const statements: string[] = [];
+  await linkedEditionsWithWorks(recordingSql(statements));
+  assertMatch(statements[0], /w\.id as work_id/i);
+});
