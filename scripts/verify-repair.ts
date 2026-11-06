@@ -13,6 +13,13 @@ interface RepairCase {
   expectedHardcoverId: number | null;
 }
 
+interface RelinkCase {
+  simaniaId: number;
+  title: string;
+  fromHardcoverId: number;
+  toHardcoverId: number;
+}
+
 interface EditionSnapshot extends RepairEdition {
   work_id: string | null;
   hardcover_id: number | null;
@@ -54,8 +61,46 @@ const CASES: RepairCase[] = [
   { simaniaId: 1028464, title: "תמרה משקרת", expectedHardcoverId: null },
 ];
 
+const RELINK_CASES: RelinkCase[] = [
+  {
+    simaniaId: 981260,
+    title: "הזמיר",
+    fromHardcoverId: 1912461,
+    toHardcoverId: 212769,
+  },
+  {
+    simaniaId: 374138,
+    title: "זודיאק",
+    fromHardcoverId: 149306,
+    toHardcoverId: 192875,
+  },
+  {
+    simaniaId: 997264,
+    title: "משכילה",
+    fromHardcoverId: 1018039,
+    toHardcoverId: 44186,
+  },
+  {
+    simaniaId: 1009943,
+    title: "רוחות הזעם",
+    fromHardcoverId: 606688,
+    toHardcoverId: 880804,
+  },
+];
+
+const NOT_FLAGGED_CASES = [
+  { simaniaId: 1027273, title: "Famesick" },
+  { simaniaId: 1028721, title: "Yesteryear" },
+  { simaniaId: 86443, title: "טווס בחדר מדרגות" },
+  { simaniaId: 810722, title: "1984" },
+  { simaniaId: 1002037, title: "ספריית חצות" },
+];
+
 async function loadCases(sql: Sql): Promise<EditionSnapshot[]> {
-  const ids = CASES.map((spec) => spec.simaniaId);
+  const ids = [
+    ...CASES.map((spec) => spec.simaniaId),
+    ...RELINK_CASES.map((spec) => spec.simaniaId),
+  ];
   return await sql<EditionSnapshot[]>`
     select
       e.simania_id,
@@ -113,6 +158,23 @@ async function verify(sql: Sql): Promise<number> {
   const planById = new Map<number, RepairPlan>(
     plans.map((plan) => [plan.simania_id, plan]),
   );
+  const relinkPlans = plans.filter((plan) => plan.kind === "relink");
+  for (const plan of relinkPlans) {
+    console.log(`RELINK ${
+      JSON.stringify({
+        simania_id: plan.simania_id,
+        title: plan.title,
+        from: {
+          hardcover_id: plan.hardcover_id,
+          title: plan.original_title,
+        },
+        to: {
+          hardcover_id: plan.book.id,
+          title: plan.book.title,
+        },
+      })
+    }`);
+  }
 
   const providerFailure = [...rejected.entries()].find(([, reason]) =>
     reason === "provider_error"
@@ -177,9 +239,53 @@ async function verify(sql: Sql): Promise<number> {
     throw new Error("A provider failure prevented a clean catalog audit.");
   }
 
-  const spinMismatch = audit.author_mismatches.some((row) =>
-    row.simania_id === 97171
+  const mismatches = audit.author_mismatches;
+  const mismatchIds = new Set(
+    mismatches.map((row) => row.simania_id),
   );
+  const unflaggedRelinkPlans = relinkPlans.filter((plan) =>
+    !mismatchIds.has(plan.simania_id)
+  );
+  if (unflaggedRelinkPlans.length > 0) failed = true;
+  console.log(
+    `${
+      unflaggedRelinkPlans.length === 0 ? "PASS" : "FAIL"
+    } every relink plan targets a flagged author mismatch`,
+  );
+
+  for (const spec of RELINK_CASES) {
+    const row = byId.get(spec.simaniaId);
+    const plan = relinkPlans.find((candidate) =>
+      candidate.simania_id === spec.simaniaId
+    );
+    const alreadyLinked = row?.hardcover_id === spec.toHardcoverId;
+    const planned = plan?.hardcover_id === spec.fromHardcoverId &&
+      plan.book.id === spec.toHardcoverId;
+    const pass = alreadyLinked || planned;
+    if (!pass) failed = true;
+    const actual = row === undefined
+      ? "edition missing from production"
+      : alreadyLinked
+      ? `already linked to ${spec.toHardcoverId}`
+      : plan === undefined
+      ? `no relink plan from current ${row.hardcover_id}`
+      : `planned ${plan.hardcover_id} -> ${plan.book.id}`;
+    console.log(
+      `${pass ? "PASS" : "FAIL"} Simania ${spec.simaniaId} ${spec.title} ` +
+        `relink ${spec.fromHardcoverId} -> ${spec.toHardcoverId} (${actual})`,
+    );
+  }
+
+  for (const spec of NOT_FLAGGED_CASES) {
+    const flagged = mismatchIds.has(spec.simaniaId);
+    if (flagged) failed = true;
+    console.log(
+      `${flagged ? "FAIL" : "PASS"} Simania ${spec.simaniaId} ${spec.title} ` +
+        "absent from author_mismatches",
+    );
+  }
+
+  const spinMismatch = mismatches.some((row) => row.simania_id === 97171);
   console.log(
     `${
       spinMismatch ? "FAIL" : "PASS"

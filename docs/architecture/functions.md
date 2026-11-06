@@ -6,7 +6,7 @@ No Edge Function calls Simania in production: Simania's Cloudflare answers 403 t
 
 ## Operator scripts
 
-`npm run audit:catalog` audits production without writing, and `npm run repair:links -- --apply` applies approved link repairs. They run on an operator machine because Simania blocks Edge Functions from its book pages and does not provide browser CORS access. The apply mode only links editions whose `work_id` is still null and records `resolve_status = 'original_title'`; it never relinks an edition.
+`npm run audit:catalog` audits production without writing, and `npm run repair:links -- --apply` applies approved link repairs. They run on an operator machine because Simania blocks Edge Functions from its book pages and does not provide browser CORS access. The apply mode links unlinked editions only while `work_id` is still null and records `resolve_status = 'original_title'`. Relinks move only flagged author mismatches with page evidence, are conditional on the old link, and are applied with `--apply` by the operator only.
 
 ## Search (browser only)
 
