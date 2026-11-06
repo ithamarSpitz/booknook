@@ -44,15 +44,20 @@ The `search-books` function was removed. Search runs in the browser: under 2 cha
 - Self-healing: before selecting seeds, it resolves at most 2 of the caller's unlinked shelved editions (`pending`, or `not_found` at least 14 days old), within 20 seconds; failures are ignored.
 - The browser regenerates recommendations in the background (`public/js/recs-refresh.js`, debounced) after every shelf change.
 
+## genre-hint
+
+- In: `{ work_id }`. Out: `{ work_id, hebrew_hint, hebrew_author }`.
+- Behavior: the caller must have a `genre_recommendations` row for `work_id` (404). It computes the hint and the Hebrew author exactly as `recommendations` does for an English-only card, from positive-ID editions only. Provider failures give nulls. It writes nothing. The library screen uses it to localize genre shelf books in the background.
+
 ## match-by-author
 
 - In: `{ work_id, candidates: [{ simania_id, title, author }] }` (1-8). Out: `{ simania_id, resolve_status }` or nulls.
-- Behavior: the caller must have a non-dismissed recommendation for `work_id` (404). Each candidate is resolved Hebrew to English with the normal resolver (stored as a `pending` edition first when new); the first whose work has the recommended `hardcover_id` wins. Sequential, no new candidate after 25 seconds. Nothing is ever linked by title similarity alone.
+- Behavior: the caller must have a non-dismissed recommendation or a `genre_recommendations` row for `work_id` (404). Each candidate is resolved Hebrew to English with the normal resolver (stored as a `pending` edition first when new); the first whose work has the recommended `hardcover_id` wins. Sequential, no new candidate after 25 seconds. Nothing is ever linked by title similarity alone.
 
 ## link-edition
 
 - In: `{ work_id, simania_id, source: "wikidata" | "nli", simania: { details, rating } }`. Out: `{ work_id, simania_id, title, author, cover_url }`.
-- Behavior: the caller must have a non-dismissed recommendation for `work_id` (404 otherwise). Store the edition with the 30-day rule, link it to the work only while its `work_id` is null, keep an existing link to the same work, and answer 409 if it links to a different work (never relink). If the caller already has that edition, or another edition of the work, on a shelf, delete the recommendation and answer 409 "Already on your shelves.". Otherwise set the caller's recommendation `simania_id`.
+- Behavior: the caller must have a non-dismissed recommendation or a `genre_recommendations` row for `work_id` (404 otherwise; each of those rows that exists gets the `simania_id`, or is deleted under the already-on-your-shelves rule). Store the edition with the 30-day rule, link it to the work only while its `work_id` is null, keep an existing link to the same work, and answer 409 if it links to a different work (never relink). If the caller already has that edition, or another edition of the work, on a shelf, delete the recommendation and answer 409 "Already on your shelves.". Otherwise set the caller's recommendation `simania_id`.
 
 ## invite-user
 
