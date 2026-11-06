@@ -68,6 +68,9 @@
   .knob{color:#3b2a1b}
   .add{border-color:#b9ab95;color:var(--ink);background:transparent}
   .book{position:relative}
+  .tile-stars{position:absolute;top:-18px;right:0;left:0;z-index:1;height:11px;display:flex;direction:rtl;align-items:center;justify-content:space-between;color:rgba(122,85,48,.38);pointer-events:none}
+  .tile-stars svg{display:block;width:11px;height:11px;overflow:visible;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round}
+  .tile-stars svg.on{color:#c58a2c;fill:currentColor;stroke:currentColor}
   .book .t{position:absolute;top:8px;right:6px;left:6px;z-index:2;display:block;margin:0;padding:6px 9px;white-space:normal;
      background:#fffdf8;border-radius:3px;box-shadow:-3px 3px 0 rgba(90,55,20,.22);opacity:0;transform:translateY(-4px);transition:opacity .18s,transform .18s;pointer-events:none}
   .book .t b{font-size:13px;line-height:1.25;color:var(--ink)}
