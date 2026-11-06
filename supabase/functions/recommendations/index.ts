@@ -353,6 +353,7 @@ function genreSeeds(
     seededWorks.add(seed.work.id);
     result.push({
       workId: seed.work.id,
+      simaniaId: seed.simania_id,
       weight: seed.weight,
       tags: seed.work.tags,
       similarIds: seed.work.similar_ids,
@@ -366,6 +367,7 @@ function genreSeeds(
     seededWorks.add(item.work.id);
     result.push({
       workId: item.work.id,
+      simaniaId: item.simania_id,
       weight: 2.5,
       tags: item.work.tags,
       similarIds: item.work.similar_ids,
@@ -470,6 +472,7 @@ export async function storeGenreRecommendations({
           ? recommendationEditionByWork.get(book.workId) ?? null
           : catalogEditionByWork.get(book.workId) ?? null,
         score: book.score,
+        because: book.because,
       })),
   );
   const replaced = await db.rpc("replace_genre_recommendations", {

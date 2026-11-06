@@ -82,6 +82,7 @@ export const GENRE_MAP: readonly GenreMapEntry[] = [
 
 export type GenreSeed = {
   workId: string;
+  simaniaId: number;
   weight: number;
   tags: CachedTags;
   similarIds: number[];
@@ -97,13 +98,19 @@ export type QualifyingGenre = {
 export type GenreCandidate = {
   hardcoverId: number;
   score: number;
+  contributors: Array<{ simaniaId: number; contribution: number }>;
 };
 
 export type GenreWork = Pick<WorkRow, "id" | "tags">;
 
 export type GenreShelf = {
   genre: string;
-  books: Array<{ workId: string; hardcoverId: number; score: number }>;
+  books: Array<{
+    workId: string;
+    hardcoverId: number;
+    score: number;
+    because: number[];
+  }>;
 };
 
 const ALIAS_TO_GENRE = new Map(
@@ -160,18 +167,32 @@ export function genreCandidates(
   _genre: string,
   genreSeeds: GenreSeed[],
 ): GenreCandidate[] {
-  const scores = new Map<number, number>();
+  const scores = new Map<
+    number,
+    {
+      score: number;
+      contributors: Array<{ simaniaId: number; contribution: number }>;
+    }
+  >();
   for (const seed of genreSeeds) {
     for (const [rank, hardcoverId] of seed.similarIds.slice(0, 40).entries()) {
       if (!Number.isInteger(hardcoverId)) continue;
-      scores.set(
-        hardcoverId,
-        (scores.get(hardcoverId) ?? 0) + seed.weight * (1 - rank / 40),
-      );
+      const contribution = seed.weight * (1 - rank / 40);
+      const current = scores.get(hardcoverId) ?? {
+        score: 0,
+        contributors: [],
+      };
+      current.score += contribution;
+      current.contributors.push({ simaniaId: seed.simaniaId, contribution });
+      scores.set(hardcoverId, current);
     }
   }
   return [...scores.entries()]
-    .map(([hardcoverId, score]) => ({ hardcoverId, score }))
+    .map(([hardcoverId, { score, contributors }]) => ({
+      hardcoverId,
+      score,
+      contributors,
+    }))
     .sort((left, right) =>
       right.score - left.score || left.hardcoverId - right.hardcoverId
     );
@@ -201,6 +222,16 @@ export function buildGenreShelves({
         workId: work.id,
         hardcoverId: candidate.hardcoverId,
         score: candidate.score,
+        because: candidate.contributors
+          .toSorted((left, right) =>
+            right.contribution - left.contribution ||
+            left.simaniaId - right.simaniaId
+          )
+          .map(({ simaniaId }) => simaniaId)
+          .filter((simaniaId, index, values) =>
+            values.indexOf(simaniaId) === index
+          )
+          .slice(0, 10),
       });
       if (books.length === 12) break;
     }

@@ -18,8 +18,9 @@ function seed(
   weight: number,
   genres: string[],
   similarIds: number[] = [],
+  simaniaId = 0,
 ): GenreSeed {
-  return { workId, weight, tags: tags(...genres), similarIds };
+  return { workId, simaniaId, weight, tags: tags(...genres), similarIds };
 }
 
 Deno.test("genre map is complete and workGenres reads only eight tags", () => {
@@ -68,10 +69,59 @@ Deno.test("candidate scores sum by zero-based rank and sort deterministically", 
       seed("2", 2, ["Fantasy"], [10]),
     ]),
     [
-      { hardcoverId: 10, score: 5.9 },
-      { hardcoverId: 20, score: 4 },
+      {
+        hardcoverId: 10,
+        score: 5.9,
+        contributors: [
+          { simaniaId: 0, contribution: 3.9 },
+          { simaniaId: 0, contribution: 2 },
+        ],
+      },
+      {
+        hardcoverId: 20,
+        score: 4,
+        contributors: [{ simaniaId: 0, contribution: 4 }],
+      },
     ],
   );
+});
+
+Deno.test("genre shelf reasons order contributors, omit non-contributors, and cap at ten", () => {
+  const contributingSeeds = Array.from({ length: 12 }, (_, index) =>
+    seed(
+      `seed-${index}`,
+      index < 2 ? 5 : 4,
+      ["Fantasy"],
+      [100, 101, 102, 103],
+      index < 2 ? 20 - index * 10 : 30 + index,
+    ));
+  const absent = seed("absent", 10, ["Fantasy"], [999], 1);
+  const works = new Map(
+    [100, 101, 102, 103].map((id) => [
+      id,
+      { id: `work-${id}`, tags: tags("Fantasy") },
+    ]),
+  );
+
+  const shelves = buildGenreShelves({
+    seeds: [...contributingSeeds, absent],
+    worksByHardcoverId: works,
+    excludedWorkIds: new Set(),
+  });
+
+  assertEquals(shelves[0].books[0].score, 5 + 5 + 10 * 4);
+  assertEquals(shelves[0].books[0].because, [
+    10,
+    20,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+  ]);
 });
 
 Deno.test("shelves skip exclusions and repeats, drop short genres, cap books and shelves", () => {
