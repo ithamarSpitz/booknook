@@ -138,6 +138,7 @@ describe("data.js helpers", () => {
         position: 1,
         work_id: "work-3",
         simania_id: null,
+        because: [31],
         works: {
           hardcover_id: 103,
           original_title: "English title",
@@ -152,6 +153,7 @@ describe("data.js helpers", () => {
         position: 1,
         work_id: "work-2",
         simania_id: 22,
+        because: [22, 999, 11],
         works: {
           hardcover_id: 102,
           original_title: "Work title 2",
@@ -166,6 +168,7 @@ describe("data.js helpers", () => {
         position: 0,
         work_id: "work-1",
         simania_id: 11,
+        because: [],
         works: {
           hardcover_id: 101,
           original_title: "Work title 1",
@@ -176,7 +179,8 @@ describe("data.js helpers", () => {
       },
     ];
 
-    assert.deepEqual(mapGenreRows(rows), [
+    const titles = new Map([[11, "Seed one"], [22, "Seed two"], [31, "Seed three"]]);
+    assert.deepEqual(mapGenreRows(rows, titles), [
       {
         genre: "Mystery",
         books: [{
@@ -187,6 +191,8 @@ describe("data.js helpers", () => {
           author: "Edition author 2",
           cover_url: "edition-cover-2",
           english_only: false,
+          because: [22, 999, 11],
+          because_titles: ["Seed two", "Seed one"],
         }],
       },
       {
@@ -200,6 +206,8 @@ describe("data.js helpers", () => {
             author: "Edition author 1",
             cover_url: "edition-cover-1",
             english_only: false,
+            because: [],
+            because_titles: [],
           },
           {
             work_id: "work-3",
@@ -209,6 +217,8 @@ describe("data.js helpers", () => {
             author: "First Author, Second Author",
             cover_url: "work-cover-3",
             english_only: true,
+            because: [31],
+            because_titles: ["Seed three"],
           },
         ],
       },
@@ -281,9 +291,9 @@ describe("data.js helpers", () => {
 });
 
 describe("data.js client", () => {
-  it("loadGenreShelves selects embedded work and edition data in one ordered query", async () => {
+  it("loadGenreShelves selects genre reasons and loads their edition titles", async () => {
     const calls = [];
-    const query = {
+    const genreQuery = {
       select(columns) {
         calls.push(["select", columns]);
         return this;
@@ -298,6 +308,7 @@ describe("data.js client", () => {
               position: 0,
               work_id: "work-1",
               simania_id: null,
+              because: [7],
               works: { hardcover_id: 1, original_title: "Title", original_authors: [], hardcover_cover_url: null },
               editions: null,
             }],
@@ -307,23 +318,73 @@ describe("data.js client", () => {
         return this;
       },
     };
+    const editionsQuery = {
+      select(columns) {
+        calls.push(["select", columns]);
+        return this;
+      },
+      in(column, values) {
+        calls.push(["in", column, values]);
+        return Promise.resolve({ data: [{ simania_id: 7, title: "Seed title" }], error: null });
+      },
+    };
     const client = {
       from(table) {
         calls.push(["from", table]);
-        return query;
+        return table === "genre_recommendations" ? genreQuery : editionsQuery;
       },
     };
 
     const shelves = await loadGenreShelves(client);
     assert.equal(shelves[0].books[0].title, "Title");
+    assert.deepEqual(shelves[0].books[0].because, [7]);
+    assert.deepEqual(shelves[0].books[0].because_titles, ["Seed title"]);
     assert.deepEqual(calls, [
       ["from", "genre_recommendations"],
-      ["select", `work_id, simania_id, genre, shelf_position, position,
+      ["select", `work_id, simania_id, genre, shelf_position, position, because,
       works (hardcover_id, original_title, original_authors, hardcover_cover_url),
       editions (title, author, cover_url)`],
       ["order", "shelf_position"],
       ["order", "position"],
+      ["from", "editions"],
+      ["select", "simania_id, title"],
+      ["in", "simania_id", [7]],
     ]);
+  });
+
+  it("loadGenreShelves keeps shelves when the optional title query fails", async () => {
+    const genreQuery = {
+      select() { return this; },
+      order(column) {
+        return column === "position"
+          ? Promise.resolve({
+            data: [{
+              genre: "Fantasy",
+              shelf_position: 0,
+              position: 0,
+              work_id: "work-1",
+              simania_id: null,
+              because: [7],
+              works: { hardcover_id: 1, original_title: "Title", original_authors: [], hardcover_cover_url: null },
+              editions: null,
+            }],
+            error: null,
+          })
+          : this;
+      },
+    };
+    const editionsQuery = {
+      select() { return this; },
+      in: async () => ({ data: null, error: new Error("denied") }),
+    };
+    const client = {
+      from: (table) => table === "genre_recommendations" ? genreQuery : editionsQuery,
+    };
+
+    const shelves = await loadGenreShelves(client);
+    assert.equal(shelves[0].books[0].title, "Title");
+    assert.deepEqual(shelves[0].books[0].because, [7]);
+    assert.deepEqual(shelves[0].books[0].because_titles, []);
   });
 
   it("loadGenreShelves returns an empty optional section on query error", async () => {

@@ -43,9 +43,10 @@ function firstRelatedRow(relation) {
 
 /**
  * @param {Array<Record<string, any>>} rows
+ * @param {Map<number, string>} [titleBySimaniaId]
  * @returns {import('./contract.js').GenreShelf[]}
  */
-export function mapGenreRows(rows) {
+export function mapGenreRows(rows, titleBySimaniaId = new Map()) {
   const shelves = new Map();
   const orderedRows = [...rows].sort(
     (a, b) => a.shelf_position - b.shelf_position || a.position - b.position,
@@ -63,6 +64,7 @@ export function mapGenreRows(rows) {
     const originalAuthors = Array.isArray(work.original_authors)
       ? work.original_authors.join(", ") || null
       : null;
+    const because = Array.isArray(row.because) ? row.because.map((id) => Number(id)) : [];
     shelf.books.push({
       work_id: row.work_id,
       hardcover_id: work.hardcover_id,
@@ -71,6 +73,8 @@ export function mapGenreRows(rows) {
       author: edition.author ?? originalAuthors,
       cover_url: edition.cover_url ?? work.hardcover_cover_url ?? null,
       english_only: row.simania_id === null,
+      because,
+      because_titles: because.map((id) => titleBySimaniaId.get(id)).filter(Boolean),
     });
   }
 
@@ -300,14 +304,36 @@ export async function loadGenreShelves(client) {
   const { data, error } = await client
     .from("genre_recommendations")
     .select(
-      `work_id, simania_id, genre, shelf_position, position,
+      `work_id, simania_id, genre, shelf_position, position, because,
       works (hardcover_id, original_title, original_authors, hardcover_cover_url),
       editions (title, author, cover_url)`,
     )
     .order("shelf_position")
     .order("position");
   if (error) return [];
-  return mapGenreRows(data ?? []);
+  const rows = data ?? [];
+  const becauseIds = new Set();
+  for (const row of rows) {
+    for (const id of row.because ?? []) becauseIds.add(Number(id));
+  }
+
+  let titleBySimaniaId = new Map();
+  if (becauseIds.size) {
+    try {
+      const { data: editions, error: editionsError } = await client
+        .from("editions")
+        .select("simania_id, title")
+        .in("simania_id", [...becauseIds]);
+      if (!editionsError) {
+        titleBySimaniaId = new Map(
+          (editions ?? []).map((edition) => [Number(edition.simania_id), edition.title]),
+        );
+      }
+    } catch {
+      // Reason titles are optional; the genre shelves themselves remain usable.
+    }
+  }
+  return mapGenreRows(rows, titleBySimaniaId);
 }
 
 /** @param {import('@supabase/supabase-js').SupabaseClient} client */
