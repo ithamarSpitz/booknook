@@ -589,6 +589,7 @@ export function addBookRequestForRecommendation(rec, shelfId) {
  *   restorePrevious: () => void,
  *   beginSession: (session: ReturnType<typeof applyRecsCardChrome>) => void,
  *   isCurrent: () => boolean,
+ *   fetchPayload?: typeof fetchSimaniaPayload,
  * }} deps
  */
 export async function openRecommendationCard(overlay, rec, deps, options = {}) {
@@ -603,6 +604,28 @@ export async function openRecommendationCard(overlay, rec, deps, options = {}) {
         deps.showToast(err instanceof Error ? err.message : "לא הצלחנו לטעון פרטי הספר");
       }
       return;
+    }
+    if (!deps.isCurrent()) return;
+    if (
+      Number(rec.simania_id) > 0
+      && book?.cover_url === null
+      && book.description === null
+      && book.simania_rating === null
+    ) {
+      try {
+        const simania = await (deps.fetchPayload ?? fetchSimaniaPayload)(rec.simania_id);
+        if (!deps.isCurrent()) return;
+        if (simania) {
+          const res = await deps.api.callFunction(FUNCTIONS.BOOK_DETAILS, {
+            simania_id: rec.simania_id,
+            simania,
+          });
+          if (!deps.isCurrent()) return;
+          if (res && typeof res === "object" && res.book) book = res.book;
+        }
+      } catch {
+        // Keep the first response when browser-side Simania enrichment fails.
+      }
     }
   } else {
     if (options.englishDetails && rec.english_only && rec.hardcover_id != null) {

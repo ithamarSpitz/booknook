@@ -563,6 +563,148 @@ describe("shared card chrome", () => {
     assert.deepEqual(addedBook, { simania_id: 97171, title: "סחרור" });
   });
 
+  function bareBookCardDeps(callFunction, overrides = {}) {
+    return {
+      api: { callFunction, getClient: () => null },
+      getLibrary: () => ({ shelves: [] }),
+      showToast: () => {},
+      card: { open: () => {}, close: () => {} },
+      onDismissed: () => {},
+      onAdded: async () => {},
+      restorePrevious: () => {},
+      beginSession: () => {},
+      isCurrent: () => true,
+      ...overrides,
+    };
+  }
+
+  const bareRec = {
+    work_id: "bare-work",
+    hardcover_id: 123,
+    simania_id: 1024882,
+    title: "Bare Hebrew edition",
+    author: "Author",
+    cover_url: null,
+    english_only: false,
+    can_add: true,
+  };
+
+  it("enriches a bare positive edition and opens the second book-details result", async () => {
+    const overlay = createFakeOverlay();
+    const payload = { details: { title: bareRec.title }, rating: { rating: 4.2 } };
+    const firstBook = {
+      simania_id: bareRec.simania_id,
+      title: bareRec.title,
+      cover_url: null,
+      description: null,
+      simania_rating: null,
+    };
+    const enrichedBook = { ...firstBook, cover_url: "https://example.test/hebrew-cover.jpg" };
+    const calls = [];
+    const opened = [];
+    const deps = bareBookCardDeps(async (name, body) => {
+      calls.push([name, body]);
+      return { book: calls.length === 1 ? firstBook : enrichedBook };
+    }, {
+      fetchPayload: async (simaniaId) => {
+        assert.equal(simaniaId, bareRec.simania_id);
+        return payload;
+      },
+      card: { open: (book) => opened.push(book), close: () => {} },
+    });
+
+    await openRecommendationCard(overlay, bareRec, deps);
+
+    assert.deepEqual(calls, [
+      ["book-details", { simania_id: bareRec.simania_id }],
+      ["book-details", { simania_id: bareRec.simania_id, simania: payload }],
+    ]);
+    assert.deepEqual(opened, [enrichedBook]);
+  });
+
+  it("does not fetch Simania when book-details returns any display detail", async () => {
+    const overlay = createFakeOverlay();
+    const calls = [];
+    let payloadFetches = 0;
+    const book = {
+      simania_id: bareRec.simania_id,
+      title: bareRec.title,
+      cover_url: "https://example.test/existing-cover.jpg",
+      description: null,
+      simania_rating: null,
+    };
+    const deps = bareBookCardDeps(async (name, body) => {
+      calls.push([name, body]);
+      return { book };
+    }, {
+      fetchPayload: async () => {
+        payloadFetches += 1;
+        return null;
+      },
+    });
+
+    await openRecommendationCard(overlay, bareRec, deps);
+
+    assert.equal(payloadFetches, 0);
+    assert.deepEqual(calls, [["book-details", { simania_id: bareRec.simania_id }]]);
+  });
+
+  it("opens the first result silently when browser-side Simania fetch fails", async () => {
+    const overlay = createFakeOverlay();
+    const firstBook = {
+      simania_id: bareRec.simania_id,
+      title: bareRec.title,
+      cover_url: null,
+      description: null,
+      simania_rating: null,
+    };
+    const opened = [];
+    const toasts = [];
+    const deps = bareBookCardDeps(async () => ({ book: firstBook }), {
+      fetchPayload: async () => { throw new Error("Simania unavailable"); },
+      showToast: (message) => toasts.push(message),
+      card: { open: (book) => opened.push(book), close: () => {} },
+    });
+
+    await openRecommendationCard(overlay, bareRec, deps);
+
+    assert.deepEqual(opened, [firstBook]);
+    assert.deepEqual(toasts, []);
+  });
+
+  it("does not open a replaced card while its Simania payload is loading", async () => {
+    const overlay = createFakeOverlay();
+    const firstBook = {
+      simania_id: bareRec.simania_id,
+      title: bareRec.title,
+      cover_url: null,
+      description: null,
+      simania_rating: null,
+    };
+    let current = true;
+    let resolvePayload;
+    let payloadStarted;
+    const started = new Promise((resolve) => { payloadStarted = resolve; });
+    const payloadPending = new Promise((resolve) => { resolvePayload = resolve; });
+    const opened = [];
+    const deps = bareBookCardDeps(async () => ({ book: firstBook }), {
+      fetchPayload: async () => {
+        payloadStarted();
+        return payloadPending;
+      },
+      isCurrent: () => current,
+      card: { open: (book) => opened.push(book), close: () => {} },
+    });
+
+    const opening = openRecommendationCard(overlay, bareRec, deps);
+    await started;
+    current = false;
+    resolvePayload({ details: { title: bareRec.title }, rating: null });
+    await opening;
+
+    assert.deepEqual(opened, []);
+  });
+
   function reusableCardDeps(calls, onAdded) {
     let session = null;
     return {
