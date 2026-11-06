@@ -86,6 +86,39 @@ function mcfaddenSeed(): Record<string, Record<string, unknown>[]> {
   };
 }
 
+function reidSeed(): Record<string, Record<string, unknown>[]> {
+  return {
+    works: [{
+      id: "seed-work-reid",
+      hardcover_id: 0,
+      original_title: "The Seven Husbands of Evelyn Hugo",
+      original_authors: ["Taylor Jenkins Reid"],
+      similar_ids: [],
+      tags: {},
+      hardcover_cover_url: null,
+      refreshed_at: null,
+    }],
+    editions: [
+      edition({
+        simania_id: 1006655,
+        title: "שבעת הבעלים של אוולין הוגו",
+        author: "טיילור ג'נקינס-ריד",
+        work_id: "seed-work-reid",
+        resolve_status: "nli",
+        resolved_at: "2026-10-01T10:00:00.000Z",
+      }),
+      edition({
+        simania_id: -1,
+        title: "The Seven Husbands of Evelyn Hugo",
+        author: "Taylor Jenkins Reid",
+        work_id: "seed-work-reid",
+        resolve_status: "hardcover",
+        resolved_at: "2026-11-01T10:00:00.000Z",
+      }),
+    ],
+  };
+}
+
 const CASES: LocCase[] = [
   {
     hardcoverId: 383752,
@@ -128,6 +161,36 @@ const CASES: LocCase[] = [
     label: "Aurora",
     buildDb: () => ({}),
     expectedSimania: null,
+  },
+  {
+    hardcoverId: 39920,
+    label: "Eleanor Oliphant Is Completely Fine",
+    buildDb: () => ({}),
+    expectedSimania: 987746,
+  },
+  {
+    hardcoverId: 490300,
+    label: "Lessons in Chemistry",
+    buildDb: () => ({}),
+    expectedSimania: 1005415,
+  },
+  {
+    hardcoverId: 143390,
+    label: "The Ballad of Songbirds and Snakes",
+    buildDb: () => ({}),
+    expectedSimania: 998308,
+  },
+  {
+    hardcoverId: 80,
+    label: "Cell (author path)",
+    buildDb: () => ({}),
+    expectedSimania: 144805,
+  },
+  {
+    hardcoverId: 447329,
+    label: "Daisy Jones & The Six",
+    buildDb: reidSeed,
+    expectedSimania: 1002921,
   },
 ];
 
