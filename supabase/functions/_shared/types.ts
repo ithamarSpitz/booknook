@@ -223,6 +223,7 @@ export interface GenreRecommendationReplacement {
   position: number;
   simania_id: number | null;
   score: number;
+  because: number[];
 }
 
 export interface GenreBook {
@@ -233,6 +234,8 @@ export interface GenreBook {
   author: string | null;
   cover_url: string | null;
   english_only: boolean;
+  because: number[];
+  because_titles: string[];
 }
 
 export interface GenreShelf {

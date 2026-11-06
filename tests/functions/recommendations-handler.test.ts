@@ -402,6 +402,14 @@ Deno.test("genre shelves are ordered and choose recommendation, catalog, then nu
     "most recently resolved catalog edition expected",
   );
   assert(rows[2].simania_id === null, "negative editions must not be selected");
+  assert(
+    JSON.stringify(rows[0].because) === JSON.stringify([11, 12]),
+    "genre replacement should carry contributing seed IDs",
+  );
+  assert(
+    JSON.stringify(rows[4].because) === JSON.stringify([13, 14]),
+    "each genre row should carry only its contributing seeds",
+  );
 });
 
 Deno.test("reading shelf books seed genre shelves with weight 2.5", async () => {
