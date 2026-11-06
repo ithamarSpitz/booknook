@@ -397,3 +397,5 @@ Routes are exactly `#library`, `#recs`, `#search`, `#settings`, `#login`. Empty/
 | S1-T9 first-run/PWA | `js/first-run.js`, `css/first-run.css`, `manifest.webmanifest`, `icons/**` |
 
 Feature lanes do not edit shared routing, data access, `index.html`, or other lanes' files. UI is RTL Hebrew, supports keyboard/touch, has loading/error states, rolls back failed optimistic writes, and respects reduced motion.
+
+**Swipe to close the book card (phone only).** At the phone layout (`max-width: 640px`, where the card is a bottom sheet) with touch input: when the card is scrolled to its top and a touch starts on the card and moves downward, the sheet follows the finger. On release, it closes through the card's normal close if the drag passed 90px or was a quick flick (at least 0.5 px/ms over at least 30px); otherwise it springs back. A drag that starts while the card is scrolled down just scrolls, as now. Taps, the shelf select, star ratings and horizontal moves are unaffected. There is no swipe on wider layouts or with a mouse. With reduced motion, the spring-back and close are immediate.
