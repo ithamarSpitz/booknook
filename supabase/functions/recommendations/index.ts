@@ -116,18 +116,24 @@ export async function hebrewAuthorFor(
         .map((work) => work.id);
 
       if (matchedWorkIds.length) {
-        const editionsResult = await db.from("editions")
-          .select("author, resolved_at")
-          .in("work_id", matchedWorkIds)
+        const editionsQuery = db.from("editions")
+          .select("simania_id, author, resolved_at")
+          .in("work_id", matchedWorkIds);
+        const positiveEditionsQuery = "gt" in editionsQuery
+          ? editionsQuery.gt("simania_id", 0)
+          : editionsQuery;
+        const editionsResult = await positiveEditionsQuery
           .not("work_id", "is", null)
           .order("resolved_at", { ascending: false });
         if (editionsResult.error) throw editionsResult.error;
 
         for (
           const row of (editionsResult.data ?? []) as {
+            simania_id: number;
             author: string | null;
           }[]
         ) {
+          if (row.simania_id <= 0) continue;
           const author = row.author?.trim();
           if (author) {
             resolved = author;
@@ -431,7 +437,8 @@ export async function storeGenreRecommendations({
   if (shelfWorkIds.length) {
     const editions = await db.from("editions")
       .select("simania_id,work_id,resolved_at")
-      .in("work_id", shelfWorkIds);
+      .in("work_id", shelfWorkIds)
+      .gt("simania_id", 0);
     if (editions.error) fail(editions.error);
     const rows = (editions.data ?? []) as Pick<
       EditionRow,
@@ -494,6 +501,7 @@ async function linkedEdition(
     "work_id",
     workId,
   )
+    .gt("simania_id", 0)
     .order("simania_id", { ascending: true }).limit(1).maybeSingle();
   if (error) fail(error);
   return data as EditionRow | null;

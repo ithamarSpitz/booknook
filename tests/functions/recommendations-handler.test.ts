@@ -1,4 +1,7 @@
-import { handleRecommendations } from "../../supabase/functions/recommendations/index.ts";
+import {
+  handleRecommendations,
+  hebrewAuthorFor,
+} from "../../supabase/functions/recommendations/index.ts";
 import {
   bookCard,
   ensureResolved,
@@ -9,6 +12,7 @@ import type {
 } from "../../supabase/functions/_shared/types.ts";
 import { GENRE_MAP } from "../../supabase/functions/_shared/genres.ts";
 import { HttpError } from "../../supabase/functions/_shared/utils.ts";
+import { FakeDb as SharedFakeDb } from "./helpers/fake-db.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -33,6 +37,10 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   }
   in(name: string, values: unknown[]): this {
     this.#filters.push(["__in__", name, values]);
+    return this;
+  }
+  gt(name: string, value: number): this {
+    this.#filters.push(["__gt__", name, value]);
     return this;
   }
   contains(name: string, values: unknown[]): this {
@@ -66,6 +74,11 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
         const field = row[column];
         if (!Array.isArray(field)) return false;
         return values.every((value) => field.includes(value));
+      }
+      if (filter[0] === "__gt__") {
+        const column = filter[1] as string;
+        const value = filter[2] as number;
+        return typeof row[column] === "number" && row[column] > value;
       }
       if (filter[0] === "__notnull__") {
         const column = filter[1] as string;
@@ -146,6 +159,7 @@ type Filter =
   | [string, unknown]
   | ["__in__", string, unknown[]]
   | ["__contains__", string, unknown[]]
+  | ["__gt__", string, number]
   | ["__notnull__", string];
 
 class FakeDb {
@@ -846,6 +860,82 @@ Deno.test("English-only card uses catalog Hebrew author without Wikidata", async
   assert(!wikidataCalled, "Wikidata author bridge should not run");
 });
 
+Deno.test("catalog Hebrew author ignores a newer English edition", async () => {
+  const seed = work("seed", 1, [100]);
+  const candidate = work("candidate", 100);
+  candidate.original_authors = ["Taylor Jenkins Reid"];
+  const catalogWork = work("catalog", 9999);
+  catalogWork.original_authors = ["Taylor Jenkins Reid"];
+  const db = new FakeDb(
+    [shelfBook(11, "read", seed, { rating: 5 })],
+    [seed, candidate, catalogWork],
+    [],
+    [
+      {
+        ...linkedEdition(-474156, "catalog", "2026-11-05T00:00:00Z"),
+        author: "Taylor Jenkins Reid",
+      },
+      {
+        ...linkedEdition(1006655, "catalog", "2026-10-01T00:00:00Z"),
+        author: "טיילור ג'נקינס-ריד",
+      },
+    ],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => "לא אמור להיקרא",
+  });
+  const payload = await response.json();
+  assert(response.status === 200, "expected 200");
+  assert(
+    payload.recommendations[0].hebrew_author === "טיילור ג'נקינס-ריד",
+    "positive-ID Hebrew edition should supply the catalog author",
+  );
+});
+
+Deno.test("catalog Hebrew author works with the shared localization fake", async () => {
+  const db = new SharedFakeDb({
+    works: [{
+      id: "catalog",
+      original_authors: ["Taylor Jenkins Reid"],
+    }],
+    editions: [
+      {
+        simania_id: -474156,
+        work_id: "catalog",
+        author: "Taylor Jenkins Reid",
+        resolved_at: "2026-11-05T00:00:00Z",
+      },
+      {
+        simania_id: 1006655,
+        work_id: "catalog",
+        author: "טיילור ג'נקינס-ריד",
+        resolved_at: "2026-10-01T00:00:00Z",
+      },
+    ],
+  });
+  let wikidataCalled = false;
+  const result = await hebrewAuthorFor(
+    db as never,
+    "Taylor Jenkins Reid",
+    {
+      wikidataHebrewAuthor: async () => {
+        wikidataCalled = true;
+        return null;
+      },
+    },
+    new Map(),
+  );
+  assert(
+    result === "טיילור ג'נקינס-ריד",
+    "shared fake should return the positive-ID catalog author",
+  );
+  assert(!wikidataCalled, "Wikidata author bridge should not run");
+});
+
 Deno.test("English-only card uses Wikidata Hebrew author when catalog misses", async () => {
   const seed = work("seed", 1, [100]);
   const candidate = work("candidate", 100);
@@ -941,6 +1031,62 @@ Deno.test("localized recommendation card has null hebrew_author", async () => {
   assert(
     payload.recommendations[0].hebrew_author === null,
     "localized card should not carry hebrew_author",
+  );
+});
+
+Deno.test("candidate with only an English edition stays English-only", async () => {
+  const seed = work("seed", 1, [474156]);
+  const candidate = work("candidate", 474156);
+  const db = new FakeDb(
+    [shelfBook(11, "read", seed, { rating: 5 })],
+    [seed, candidate],
+    [],
+    [linkedEdition(-474156, "candidate", "2026-11-05T00:00:00Z")],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => null,
+  });
+  const payload = await response.json();
+  assert(response.status === 200, "expected 200");
+  assert(
+    db.replacement?.[0].simania_id === null,
+    "replacement row must not reference the English edition",
+  );
+  assert(
+    payload.recommendations[0].simania_id === null &&
+      payload.recommendations[0].english_only === true,
+    "card should stay English-only",
+  );
+});
+
+Deno.test("candidate with English and Hebrew editions uses the Hebrew edition", async () => {
+  const seed = work("seed", 1, [474156]);
+  const candidate = work("candidate", 474156);
+  const db = new FakeDb(
+    [shelfBook(11, "read", seed, { rating: 5 })],
+    [seed, candidate],
+    [],
+    [
+      linkedEdition(-474156, "candidate", "2026-11-05T00:00:00Z"),
+      linkedEdition(1234, "candidate", "2026-10-01T00:00:00Z"),
+    ],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    wikidataHebrewAuthor: async () => null,
+  });
+  const payload = await response.json();
+  assert(response.status === 200, "expected 200");
+  assert(
+    db.replacement?.[0].simania_id === 1234 &&
+      payload.recommendations[0].simania_id === 1234,
+    "positive-ID Hebrew edition should be selected",
   );
 });
 
