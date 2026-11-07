@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>1</numberOfRecords>
+  <records><record><recordData>
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+      <datafield tag="100"><subfield code="a">מייז, אלה, 1982- מחברת</subfield></datafield>
+      <datafield tag="240"><subfield code="a">To hate Adam Conor. Hebrew</subfield></datafield>
+      <datafield tag="245"><subfield code="a">לשנוא את אדם קונור /</subfield><subfield code="c">אלה מייז</subfield></datafield>
+    </record>
+  </recordData></record></records>
+</searchRetrieveResponse>

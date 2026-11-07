@@ -50,5 +50,8 @@ verify_jwt = true
 [functions.genre-hint]
 verify_jwt = true
 
+[functions.hebrew-candidates]
+verify_jwt = true
+
 [functions.search-english]
 verify_jwt = true

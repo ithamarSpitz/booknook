@@ -165,6 +165,20 @@ export interface GenreHintResponse {
   hebrew_author: string | null;
 }
 
+export interface HebrewCandidatesRequest {
+  work_id: string;
+}
+
+export interface HebrewCandidatesResponse {
+  work_id: string;
+  candidates: Array<{
+    title: string;
+    author: string | null;
+    rule: "A" | "B" | "C" | "D" | "E" | "F" | "G";
+  }>;
+  english_names: string[];
+}
+
 export interface LinkEditionRequest {
   work_id: string;
   simania_id: number;

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">
+  <numberOfRecords>1</numberOfRecords>
+  <records><record><recordData>
+    <record xmlns="http://www.loc.gov/MARC21/slim">
+      <datafield tag="100"><subfield code="a">סטיבנסון, ניל, 1959- מחבר</subfield></datafield>
+      <datafield tag="245"><subfield code="a">סנוקראש /</subfield><subfield code="c">ניל סטיבנסון</subfield></datafield>
+    </record>
+  </recordData></record></records>
+</searchRetrieveResponse>
