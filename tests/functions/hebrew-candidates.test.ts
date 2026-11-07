@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   extractEnglishNames,
   hebrewCandidates,
+  parseNliMarc,
 } from "../../supabase/functions/_shared/hebrew-candidates.ts";
 
 const FIXTURES = new URL("./fixtures/nli-author/", import.meta.url);
@@ -190,4 +191,111 @@ Deno.test("english name extraction removes sentence starts and stop/title/author
     ),
     [],
   );
+});
+
+Deno.test("rule G names exclude common words, demonyms and review sources", () => {
+  const onlyOneLeft = extractEnglishNames(
+    "A story about Lenora Hope. Inside, Kit hung on until the End and Took charge.",
+    "The Only One Left",
+    "Riley Sager",
+  );
+  assert(onlyOneLeft.includes("Lenora"));
+  assert(onlyOneLeft.includes("Kit"));
+  for (const excluded of ["Hope", "Hung", "End", "Took"]) {
+    assert(!onlyOneLeft.includes(excluded));
+  }
+
+  const prettyGirls = extractEnglishNames(
+    "Sisters Claire and Lydia investigate Julia in Atlanta.",
+    "Pretty Girls",
+    "Karin Slaughter",
+  );
+  for (const kept of ["Claire", "Lydia", "Julia", "Atlanta"]) {
+    assert(prettyGirls.includes(kept));
+  }
+
+  const neverLie = extractEnglishNames(
+    "Newlyweds Tricia and Ethan visit Hale. Provided by Amazon.",
+    "Never Lie",
+    "Freida McFadden",
+  );
+  for (const kept of ["Tricia", "Ethan", "Hale"]) {
+    assert(neverLie.includes(kept));
+  }
+  for (const excluded of ["Provided", "Amazon"]) {
+    assert(!neverLie.includes(excluded));
+  }
+});
+
+Deno.test("MARC 100 uses only subfield a and drops Latin words", async () => {
+  const records = parseNliMarc(await fixture("riley-sager-author.xml"));
+  assertEquals(records[0]?.author, "ריילי סאגר");
+});
+
+Deno.test("Wikidata 429 is retried once and rule D survives", async () => {
+  const xml = await fixture("anxious-people.xml");
+  let wikidataCalls = 0;
+  const sleeps: number[] = [];
+  const wd = {
+    search: { search: [{ id: "Q1" }] },
+    works: {
+      Q1: {
+        labels: { sv: { value: "Folk med ångest" } },
+        claims: {
+          P50: [{ mainsnak: { datavalue: { value: { id: "Q2" } } } }],
+          P1476: [{
+            mainsnak: { datavalue: { value: { text: "Folk med ångest" } } },
+          }],
+        },
+      },
+    },
+    authors: { Q2: { labels: { en: { value: "Fredrik Backman" } } } },
+  };
+  const p = providers(xml, wd);
+  const fetcher: typeof fetch = (input, init) => {
+    if (String(input).includes("wikidata.org") && ++wikidataCalls === 1) {
+      return Promise.resolve(new Response(null, { status: 429 }));
+    }
+    return p.fetcher(input, init);
+  };
+  const result = await hebrewCandidates({
+    title: "Anxious People",
+    author: "Fredrik Backman",
+    description: null,
+  }, {
+    fetch: fetcher,
+    sleep: (ms) => {
+      sleeps.push(ms);
+      return Promise.resolve();
+    },
+    wikidataHebrew: bridge(null),
+    nliHebrew: bridge(null),
+  });
+  assertEquals(sleeps, [2_000]);
+  assertEquals(result.candidates[0]?.rule, "D");
+});
+
+Deno.test("a second Wikidata 429 drops D but keeps other rules", async () => {
+  const xml = await fixture("anxious-people.xml");
+  let wikidataCalls = 0;
+  const fetcher: typeof fetch = (input) => {
+    if (String(input).includes("wikidata.org")) {
+      wikidataCalls++;
+      return Promise.resolve(new Response(null, { status: 429 }));
+    }
+    return Promise.resolve(new Response(xml));
+  };
+  const result = await hebrewCandidates({
+    title: "Anxious People",
+    author: "Fredrik Backman",
+    description: null,
+  }, {
+    fetch: fetcher,
+    sleep: () => Promise.resolve(),
+    wikidataHebrew: bridge(null),
+    nliHebrew: bridge("אנשים חרדים"),
+  });
+  assertEquals(wikidataCalls, 2);
+  assert(!result.candidates.some((candidate) => candidate.rule === "D"));
+  assert(result.candidates.some((candidate) => candidate.rule === "E"));
 });

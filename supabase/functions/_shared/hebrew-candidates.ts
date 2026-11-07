@@ -25,6 +25,7 @@ type Deps = {
   wikidataHebrew: BridgeLookup;
   nliHebrew: BridgeLookup;
   clock: () => number;
+  sleep: (ms: number) => Promise<void>;
 };
 
 const defaults: Deps = {
@@ -32,6 +33,7 @@ const defaults: Deps = {
   wikidataHebrew,
   nliHebrew,
   clock: Date.now,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 
 function decodeXml(value: string): string {
@@ -44,7 +46,11 @@ function decodeXml(value: string): string {
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
-function fieldValues(xml: string, tag: string): string[] {
+function fieldValues(
+  xml: string,
+  tag: string,
+  allowedCodes?: ReadonlySet<string>,
+): string[] {
   const fields = new RegExp(
     `<(?:[\\w-]+:)?datafield\\b[^>]*\\btag=["']${tag}["'][^>]*>([\\s\\S]*?)<\\/(?:[\\w-]+:)?datafield>`,
     "gi",
@@ -52,8 +58,11 @@ function fieldValues(xml: string, tag: string): string[] {
   const values: string[] = [];
   for (const field of xml.matchAll(fields)) {
     const parts = [...field[1].matchAll(
-      /<(?:[\w-]+:)?subfield\b[^>]*\bcode=["'][a-z0-9]["'][^>]*>([\s\S]*?)<\/(?:[\w-]+:)?subfield>/gi,
-    )].map((match) => decodeXml(match[1].replace(/<[^>]+>/g, "")).trim())
+      /<(?:[\w-]+:)?subfield\b[^>]*\bcode=["']([a-z0-9])["'][^>]*>([\s\S]*?)<\/(?:[\w-]+:)?subfield>/gi,
+    )].filter((match) =>
+      !allowedCodes || allowedCodes.has(match[1].toLowerCase())
+    )
+      .map((match) => decodeXml(match[2].replace(/<[^>]+>/g, "")).trim())
       .filter(Boolean);
     if (parts.length) values.push(parts.join(" "));
   }
@@ -70,7 +79,10 @@ export function parseNliMarc(xml: string): Record[] {
       .replace(/\[[^\]]*\]/g, " ").replace(/[\s:/.;]+$/g, "")
       .replace(/\s+/g, " ").trim();
     if (!title) continue;
-    let author = fieldValues(chunk, "100")[0] ?? "";
+    let author = fieldValues(chunk, "100", new Set(["a"]))[0] ?? "";
+    author = author.split(/\s+/).filter((word) => !/[A-Za-z]/.test(word)).join(
+      " ",
+    );
     author = author.replace(/,?\s*\d{4}\s*-?\s*(?:\d{4})?.*$/g, "")
       .replace(/(?:\s|,)+(?:מחבר|מחברת|author).*$/i, "")
       .replace(/[\s,;:/]+$/g, "").trim();
@@ -135,12 +147,24 @@ async function wikidataJson(
   deps: Deps,
   remaining: () => number,
 ): Promise<any> {
-  const text = await fetchText(
-    deps.fetch,
-    `${WIKIDATA}?${new URLSearchParams({ format: "json", ...params })}`,
-    remaining(),
-  );
-  return JSON.parse(text);
+  const url = `${WIKIDATA}?${new URLSearchParams({ format: "json", ...params })}`;
+  const request = async (): Promise<Response> => {
+    const left = remaining();
+    if (left <= 0) throw new Error("hebrew-candidates deadline exceeded");
+    return await deps.fetch(url, { signal: timeoutSignal(left) });
+  };
+  let response = await request();
+  if (response.status === 429) {
+    if (remaining() <= 2_000) {
+      throw new Error("hebrew-candidates deadline exceeded");
+    }
+    await withinDeadline(() => deps.sleep(2_000), remaining());
+    response = await request();
+  }
+  if (!response.ok) {
+    throw new Error(`Provider returned HTTP ${response.status}`);
+  }
+  return JSON.parse(await response.text());
 }
 
 async function withinDeadline<T>(
@@ -240,7 +264,7 @@ async function wikidataOriginalTitles(
 }
 
 const STOP_WORDS = new Set(
-  `the a an and but or when after before now in on at of for from with without this that these those he she him her his hers they them their theirs its it we us our ours you your yours i me my mine who whom whose as if yet so then there here new york times book review bestselling author novel award january february march april may june july august september october november december zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty hundred thousand million first second third fourth fifth last`
+  `a about after again against all also always american amazon an and another any are around as at away back bad be became because become been before began being best better between big black book books british called came can canadian city come could day days dead did do does down during each early end english even ever every family far few find first for found four from gave get girl give go goes going good got great had has have he her here him his home hope house how hung i if in into is it its just keep kind know last left life like little live long look lost love made make man many may me men might more most mother much must my never new newsday next night no not now of off old on once one only or other our out over own people place post provided real right royal said same saw say see seemed she should simple since small so some something soon still such take than that the their them then there these they thing things think this those three through time to told too took two under until up us very want war was washington way we well went were western what when where which while who why will with without woman women world would year years yet york you young your times bestselling author novel award review publishers weekly kirkus goodreads booklist library journal but or his hers theirs ours yours mine whom whose as if zero five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty hundred thousand million second third fourth fifth january february march april june july august september october november december african asian australian brazilian chinese danish dutch european french german greek indian irish israeli italian japanese korean mexican norwegian polish russian scottish spanish swedish swiss welsh`
     .split(/\s+/),
 );
 
