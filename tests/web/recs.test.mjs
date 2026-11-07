@@ -1184,7 +1184,7 @@ describe("catalog fallback localization", () => {
     assert.equal(result, null);
   });
 
-  it("uses rule-G name hits only for a unique winner with at least two hits", async () => {
+  it("links The Sea shape when only one edition has name hits", async () => {
     const candidates = [
       { title: "ספר ראשון", author: "קים סטנלי רובינסון", rule: "G" },
       { title: "ספר שני", author: "קים סטנלי רובינסון", rule: "G" },
@@ -1196,13 +1196,13 @@ describe("catalog fallback localization", () => {
       ["ספר שלישי", { id: 33, title: "ספר שלישי", author: "קים סטנלי רובינסון" }],
     ]);
     const descriptions = new Map([
-      [31, "אליס בוב דיוויד"],
-      [32, "אליס"],
+      [31, "מאק גרייסס טאד"],
+      [32, "בלי התאמות"],
       [33, "בלי התאמות"],
     ]);
     let reads = 0;
     const deps = {
-      callFunction: async () => candidateResponse(candidates, ["Alice", "Bob", "David"]),
+      callFunction: async () => candidateResponse(candidates, ["Max", "Graces", "Today"]),
       searchBooks: async (query) => [books.get([...books.keys()].find((title) => query.startsWith(title)))].filter(Boolean),
       fetchPayload: async (id) => {
         reads++;
@@ -1230,6 +1230,35 @@ describe("catalog fallback localization", () => {
       callFunction: async () => candidateResponse([candidates[0]], ["Alice"]),
       fetchPayload: async () => ({ details: { description: "אליס" } }),
     }), null, "one hit is insufficient");
+  });
+
+  it("does not link Regeneration when rival series editions have any hits", async () => {
+    const candidates = ["X", "Y", "Z"].map((suffix) => ({
+      title: `ספר ${suffix}`,
+      author: "פט ברקר",
+      rule: "G",
+    }));
+    const descriptions = new Map([
+      [51, "זיגפריד קמפ סאנדיי"],
+      [52, "זיגפריד סאסן"],
+      [53, "זיגפריד סאסן פיטר"],
+    ]);
+    const result = await localizeFallback(rec({ author: "Pat Barker" }), {
+      callFunction: async () => candidateResponse(candidates, [
+        "Siegfried",
+        "Kemp",
+        "Sunday",
+        "Sassoon",
+        "Peter",
+      ]),
+      searchBooks: async (query) => {
+        const index = candidates.findIndex(({ title }) => query.startsWith(title));
+        return [{ id: 51 + index, title: candidates[index].title, author: "פט ברקר" }];
+      },
+      fetchPayload: async (id) => ({ details: { description: descriptions.get(id) } }),
+      isCurrent: () => true,
+    });
+    assert.equal(result, null);
   });
 
   it("does not link Pretty Girls when only Atlanta is distinctive", async () => {

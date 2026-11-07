@@ -125,6 +125,7 @@ const GUARD_CASES: GuardCase[] = [
   { title: "Behind Closed Doors", author: "B.A. Paris", forbidden: 220768 },
   { title: "Pretty Girls", author: "Karin Slaughter", forbidden: 41212 },
   { title: "The Only One Left", author: "Riley Sager", forbidden: 1028558 },
+  { title: "Regeneration", author: "Pat Barker", forbidden: 844 },
 ];
 
 const NO_DECISION_CASES: NoDecisionCase[] = [

@@ -330,6 +330,7 @@ export async function localizeFallback(rec, deps) {
   ]).sort((left, right) => right[1] - left[1]);
   if (!scored[0] || scored[0][1] < 2) return null;
   if (scored[1] && scored[0][1] <= scored[1][1]) return null;
+  if (editions.some(([id, hits]) => id !== scored[0][0] && hits.length > 0)) return null;
   return scored[0][0];
 }
 
