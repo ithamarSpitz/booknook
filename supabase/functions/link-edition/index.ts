@@ -25,6 +25,10 @@ type FunctionDeps = {
   ensureEdition: typeof ensureEdition;
 };
 
+type LinkEditionInput = Omit<LinkEditionRequest, "source"> & {
+  source: LinkEditionRequest["source"] | "nli_author";
+};
+
 const defaults: FunctionDeps = {
   requireUser,
   serviceClient,
@@ -46,16 +50,17 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
     if (preflight) return preflight;
     try {
       const userId = await deps.requireUser(req);
-      const input = await body<Partial<LinkEditionRequest>>(req);
+      const input = await body<Partial<LinkEditionInput>>(req);
       if (
         typeof input.work_id !== "string" || !input.work_id.trim() ||
         !Number.isSafeInteger(input.simania_id) ||
         Number(input.simania_id) <= 0 ||
-        (input.source !== "wikidata" && input.source !== "nli")
+        (input.source !== "wikidata" && input.source !== "nli" &&
+          input.source !== "nli_author")
       ) {
         throw new HttpError(
           400,
-          "work_id, simania_id and source (wikidata or nli) are required.",
+          "work_id, simania_id and source (wikidata, nli or nli_author) are required.",
         );
       }
       const supplied = suppliedSimania(input.simania);
