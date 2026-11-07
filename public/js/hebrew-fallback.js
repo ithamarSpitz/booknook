@@ -60,8 +60,12 @@ export function soundAgrees(simaniaAuthor, englishAuthor) {
 /** @param {string[]} englishNames @param {string} hebrewDescription @returns {string[]} */
 export function nameHits(englishNames, hebrewDescription) {
   const tokens = new Set();
-  for (const match of String(hebrewDescription ?? "").matchAll(/[א-ת]{3,}/g)) {
-    const token = match[0];
+  const normalized = String(hebrewDescription ?? "")
+    .replace(/[׳’`]/g, "'")
+    .replace(/״/g, '"');
+  for (const word of normalized.split(/[^א-ת'"]+/)) {
+    const token = word.replace(/^['"]+|['"]+$/g, "");
+    if (token.replace(/['"]/g, "").length < 3) continue;
     tokens.add(token);
     if (/^[והבלמשכ]/.test(token) && token.length > 3) {
       tokens.add(token.slice(1));

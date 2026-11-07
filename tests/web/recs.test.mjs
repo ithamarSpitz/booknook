@@ -1214,14 +1214,80 @@ describe("catalog fallback localization", () => {
     assert.equal(reads, 3);
 
     descriptions.set(31, "אליס בוב");
-    descriptions.set(32, "אליס בוב");
-    assert.equal(await localizeFallback(rec(), deps), null, "2-2 tie");
+    descriptions.set(32, "טרישה איתן");
+    assert.equal(await localizeFallback(rec(), {
+      ...deps,
+      callFunction: async () => candidateResponse(candidates, [
+        "Alice",
+        "Bob",
+        "Tricia",
+        "Ethan",
+      ]),
+    }), null, "2-2 distinctive tie");
 
     assert.equal(await localizeFallback(rec(), {
       ...deps,
       callFunction: async () => candidateResponse([candidates[0]], ["Alice"]),
       fetchPayload: async () => ({ details: { description: "אליס" } }),
     }), null, "one hit is insufficient");
+  });
+
+  it("does not link Pretty Girls when only Atlanta is distinctive", async () => {
+    const candidates = [
+      { title: "ספר א", author: "קארין סלוטר", rule: "G" },
+      { title: "ספר ב", author: "קארין סלוטר", rule: "G" },
+    ];
+    const descriptions = new Map([
+      [61, "ג'וליה ואטלנטה"],
+      [62, "ג'וליה"],
+    ]);
+    const result = await localizeFallback(rec({ author: "Karin Slaughter" }), {
+      callFunction: async () => candidateResponse(candidates, ["Julia", "Atlanta"]),
+      searchBooks: async (query) => query.startsWith("ספר א")
+        ? [{ id: 61, title: "ספר א", author: "קארין סלוטר" }]
+        : [{ id: 62, title: "ספר ב", author: "קארין סלוטר" }],
+      fetchPayload: async (id) => ({ details: { description: descriptions.get(id) } }),
+      isCurrent: () => true,
+    });
+    assert.equal(result, null);
+  });
+
+  it("does not link Lathe when every edition shares Orr and Haber", async () => {
+    const candidates = ["א", "ב", "ג"].map((suffix) => ({
+      title: `ספר ${suffix}`,
+      author: "אורסולה לה גווין",
+      rule: "G",
+    }));
+    const result = await localizeFallback(rec({ author: "Ursula K. Le Guin" }), {
+      callFunction: async () => candidateResponse(candidates, ["Orr", "Haber"]),
+      searchBooks: async (query) => {
+        const index = candidates.findIndex(({ title }) => query.startsWith(title));
+        return [{ id: 71 + index, title: candidates[index].title, author: "אורסולה לה גווין" }];
+      },
+      fetchPayload: async () => ({ details: { description: "אור והאבר" } }),
+      isCurrent: () => true,
+    });
+    assert.equal(result, null);
+  });
+
+  it("links Never Lie when Tricia and Ethan are distinctive", async () => {
+    const candidates = ["א", "ב", "ג"].map((suffix) => ({
+      title: `ספר ${suffix}`,
+      author: "פרידה מקפדן",
+      rule: "G",
+    }));
+    const result = await localizeFallback(rec({ author: "Freida McFadden" }), {
+      callFunction: async () => candidateResponse(candidates, ["Tricia", "Ethan"]),
+      searchBooks: async (query) => {
+        const index = candidates.findIndex(({ title }) => query.startsWith(title));
+        return [{ id: 81 + index, title: candidates[index].title, author: "פרידה מקפדן" }];
+      },
+      fetchPayload: async (id) => ({
+        details: { description: id === 81 ? "טרישה ואית׳ן" : "בלי שמות" },
+      }),
+      isCurrent: () => true,
+    });
+    assert.equal(result, 81);
   });
 
   it("reuses the winning rule-G payload when linking", async () => {
