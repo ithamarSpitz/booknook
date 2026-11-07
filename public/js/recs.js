@@ -303,12 +303,12 @@ export async function localizeFallback(rec, deps) {
   const englishNames = Array.isArray(response.english_names)
     ? response.english_names.map(String)
     : [];
-  const scoredById = new Map();
+  const hitsById = new Map();
   for (const candidate of candidates.filter((item) => item.rule === "G").slice(0, 6)) {
     const found = await findEdition(candidate);
     if (!deps.isCurrent()) return null;
     if (searchExhausted) return null;
-    if (!found || scoredById.has(found.id) || detailCount >= 6) continue;
+    if (!found || hitsById.has(found.id) || detailCount >= 6) continue;
     detailCount++;
     let payload;
     try {
@@ -319,11 +319,17 @@ export async function localizeFallback(rec, deps) {
     if (!deps.isCurrent()) return null;
     if (deps.payloadById instanceof Map) deps.payloadById.set(found.id, payload);
     const description = String(payload?.details?.description ?? "");
-    scoredById.set(found.id, nameHits(englishNames, description).length);
+    hitsById.set(found.id, nameHits(englishNames, description));
   }
-  const scored = [...scoredById].sort((left, right) => right[1] - left[1]);
+  const editions = [...hitsById];
+  const scored = editions.map(([id, hits]) => [
+    id,
+    hits.filter((name) => !editions.some(
+      ([otherId, otherHits]) => otherId !== id && otherHits.includes(name),
+    )).length,
+  ]).sort((left, right) => right[1] - left[1]);
   if (!scored[0] || scored[0][1] < 2) return null;
-  if (scored[1] && scored[0][1] === scored[1][1]) return null;
+  if (scored[1] && scored[0][1] <= scored[1][1]) return null;
   return scored[0][0];
 }
 

@@ -34,3 +34,10 @@ test("nameHits finds character names mentioned in a Hebrew description", () => {
     "Ethan",
   ]);
 });
+
+test("nameHits keeps geresh-like marks inside Hebrew name tokens", () => {
+  assert.deepEqual(
+    nameHits(["Tricia", "Ethan"], "טרישה ואית׳ן, זוג צעיר"),
+    ["Tricia", "Ethan"],
+  );
+});
