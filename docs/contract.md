@@ -317,7 +317,7 @@ Measured 2026-11-07, both readers: of 55 English-only books, 23 had a Hebrew edi
 | Small Island (Andrea Levy) | 97143 | G |
 | Never Lie (Freida McFadden) | 1029088 | G |
 
-Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (David Koepp); Behind Closed Doors to 220768 (an Israeli book by another author); Pretty Girls (Karin Slaughter) to 41212 הנקודה העיוורת (it is Blindsighted); The Only One Left (Riley Sager) to 1028558 רכבת הנקמה (it is With a Vengeance); The Lathe of Heaven and Watchers to anything by rule G. The two wrong links were made in production on 2026-11-07 by the first rule G (it matched "Julia"/"Atlanta" and "Took"/"Kit") and were undone with `unlink:fallback`. Rule G v2 (S13) was probed over all 61 English-only books on 2026-11-07 and made 20 links, all correct (`tasks/sprint-13-fallback-g/`). Known misses, left English-only: Grass (20895, no Simania description) and Stories of Your Life and Others (42098, no character names). The working probes are in `tasks/sprint-12-fallback/reference/`, a read-only reference that the implementation follows; where they differ from this section, this section wins.
+Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (David Koepp); Behind Closed Doors to 220768 (an Israeli book by another author); Pretty Girls (Karin Slaughter) to 41212 הנקודה העיוורת (it is Blindsighted); The Only One Left (Riley Sager) to 1028558 רכבת הנקמה (it is With a Vengeance); The Lathe of Heaven and Watchers to anything by rule G; Regeneration (Pat Barker) to 844 דרך הרפאים (it is The Ghost Road). The two wrong links were made in production on 2026-11-07 by the first rule G (it matched "Julia"/"Atlanta" and "Took"/"Kit") and were undone with `unlink:fallback`. Rule G v2 (S13) was probed over all 61 English-only books on 2026-11-07 and made 20 links, all correct (`tasks/sprint-13-fallback-g/`). Known misses, left English-only: Grass (20895, no Simania description) and Stories of Your Life and Others (42098, no character names). The working probes are in `tasks/sprint-12-fallback/reference/`, a read-only reference that the implementation follows; where they differ from this section, this section wins.
 
 **It is a fallback only.** It runs for a card only after the title path and the author path (`match-by-author`) have both missed, and only while the card is still English-only. It never touches a card that has a `simania_id`. It links only through `link-edition`, so an edition already linked to a different work is never relinked (`409`, a miss).
 
@@ -354,11 +354,12 @@ Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (D
 3. Rules E and F: the same search, but the result must pass `titleMatch` and `soundAgrees`.
 4. Rule G: find each G candidate on Simania as in step 2 (at most 6), and read the details `description` of each found edition.
    - A hit is **distinctive** when that English name does not also hit another found edition's description.
-   - The edition with the most distinctive hits wins only if it has at least 2 and strictly more than the next one.
+   - The edition with the most distinctive hits wins only if it has at least 2 distinctive hits and every other found edition has no hits at all (not even shared ones). Same-author series books share characters, so any hit on another edition means no link.
    - Live cases:
      - Pretty Girls: Julia hits two Slaughter books, so only Atlanta is distinctive → no link.
      - The Lathe of Heaven: Orr and Haber hit three Le Guin books → no link.
      - Never Lie: Tricia and Ethan → link 1029088.
+     - Regeneration (Pat Barker): 844 דרך הרפאים (The Ghost Road, book 3) has Kemp and Sunday distinctive, but 145387 התחדשות and 1059 עולם אחר also have hits (Siegfried, Sassoon, Peter) → no link. Measured 2026-11-07 in the S13 population review, before any apply.
 5. On a decision, fetch the payload and call `link-edition` with `source: "nli_author"`. Any miss, tie, failure or `409` leaves the card English-only.
 - Bounds per card: at most 12 Simania searches and 6 detail reads.
 

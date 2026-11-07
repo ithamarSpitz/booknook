@@ -648,3 +648,16 @@ sprints:
       - npm run test:functions
       - npm run test:web
       - npm run verify:fallback
+  S14-fallback-g-series:
+    name: Rule G links only when no other found edition has any name hit (series guard)
+    tasks:
+      S14-T1:
+        file: tasks/sprint-14-fallback-g-series/01-rule-g-sole-hits.md
+        stage: 1
+        depends_on: []
+    stage_verification:
+      '1':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
