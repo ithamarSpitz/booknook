@@ -11,6 +11,7 @@ import {
 } from "../../public/js/data.js";
 import { createRouter } from "../../public/js/router.js";
 import { ROUTES } from "../../public/js/contract.js";
+import { localizeRecommendations } from "../../public/js/recs.js";
 
 describe("layout helpers (data.js)", () => {
   it("bookTilesWithoutPlus skips plus tiles and dragged book", () => {
@@ -519,6 +520,41 @@ function englishGenreShelves(count) {
 }
 
 describe("genre shelf localization", () => {
+  it("links a genre book through the catalog fallback after the existing paths miss", async () => {
+    const linked = [];
+    const calls = [];
+    await library.localizeGenreBooks(englishGenreShelves(1), {
+      storage: null,
+      isCurrent: () => true,
+      callFunction: async (name, body) => {
+        calls.push(name);
+        if (name === "genre-hint") {
+          return { hebrew_hint: { source: "nli", title: "כותרת ישנה", author: null }, hebrew_author: null };
+        }
+        if (name === "hebrew-candidates") {
+          return {
+            work_id: body.work_id,
+            candidates: [{ title: "כותרת נכונה", author: "מחבר", rule: "A" }],
+            english_names: [],
+          };
+        }
+        return { simania_id: 765, title: "כותרת נכונה", author: "מחבר", cover_url: null };
+      },
+      localize: (items, deps) => localizeRecommendations(items, {
+        ...deps,
+        match: async () => null,
+        searchByAuthor: async () => [],
+        searchBooks: async () => [{ id: 765, title: "כותרת נכונה", author: "מחבר" }],
+        fetchPayload: async () => ({ details: { title: "כותרת נכונה" }, rating: null }),
+      }),
+      onLinked: (...args) => linked.push(args),
+    });
+
+    assert.deepEqual(calls, ["genre-hint", "hebrew-candidates", "link-edition"]);
+    assert.equal(linked[0][0], "english-1");
+    assert.equal(linked[0][1].simania_id, 765);
+  });
+
   it("attempts at most 12 English books in shelf and position order, two at a time", async () => {
     const attempts = [];
     let active = 0;

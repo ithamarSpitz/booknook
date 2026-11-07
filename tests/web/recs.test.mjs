@@ -25,6 +25,7 @@ import {
   sortRecommendations,
   visibleRecommendations,
   localizeRecommendations,
+  localizeFallback,
   recommendationFromApiCard,
   verifyTitleMatch,
 } from "../../public/js/recs.js";
@@ -939,6 +940,7 @@ describe("localizeRecommendations author path", () => {
     assert.equal(sent.length, 1);
     assert.equal(sent[0][0], "link-edition");
     assert.deepEqual(sent[0][1].source, "wikidata");
+    assert.equal(sent.some(([name]) => name === "hebrew-candidates"), false);
   });
 
   it("links a mismatched title result only when match-by-author confirms it", async () => {
@@ -1073,7 +1075,7 @@ describe("localizeRecommendations author path", () => {
       onLinked: () => assert.fail("must not link"),
       isCurrent: () => true,
     });
-    assert.deepEqual(sent, ["match-by-author"]);
+    assert.deepEqual(sent, ["match-by-author", "hebrew-candidates"]);
   });
 
   it("localizes a card with only hebrew_author", async () => {
@@ -1109,6 +1111,211 @@ describe("localizeRecommendations author path", () => {
     });
     assert.equal(sent[1][0], "link-edition");
     assert.equal(sent[1][1].source, "nli");
+  });
+});
+
+describe("catalog fallback localization", () => {
+  const rec = (extra = {}) => ({
+    work_id: "fallback-work",
+    simania_id: null,
+    title: "Aurora",
+    author: "Kim Stanley Robinson",
+    english_only: true,
+    can_add: false,
+    hebrew_hint: null,
+    hebrew_author: null,
+    ...extra,
+  });
+
+  const candidateResponse = (candidates, english_names = []) => ({
+    work_id: "fallback-work",
+    candidates,
+    english_names,
+  });
+
+  it("links a single rule-A winner with nli_author", async () => {
+    const calls = [];
+    const linked = [];
+    await localizeRecommendations([rec()], {
+      match: async () => assert.fail("no title hint"),
+      searchByAuthor: async () => assert.fail("no Hebrew author"),
+      searchBooks: async () => [{ id: 701, title: "אורורה", author: "קים סטנלי רובינסון" }],
+      fetchPayload: async () => ({ details: { title: "אורורה" }, rating: null }),
+      callFunction: async (name, body) => {
+        calls.push([name, body]);
+        if (name === "hebrew-candidates") {
+          return candidateResponse([{ title: "אורורה", author: "קים סטנלי רובינסון", rule: "A" }]);
+        }
+        return { simania_id: 701, title: "אורורה", author: "קים סטנלי רובינסון", cover_url: null };
+      },
+      onLinked: (workId, patch) => linked.push([workId, patch]),
+      isCurrent: () => true,
+    });
+
+    assert.equal(calls[0][0], "hebrew-candidates");
+    assert.equal(calls[1][0], "link-edition");
+    assert.equal(calls[1][1].source, "nli_author");
+    assert.equal(calls[1][1].simania_id, 701);
+    assert.equal(linked[0][1].simania_id, 701);
+  });
+
+  it("does not decide when one rule-A tier finds two Simania IDs", async () => {
+    const result = await localizeFallback(rec(), {
+      callFunction: async () => candidateResponse([
+        { title: "ראשון", author: "קים סטנלי רובינסון", rule: "A" },
+        { title: "שני", author: "קים סטנלי רובינסון", rule: "A" },
+      ]),
+      searchBooks: async (query) => query.startsWith("ראשון")
+        ? [{ id: 11, title: "ראשון", author: "קים סטנלי רובינסון" }]
+        : [{ id: 22, title: "שני", author: "קים סטנלי רובינסון" }],
+      isCurrent: () => true,
+    });
+    assert.equal(result, null);
+  });
+
+  it("rejects rule E when the Simania author does not sound like the English author", async () => {
+    const result = await localizeFallback(rec(), {
+      callFunction: async () => candidateResponse([
+        { title: "כיבוי אורות", author: null, rule: "E" },
+      ]),
+      searchBooks: async () => [{ id: 1013521, title: "כיבוי אורות", author: "דיוויד קופ" }],
+      isCurrent: () => true,
+    });
+    assert.equal(result, null);
+  });
+
+  it("uses rule-G name hits only for a unique winner with at least two hits", async () => {
+    const candidates = [
+      { title: "ספר ראשון", author: "קים סטנלי רובינסון", rule: "G" },
+      { title: "ספר שני", author: "קים סטנלי רובינסון", rule: "G" },
+      { title: "ספר שלישי", author: "קים סטנלי רובינסון", rule: "G" },
+    ];
+    const books = new Map([
+      ["ספר ראשון", { id: 31, title: "ספר ראשון", author: "קים סטנלי רובינסון" }],
+      ["ספר שני", { id: 32, title: "ספר שני", author: "קים סטנלי רובינסון" }],
+      ["ספר שלישי", { id: 33, title: "ספר שלישי", author: "קים סטנלי רובינסון" }],
+    ]);
+    const descriptions = new Map([
+      [31, "אליס בוב דיוויד"],
+      [32, "אליס"],
+      [33, "בלי התאמות"],
+    ]);
+    let reads = 0;
+    const deps = {
+      callFunction: async () => candidateResponse(candidates, ["Alice", "Bob", "David"]),
+      searchBooks: async (query) => [books.get([...books.keys()].find((title) => query.startsWith(title)))].filter(Boolean),
+      fetchPayload: async (id) => {
+        reads++;
+        return { details: { description: descriptions.get(id) } };
+      },
+      isCurrent: () => true,
+    };
+    assert.equal(await localizeFallback(rec(), deps), 31);
+    assert.equal(reads, 3);
+
+    descriptions.set(31, "אליס בוב");
+    descriptions.set(32, "אליס בוב");
+    assert.equal(await localizeFallback(rec(), deps), null, "2-2 tie");
+
+    assert.equal(await localizeFallback(rec(), {
+      ...deps,
+      callFunction: async () => candidateResponse([candidates[0]], ["Alice"]),
+      fetchPayload: async () => ({ details: { description: "אליס" } }),
+    }), null, "one hit is insufficient");
+  });
+
+  it("reuses the winning rule-G payload when linking", async () => {
+    let reads = 0;
+    const linked = [];
+    await localizeRecommendations([rec()], {
+      searchBooks: async () => [{ id: 41, title: "ספר", author: "קים סטנלי רובינסון" }],
+      fetchPayload: async () => {
+        reads++;
+        return { details: { title: "ספר", description: "אליס בוב" }, rating: null };
+      },
+      callFunction: async (name, body) => name === "hebrew-candidates"
+        ? candidateResponse([{ title: "ספר", author: "קים סטנלי רובינסון", rule: "G" }], ["Alice", "Bob"])
+        : { simania_id: body.simania_id, title: "ספר", author: null, cover_url: null },
+      onLinked: (...args) => linked.push(args),
+      isCurrent: () => true,
+    });
+    assert.equal(reads, 1);
+    assert.equal(linked.length, 1);
+  });
+
+  it("leaves the card English-only when link-edition returns 409", async () => {
+    const linked = [];
+    const previousWarn = console.warn;
+    console.warn = () => {};
+    try {
+      await localizeRecommendations([rec()], {
+        searchBooks: async () => [{ id: 51, title: "אורורה", author: "קים סטנלי רובינסון" }],
+        fetchPayload: async () => ({ details: { title: "אורורה" }, rating: null }),
+        callFunction: async (name) => {
+          if (name === "hebrew-candidates") {
+            return candidateResponse([{ title: "אורורה", author: "קים סטנלי רובינסון", rule: "A" }]);
+          }
+          const error = new Error("conflict");
+          error.status = 409;
+          throw error;
+        },
+        onLinked: (...args) => linked.push(args),
+        isCurrent: () => true,
+      });
+    } finally {
+      console.warn = previousWarn;
+    }
+    assert.deepEqual(linked, []);
+  });
+
+  it("sends a card with neither hint nor Hebrew author to hebrew-candidates", async () => {
+    const calls = [];
+    await localizeRecommendations([rec()], {
+      callFunction: async (name) => {
+        calls.push(name);
+        return candidateResponse([]);
+      },
+      onLinked: () => assert.fail("must not link"),
+      isCurrent: () => true,
+    });
+    assert.deepEqual(calls, ["hebrew-candidates"]);
+  });
+
+  it("never sends a card that already has a Hebrew edition to the fallback", async () => {
+    let calls = 0;
+    await localizeRecommendations([rec({ simania_id: 99, english_only: false })], {
+      callFunction: async () => { calls++; },
+      onLinked: () => assert.fail("must not link"),
+      isCurrent: () => true,
+    });
+    assert.equal(calls, 0);
+  });
+
+  it("caps each card at 12 searches and 6 detail reads", async () => {
+    const candidates = Array.from({ length: 6 }, (_, index) => ({
+      title: `ספר ${index + 1}`,
+      author: "קים סטנלי רובינסון",
+      rule: "G",
+    }));
+    let searches = 0;
+    let reads = 0;
+    await localizeFallback(rec(), {
+      callFunction: async () => candidateResponse(candidates, []),
+      searchBooks: async (query) => {
+        searches++;
+        const exact = candidates.find((candidate) => candidate.title === query);
+        return exact
+          ? [{ id: Number(query.split(" ").pop()) + 100, title: exact.title, author: exact.author }]
+          : [];
+      },
+      fetchPayload: async () => {
+        reads++;
+        return { details: { description: "" } };
+      },
+      isCurrent: () => true,
+    });
+    assert.equal(searches, 12);
+    assert.equal(reads, 6);
   });
 });
 

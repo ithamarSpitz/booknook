@@ -3,10 +3,18 @@ import { promptRating, shouldPromptRating } from "./my-rating.js";
 import {
   fetchSimaniaPayload,
   matchHebrewBook,
+  searchBooks,
   searchByAuthor,
   similarity,
   simaniaIdOf,
 } from "./simania.js";
+import {
+  authorAgrees,
+  mainTitle,
+  nameHits,
+  soundAgrees,
+  titleMatch,
+} from "./hebrew-fallback.js";
 import { notifyShelvesChanged } from "./events.js";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
@@ -195,6 +203,131 @@ function linkSourceFromAuthorMatch(resolveStatus) {
 }
 
 /**
+ * Decide the single clear Simania winner from the catalog fallback. Linking is
+ * deliberately left to localizeRecommendations so every path uses the same
+ * payload and onLinked flow.
+ * @param {import('./contract.js').RecommendationCard} rec
+ * @param {{
+ *   callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>,
+ *   isCurrent: () => boolean,
+ *   searchBooks?: typeof searchBooks,
+ *   fetchPayload?: typeof fetchSimaniaPayload,
+ *   fetchSimaniaPayload?: typeof fetchSimaniaPayload,
+ *   payloadById?: Map<number, unknown>,
+ * }} deps
+ * @returns {Promise<number|null>}
+ */
+export async function localizeFallback(rec, deps) {
+  if (!rec?.english_only || rec.simania_id != null || !deps.isCurrent()) return null;
+
+  let response;
+  try {
+    response = await deps.callFunction(FUNCTIONS.HEBREW_CANDIDATES, {
+      work_id: rec.work_id,
+    });
+  } catch {
+    return null;
+  }
+  if (!deps.isCurrent() || !response || typeof response !== "object") return null;
+
+  const candidates = Array.isArray(response.candidates)
+    ? response.candidates.filter((candidate) => candidate && typeof candidate === "object")
+    : [];
+  if (!candidates.length) return null;
+
+  const search = deps.searchBooks ?? searchBooks;
+  const fetchPayload = deps.fetchPayload ?? deps.fetchSimaniaPayload ?? fetchSimaniaPayload;
+  const englishAuthor = String(rec.author ?? "");
+  let searchCount = 0;
+  let detailCount = 0;
+  let searchExhausted = false;
+
+  async function findEdition(candidate, needSound = false) {
+    const title = String(candidate.title ?? "");
+    const author = String(candidate.author ?? "");
+    const shortTitle = mainTitle(title);
+    if (!shortTitle) return null;
+    const queries = [`${shortTitle} ${author}`.trim(), shortTitle];
+    for (const query of queries) {
+      if (searchCount >= 12 || !deps.isCurrent()) {
+        if (searchCount >= 12) searchExhausted = true;
+        return null;
+      }
+      searchCount++;
+      let books;
+      try {
+        books = await search(query, 10);
+      } catch {
+        books = [];
+      }
+      if (!deps.isCurrent()) return null;
+      for (const book of Array.isArray(books) ? books : []) {
+        const id = simaniaIdOf(book);
+        if (id == null || !titleMatch(title, String(book?.title ?? ""))) continue;
+        const agrees = needSound
+          ? soundAgrees(String(book?.author ?? ""), englishAuthor)
+          : authorAgrees(author, String(book?.author ?? ""), englishAuthor);
+        if (agrees) return { id, book };
+      }
+    }
+    return null;
+  }
+
+  for (const rule of ["A", "B", "D", "C"]) {
+    if (!deps.isCurrent()) return null;
+    const ids = new Set();
+    for (const candidate of candidates.filter((item) => item.rule === rule)) {
+      const found = await findEdition(candidate);
+      if (!deps.isCurrent()) return null;
+      if (found) ids.add(found.id);
+    }
+    if (searchExhausted) return null;
+    if (ids.size > 1) return null;
+    if (ids.size === 1) return ids.values().next().value;
+  }
+
+  for (const rule of ["E", "F"]) {
+    if (!deps.isCurrent()) return null;
+    const ids = new Set();
+    for (const candidate of candidates.filter((item) => item.rule === rule)) {
+      const found = await findEdition(candidate, true);
+      if (!deps.isCurrent()) return null;
+      if (found) ids.add(found.id);
+    }
+    if (searchExhausted) return null;
+    if (ids.size > 1) return null;
+    if (ids.size === 1) return ids.values().next().value;
+  }
+
+  if (!deps.isCurrent()) return null;
+  const englishNames = Array.isArray(response.english_names)
+    ? response.english_names.map(String)
+    : [];
+  const scoredById = new Map();
+  for (const candidate of candidates.filter((item) => item.rule === "G").slice(0, 6)) {
+    const found = await findEdition(candidate);
+    if (!deps.isCurrent()) return null;
+    if (searchExhausted) return null;
+    if (!found || scoredById.has(found.id) || detailCount >= 6) continue;
+    detailCount++;
+    let payload;
+    try {
+      payload = await fetchPayload(found.id);
+    } catch {
+      continue;
+    }
+    if (!deps.isCurrent()) return null;
+    if (deps.payloadById instanceof Map) deps.payloadById.set(found.id, payload);
+    const description = String(payload?.details?.description ?? "");
+    scoredById.set(found.id, nameHits(englishNames, description).length);
+  }
+  const scored = [...scoredById].sort((left, right) => right[1] - left[1]);
+  if (!scored[0] || scored[0][1] < 2) return null;
+  if (scored[1] && scored[0][1] === scored[1][1]) return null;
+  return scored[0][0];
+}
+
+/**
  * @param {{
  *   work_id: string,
  *   hebrew_author?: string|null,
@@ -248,21 +381,22 @@ export async function verifyTitleMatch(rec, book, deps) {
  *   isCurrent: () => boolean,
  *   match?: typeof matchHebrewBook,
  *   searchByAuthor?: typeof searchByAuthor,
+ *   searchBooks?: typeof searchBooks,
  *   fetchPayload?: typeof fetchSimaniaPayload,
+ *   fetchSimaniaPayload?: typeof fetchSimaniaPayload,
  *   concurrency?: number,
  * }} deps
  */
 export async function localizeRecommendations(items, deps) {
   const match = deps.match ?? matchHebrewBook;
   const searchByAuthorFn = deps.searchByAuthor ?? searchByAuthor;
-  const fetchPayload = deps.fetchPayload ?? fetchSimaniaPayload;
-  const queue = items.filter(
-    (rec) => rec.english_only && (rec.hebrew_hint?.title || rec.hebrew_author),
-  );
+  const fetchPayload = deps.fetchPayload ?? deps.fetchSimaniaPayload ?? fetchSimaniaPayload;
+  const queue = items.filter((rec) => rec.english_only && rec.simania_id == null);
   async function one(rec) {
+    const payloadById = new Map();
     const hint = rec.hebrew_hint;
     let simaniaId = null;
-    /** @type {"wikidata"|"nli"|null} */
+    /** @type {"wikidata"|"nli"|"nli_author"|null} */
     let source = null;
     if (hint?.title) {
       const book = await match(hint.title, hint.author ?? "");
@@ -293,8 +427,21 @@ export async function localizeRecommendations(items, deps) {
         }
       }
     }
+    // Recommendation/genre view models always carry this field (null when no
+    // author bridge exists). Treat older partial callers that omit it as not
+    // eligible, while still queuing every current English-only card.
+    if (simaniaId == null && Object.hasOwn(rec, "hebrew_author") && deps.isCurrent()) {
+      simaniaId = await localizeFallback(rec, {
+        ...deps,
+        fetchPayload,
+        payloadById,
+      });
+      if (simaniaId != null) source = "nli_author";
+    }
     if (simaniaId == null || source == null || !deps.isCurrent()) return;
-    const simania = await fetchPayload(simaniaId);
+    const simania = payloadById.has(simaniaId)
+      ? payloadById.get(simaniaId)
+      : await fetchPayload(simaniaId);
     if (!deps.isCurrent()) return;
     const res = await deps.callFunction(FUNCTIONS.LINK_EDITION, {
       work_id: rec.work_id,
