@@ -49,6 +49,11 @@ The `search-books` function was removed. Search runs in the browser: under 2 cha
 - In: `{ work_id }`. Out: `{ work_id, hebrew_hint, hebrew_author }`.
 - Behavior: the caller must have a `genre_recommendations` row for `work_id` (404). It computes the hint and the Hebrew author exactly as `recommendations` does for an English-only card, from positive-ID editions only. Provider failures give nulls. It writes nothing. The library screen uses it to localize genre shelf books in the background.
 
+## hebrew-candidates
+
+- In: `{ work_id }`. Out: `{ work_id, candidates: [{ title, author, rule }], english_names }`.
+- Behavior: the caller must have a non-dismissed recommendation or a `genre_recommendations` row for `work_id` (404). It searches NLI by the author's Latin authority name, and uses Wikidata original-language titles and the Hardcover description, to list Hebrew titles that may be this work (rules A-G in `docs/contract.md`). It writes nothing. The browser uses it only as a last fallback for English-only cards, verifies each candidate on Simania, and links through `link-edition` with `source: "nli_author"`.
+
 ## match-by-author
 
 - In: `{ work_id, candidates: [{ simania_id, title, author }] }` (1-8). Out: `{ simania_id, resolve_status }` or nulls.
@@ -56,7 +61,7 @@ The `search-books` function was removed. Search runs in the browser: under 2 cha
 
 ## link-edition
 
-- In: `{ work_id, simania_id, source: "wikidata" | "nli", simania: { details, rating } }`. Out: `{ work_id, simania_id, title, author, cover_url }`.
+- In: `{ work_id, simania_id, source: "wikidata" | "nli" | "nli_author", simania: { details, rating } }`. Out: `{ work_id, simania_id, title, author, cover_url }`.
 - Behavior: the caller must have a non-dismissed recommendation or a `genre_recommendations` row for `work_id` (404 otherwise; each of those rows that exists gets the `simania_id`, or is deleted under the already-on-your-shelves rule). Store the edition with the 30-day rule, link it to the work only while its `work_id` is null, keep an existing link to the same work, and answer 409 if it links to a different work (never relink). If the caller already has that edition, or another edition of the work, on a shelf, delete the recommendation and answer 409 "Already on your shelves.". Otherwise set the caller's recommendation `simania_id`.
 
 ## invite-user

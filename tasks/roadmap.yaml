@@ -555,3 +555,65 @@ sprints:
       '2':
       - npm run check:functions
       - npm run test:functions
+  S12-fallback:
+    name: Catalog fallback for English-only books (NLI by author, Simania verified, never relinks)
+    tasks:
+      S12-T1:
+        file: tasks/sprint-12-fallback/01-nli-author-status.md
+        stage: 1
+        depends_on: []
+      S12-T2:
+        file: tasks/sprint-12-fallback/02-fallback-helpers.md
+        stage: 1
+        depends_on: []
+      S12-T3:
+        file: tasks/sprint-12-fallback/03-hebrew-candidates.md
+        stage: 2
+        depends_on:
+        - S12-T1
+        - S12-T2
+      S12-T4:
+        file: tasks/sprint-12-fallback/04-link-edition-source.md
+        stage: 2
+        depends_on:
+        - S12-T1
+      S12-T5:
+        file: tasks/sprint-12-fallback/05-unlink-fallback.md
+        stage: 2
+        depends_on:
+        - S12-T1
+      S12-T6:
+        file: tasks/sprint-12-fallback/06-browser-fallback.md
+        stage: 3
+        depends_on:
+        - S12-T2
+        - S12-T3
+        - S12-T4
+      S12-T7:
+        file: tasks/sprint-12-fallback/07-refresh-all-queue.md
+        stage: 4
+        depends_on:
+        - S12-T6
+      S12-T8:
+        file: tasks/sprint-12-fallback/08-fallback-gate.md
+        stage: 4
+        depends_on:
+        - S12-T6
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '2':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '3':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '4':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:fallback

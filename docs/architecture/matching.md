@@ -16,6 +16,8 @@ The current implementation in `supabase/functions/_shared/bridges.ts` and `siman
 2. Find that Hebrew title on Simania and keep the closest match above the existing threshold. This step runs in the browser (`localizeRecommendations` in `public/js/recs.js`, using `public/js/simania.js`): the `recommendations` function returns the step 1 result as `hebrew_hint`, and the browser calls `link-edition` for an accepted match. `matchHebrewBook` in `_shared/simania.ts` remains for off-cloud use.
 3. Before calling any provider, check `editions` for a row whose `work_id` is already this work. Reuse it.
 
+4. Fallback, only when steps 1-2 and the author path missed: `hebrew-candidates` lists the author's Hebrew editions from NLI (searched by Latin authority name) with the rule that ties each one to this work. The browser accepts one only with Simania title and author agreement, or with matching character names, and only as a single clear winner. It links with `resolve_status = 'nli_author'` and never relinks. See `docs/contract.md`, "Catalog fallback for English-only books".
+
 ## Normalization
 
 `utils.ts normalize` and `similarity` are authoritative: NFKD, Latin diacritics removed, lower case, a leading English article removed, everything that is not a letter or digit turned into a space. `similarity` is word-set Dice overlap. Display text is never changed. Hebrew final-letter folding and niqqud handling are not implemented; do not add them unless a task asks.

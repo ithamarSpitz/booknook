@@ -289,6 +289,74 @@ Computed in the same `recommendations` run, after the ordinary cards, and stored
 
 Request `GenreHintRequest`: `{"work_id":"..."}`. Response `GenreHintResponse`: `{"work_id":"...","hebrew_hint":{"title":"...","author":"..."}|null,"hebrew_author":"..."|null}`, computed exactly as the `recommendations` function computes `hebrew_hint` and `hebrew_author` for an English-only card (the same `defaultHebrewHint` and `hebrewAuthorFor`, positive-ID editions only). JWT required; the caller must have a `genre_recommendations` row for `work_id` (`404`); bad body `400`; a provider failure gives nulls, not an error. Nothing is written.
 
+### Catalog fallback for English-only books (`hebrew-candidates`)
+
+Measured 2026-11-07, both readers: of 55 English-only books, 23 had a Hebrew edition on Simania that the title and author paths missed. A deterministic probe recovered 21 of them, with no wrong links. It searched NLI by the author's Latin authority name and then found the Hebrew title on Simania. Expected links (the `verify:fallback` cases):
+
+| English (Hardcover) | Simania | rule |
+|---|---|---|
+| Before We Were Strangers | 990620 | A |
+| Better Than the Movies | 1008203 | A |
+| From Lukov with Love | 1005485 | A |
+| The Cheat Sheet (Sarah Adams) | 1010339 | A |
+| To Hate Adam Connor | 989571 | A (NLI spells "Conor") |
+| Little Bear | 3659 | A |
+| Behind Closed Doors (B.A. Paris) | 986532 | A |
+| Hidden Pictures | 1007788 | A |
+| Lexicon (Max Barry) | 973447 | A |
+| The Invisible Life of Addie LaRue | 1005442 | A (Simania author "ו.א. שוואב") |
+| The Kind Worth Killing | 984972 | A |
+| The Last Thing He Told Me | 1004977 | A |
+| The Overnight Guest | 1024242 | A |
+| The Woman in Cabin 10 | 990033 | A |
+| The Women (Kristin Hannah) | 1011037 | A |
+| Snow Crash | 977074 | B |
+| Anxious People | 1003668 | D (NLI original "Folk med Ångest") |
+| A Canticle for Leibowitz | 42259 or 1025481 | E (Simania title "הימנון ללייבוביץ [מהדורת 2003]") |
+| Girl in Landscape | 34027 | G |
+| Small Island (Andrea Levy) | 97143 | G |
+| Never Lie (Freida McFadden) | 1029088 | G |
+
+Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (David Koepp); Behind Closed Doors to 220768 (an Israeli book by another author). Known misses, left English-only: Grass (20895, no Simania description) and Stories of Your Life and Others (42098, no character names). The working probes are in `tasks/sprint-12-fallback/reference/`, a read-only reference that the implementation follows; where they differ from this section, this section wins.
+
+**It is a fallback only.** It runs for a card only after the title path and the author path (`match-by-author`) have both missed, and only while the card is still English-only. It never touches a card that has a `simania_id`. It links only through `link-edition`, so an edition already linked to a different work is never relinked (`409`, a miss).
+
+**Shared helpers (pure, deterministic).**
+- `mainTitle(t)`: remove `[...]` tags, cut at the first `:` or `(`, collapse spaces, trim.
+- `titleMatch(a, b)`: `similarity(mainTitle(a), mainTitle(b)) >= 0.8`, or character-bigram Dice of the two `normalize`d main titles `>= 0.85`.
+- `authorAgrees(hebrewAuthor, simaniaAuthor, englishAuthor)`: `similarity(hebrewAuthor, simaniaAuthor) >= 0.5`, or `nameSoundScore(simaniaAuthor, [englishAuthor]) >= 0.7`, or (when `hebrewAuthor` is non-empty) the last word of the two `normalize`d Hebrew names is equal.
+- `soundAgrees(simaniaAuthor, englishAuthor)`: `nameSoundScore(simaniaAuthor, [englishAuthor]) >= 0.7`.
+- `nameHits(englishNames, hebrewDescription)`: the English names for which some Hebrew description token (Hebrew-letter runs of length ≥ 3, plus the same token without one leading `ו ה ב ל מ ש כ` when longer than 3) has `nameSoundScore(token, [name]) >= 0.85`.
+- Edge Functions cannot import `public/js` (deploy bundles only `supabase/functions`), so there are two copies:
+  - Server: `supabase/functions/_shared/names.ts` (`nameSoundScore`, moved from `scripts/lib/names.ts`, which now re-exports it) and `_shared/fallback-match.ts` (`mainTitle`, `titleMatch`).
+  - Browser: `public/js/names.js` and `public/js/hebrew-fallback.js` (all five helpers).
+  - A parity test (`tests/functions/fallback-parity.test.ts`) runs both copies on the same fixed cases and requires identical results.
+
+**`hebrew-candidates` (Edge Function, server side; NLI, Wikidata and Hardcover answer from Supabase).**
+- Request `HebrewCandidatesRequest` `{"work_id":"..."}`. Response `HebrewCandidatesResponse` `{"work_id":"...","candidates":[{"title":"...","author":"..."|null,"rule":"A"|"B"|"C"|"D"|"E"|"F"|"G"}],"english_names":["..."]}`.
+- JWT is required. The caller must have a non-dismissed recommendation or a `genre_recommendations` row for `work_id` (`404`). Bad body `400`. A provider failure leaves that rule's candidates out, not an error. Nothing is written.
+- From the work: English title `t` = `original_title`, English author `a` = `original_authors[0]`.
+- NLI records: one SRU query `alma.creator all "<last>, <first>"`, built from `a` (drop a final `Jr`/`Jr.`; last word, comma, first word), `maximumRecords=100`. Also one query `alma.creator all "<last>, <first>" AND alma.uniform_title all "<mainTitle(t)>"`. Keep records whose 245 title has a Hebrew letter. Hebrew title = 245 before ` / `, without `[...]`, trailing punctuation trimmed. Hebrew author = 100 `a` without dates or a role word, reordered from `Last, First` to `First Last`. Original = 240 without a trailing `. Hebrew`.
+- Candidates, in this order, without duplicates, at most 8:
+  - **A.** Records whose original passes `titleMatch(original, t)`.
+  - **B.** Records with no original whose Hebrew title has `nameSoundScore(hebrewTitle, [mainTitle(t)]) >= 0.85`.
+  - **D.** Records whose original passes `titleMatch` with one of the work's original-language titles on Wikidata: the item found by `wbsearchentities` for `mainTitle(t)` whose `P50` author's English label agrees with `a` (`similarity >= 0.5` or the same last word); its `P1476` values and its non-Hebrew labels.
+  - **C.** Records whose Hebrew title passes `titleMatch` with `wikidataHebrew(t, a)`.
+  - **E.** `nliHebrew(t, a)`'s title, with `author` null.
+  - **F.** `wikidataHebrew(t, a)`'s title, with `author` null, when C found no record.
+  - **G.** Records with no original (not already listed). `english_names` holds the capitalized words of length ≥ 3 in the Hardcover `description` that are not the first word of a sentence. It leaves out a fixed stop list (articles, pronouns, months, "New York Times", "Bestselling", "Author", "Novel", "Award", number words), the words of `t`, and the words of `a`.
+- Bounds: at most 2 NLI, 4 Wikidata and 1 Hardcover requests per call, within 20 seconds.
+
+**Browser decision (`localizeFallback` in `public/js/recs.js`).** It runs after the existing paths miss, for every English-only card, including ones with no `hebrew_hint` or `hebrew_author`.
+1. Call `hebrew-candidates`.
+2. For rules A-D (and C), in order, for each candidate: `searchBooks` for `"<mainTitle(title)> <author>"`, then for `mainTitle(title)` alone (limit 10). Take the first positive-ID result with `titleMatch(candidate.title, result.title)` and `authorAgrees(candidate.author ?? "", result.author, englishAuthor)`. The first rule tier that yields a result decides. If that tier yields two different Simania IDs, stop with no link.
+3. Rules E and F: the same search, but the result must pass `titleMatch` and `soundAgrees`.
+4. Rule G: find each G candidate on Simania as in step 2 (at most 6), and read the details `description` of each found edition. The edition with the most `nameHits(english_names, description)` wins only if it has at least 2 hits and strictly more than the next one.
+5. On a decision, fetch the payload and call `link-edition` with `source: "nli_author"`. Any miss, tie, failure or `409` leaves the card English-only.
+- Bounds per card: at most 12 Simania searches and 6 detail reads.
+
+**`resolve_status` gains `nli_author`** (linked by this fallback). `link-edition` accepts `source` `nli_author`. **`npm run unlink:fallback`** (`scripts/unlink-fallback.ts`, off-cloud, dry-run by default) lists every edition with `resolve_status = 'nli_author'`: `simania_id`, Hebrew title, work `hardcover_id` and English title. With `--apply` it sets `work_id = null`, `resolve_status = 'pending'` and `resolved_at = null`, and nulls `simania_id` on the recommendation and genre rows that point to those editions, in one transaction. With `--apply --simania <id>` it does the same for one edition.
+
 ### `match-by-author`
 
 Request `MatchByAuthorRequest`: `{"work_id":"...","candidates":[{"simania_id":97171,"title":"סחרור","author":"רוברט צ'רלס וילסון"}]}`; at most 8 candidates (`400` otherwise). Response `MatchByAuthorResponse`: `{"simania_id":97171,"resolve_status":"wikidata"}` or `{"simania_id":null,"resolve_status":null}`.
