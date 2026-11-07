@@ -42,7 +42,7 @@ Contract: "Catalog fallback for English-only books", **Shared helpers**. Referen
 
 1. `mainTitle("הימנון ללייבוביץ [מהדורת 2003]")` is `"הימנון ללייבוביץ"`, and `mainTitle("לקסיקון : כשמילים יכולות להרוג")` is `"לקסיקון"`.
 2. `titleMatch("To hate Adam Conor", "To Hate Adam Connor")` is true; `titleMatch("Aurora", "Blackout")` is false.
-3. `authorAgrees("", "ו.א. שוואב", "V. E. Schwab")`, `authorAgrees("מקס בארי", "מקס ברי", "Max Barry")` and `soundAgrees("וולטר מ. מילר הבן", "Walter M. Miller Jr.")` are true; `soundAgrees("דיוויד קופ", "Kim Stanley Robinson")` is false.
+3. `authorAgrees("ו. א. שוואב", "ו.א. שוואב", "V. E. Schwab")` (same last word; the NLI candidate always carries its Hebrew author), `authorAgrees("מקס בארי", "מקס ברי", "Max Barry")` and `soundAgrees("וולטר מ. מילר הבן", "Walter M. Miller Jr.")` are true; `soundAgrees("דיוויד קופ", "Kim Stanley Robinson")` is false.
 4. `nameHits(["Tricia","Ethan","Hale"], "<a Hebrew description mentioning טרישה and איתן>")` gives Tricia and Ethan.
 5. The existing name-sound tests still pass.
 
