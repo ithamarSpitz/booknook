@@ -61,15 +61,15 @@
   .shelf-head{position:absolute;right:38px;bottom:7px;z-index:3;gap:8px;padding:2px 12px;background:rgba(255,255,255,.88);border-radius:3px}
   .shelf-head h2{font:700 14px "Assistant",sans-serif;color:var(--ink)}
   .shelf-head span{font-size:12px;font-weight:600;color:var(--muted);opacity:1}
-  .rowwrap{--gap:12px}
+  .rowwrap{--gap:16px}
   .row{padding:30px 0 0;align-items:flex-end}
   .cover{border-radius:0}
   .book:hover .cover{transform:translateY(-6px)}
   .knob{color:#3b2a1b}
   .add{border-color:#b9ab95;color:var(--ink);background:transparent}
   .book{position:relative}
-  .tile-stars{position:absolute;top:-18px;right:0;left:0;z-index:1;height:11px;display:flex;direction:rtl;align-items:center;justify-content:space-between;color:rgba(122,85,48,.38);pointer-events:none}
-  .tile-stars svg{display:block;width:11px;height:11px;overflow:visible;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round}
+  .tile-stars{position:absolute;top:-21px;right:0;left:0;z-index:1;height:14px;display:flex;direction:rtl;align-items:center;justify-content:center;gap:2px;color:rgba(122,85,48,.38);pointer-events:none}
+  .tile-stars svg{display:block;width:14px;height:14px;overflow:visible;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round}
   .tile-stars svg.on{color:#c58a2c;fill:currentColor;stroke:currentColor}
   .book .t{position:absolute;top:8px;right:6px;left:6px;z-index:2;display:block;margin:0;padding:6px 9px;white-space:normal;
      background:#fffdf8;border-radius:3px;box-shadow:-3px 3px 0 rgba(90,55,20,.22);opacity:0;transform:translateY(-4px);transition:opacity .18s,transform .18s;pointer-events:none}
@@ -96,7 +96,7 @@
     .shelf{padding:0 4px}
     .board{margin:0 -12px;height:24px}
     .shelf-head{right:12px;bottom:5px}
-    .rowwrap{--per:3.5;--gap:8px}
+    .rowwrap{--per:3.5;--gap:11px}
     .row{padding-top:24px}
     .plus .cover{font-size:36px}
   }
