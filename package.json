@@ -18,6 +18,7 @@
     "verify:localization": "deno run --allow-net --allow-env --allow-read scripts/verify-localization.ts",
     "audit:catalog": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/audit-catalog.ts",
     "repair:links": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/repair-links.ts",
+    "unlink:fallback": "deno run --allow-net --allow-env --allow-read --allow-sys scripts/unlink-fallback.ts",
     "verify:repair": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/verify-repair.ts",
     "refresh:all": "deno run --allow-net --allow-env --allow-read --allow-run --allow-sys scripts/refresh-all.ts"
   },
