@@ -634,6 +634,10 @@ sprints:
         depends_on:
         - S13-T1
         - S13-T2
+      S13-T4:
+        file: tasks/sprint-13-fallback-g/04-shelf-stars-spacing.md
+        stage: 2
+        depends_on: []
     stage_verification:
       '1':
       - npm run check:functions
