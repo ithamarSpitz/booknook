@@ -44,7 +44,10 @@ Deno.test("refresh-all dry run only gets keys, readers, and before counts", asyn
     },
     countReaderRows: async (_sql, id) => {
       calls.push(`counts:${id}`);
-      return { ...zeroCounts, englishRecommendations: id === "reader-1" ? 2 : 3 };
+      return {
+        ...zeroCounts,
+        englishRecommendations: id === "reader-1" ? 2 : 3,
+      };
     },
     readerToken: async () => {
       calls.push("SESSION-MUST-NOT-RUN");
@@ -186,6 +189,97 @@ Deno.test("a step 3 book failure is counted and later genre books continue", asy
   assertEquals(JSON.parse(logs[0]), summary);
 });
 
+Deno.test("an English-only card without a hint or Hebrew author is localized", async () => {
+  const db = fakeSql();
+  const localized: Record<string, unknown>[] = [];
+  const functionCalls: Array<{ token: string; name: string }> = [];
+
+  await refreshReader({
+    keys,
+    sql: db.sql,
+    readerToken: async () => "reader-token",
+    callAs: async (_keys, token, name) => {
+      functionCalls.push({ token, name });
+      return name === "recommendations"
+        ? {
+          recommendations: [{
+            work_id: "fallback-work",
+            english_only: true,
+            simania_id: null,
+            hebrew_hint: null,
+            hebrew_author: null,
+          }],
+        }
+        : {};
+    },
+    fetchSimaniaPayload: async () => ({ details: {}, rating: null }),
+    localizeRecommendations: async (items, deps) => {
+      localized.push(...items);
+      await deps.callFunction("hebrew-candidates", {
+        work_id: items[0]?.work_id,
+      });
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    listBareEditionIds: async () => [],
+    sleep: async () => {},
+    log: () => {},
+  }, { id: "reader", email: "reader@example.test" });
+
+  assertEquals(localized.map((item) => item.work_id), ["fallback-work"]);
+  assertEquals(functionCalls, [
+    { token: "reader-token", name: "recommendations" },
+    { token: "reader-token", name: "hebrew-candidates" },
+  ]);
+});
+
+Deno.test("fallbackLinked counts only successful nli_author links", async () => {
+  const db = fakeSql();
+  const summary = await refreshReader({
+    keys,
+    sql: db.sql,
+    readerToken: async () => "reader-token",
+    callAs: async (_keys, _token, name, body) => {
+      if (name === "recommendations") {
+        return {
+          recommendations: [
+            { work_id: "fallback", english_only: true },
+            { work_id: "ordinary", english_only: true },
+          ],
+        };
+      }
+      if (name === "link-edition") {
+        return { simania_id: (body as Record<string, unknown>).simania_id };
+      }
+      return {};
+    },
+    fetchSimaniaPayload: async () => ({ details: {}, rating: null }),
+    localizeRecommendations: async (items, deps) => {
+      for (const [index, item] of items.entries()) {
+        await deps.callFunction("link-edition", {
+          work_id: item.work_id,
+          simania_id: index + 1,
+          source: index === 0 ? "nli_author" : "wikidata",
+        });
+        deps.onLinked(String(item.work_id), {
+          simania_id: index + 1,
+          title: "linked",
+          author: null,
+          cover_url: null,
+        });
+      }
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    listBareEditionIds: async () => [],
+    sleep: async () => {},
+    log: () => {},
+  }, { id: "reader", email: "reader@example.test" });
+
+  assertEquals(summary.booksLinked, 2);
+  assertEquals(summary.fallbackLinked, 1);
+});
+
 Deno.test("reader session failure exits 2 without printing tokens or keys", async () => {
   const db = fakeSql();
   const errors: string[] = [];
@@ -258,6 +352,7 @@ Deno.test("summary reports before/after, links, fills, and failures from fakes",
     genreBefore: 3,
     genreAfter: 1,
     booksLinked: 1,
+    fallbackLinked: 0,
     editionsFilled: 1,
     failed: 1,
   });

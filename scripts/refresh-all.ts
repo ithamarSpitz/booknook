@@ -37,6 +37,7 @@ export interface ReaderSummary {
   genreBefore: number;
   genreAfter: number;
   booksLinked: number;
+  fallbackLinked: number;
   editionsFilled: number;
   failed: number;
 }
@@ -203,13 +204,15 @@ export async function refreshReader(
     if (!Array.isArray(response?.recommendations)) {
       throw new Error("Recommendations response has an invalid shape.");
     }
-    recommendations = response.recommendations.filter((item) => record(item)) as
-      Record<string, unknown>[];
+    recommendations = response.recommendations.filter((item) =>
+      record(item)
+    ) as Record<string, unknown>[];
   } catch {
     failed++;
   }
 
   const linkedWorks = new Set<string>();
+  const fallbackLinkedWorks = new Set<string>();
   let simaniaStarted = false;
   const throttledFetch: FetchPayload = async (simaniaId, fetchImpl) => {
     if (simaniaStarted) await deps.sleep(1_000);
@@ -224,7 +227,16 @@ export async function refreshReader(
     let observedFailures = 0;
     const guardedCall = async (name: string, body: Record<string, unknown>) => {
       try {
-        return await callFunction(name, body);
+        const response = await callFunction(name, body);
+        if (
+          name === FUNCTIONS.LINK_EDITION &&
+          body.source === "nli_author" &&
+          typeof body.work_id === "string" &&
+          Number(record(response)?.simania_id) === Number(body.simania_id)
+        ) {
+          fallbackLinkedWorks.add(body.work_id);
+        }
+        return response;
       } catch {
         observedFailures++;
         throw new Error("Reader function call failed.");
@@ -253,9 +265,7 @@ export async function refreshReader(
   };
 
   const localizableCards = recommendations.filter((item) =>
-    item.english_only === true &&
-    (Boolean(record(item.hebrew_hint)?.title) ||
-      typeof item.hebrew_author === "string" && item.hebrew_author.length > 0)
+    item.english_only === true
   );
   await localize(localizableCards);
 
@@ -309,6 +319,7 @@ export async function refreshReader(
     genreBefore: before.englishGenres,
     genreAfter: after.englishGenres,
     booksLinked: linkedWorks.size,
+    fallbackLinked: fallbackLinkedWorks.size,
     editionsFilled,
     failed,
   };
