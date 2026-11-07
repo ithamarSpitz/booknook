@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<searchRetrieveResponse>
+  <records>
+    <record>
+      <recordData>
+        <record xmlns="http://www.loc.gov/MARC21/slim">
+          <datafield tag="100">
+            <subfield code="a">סאגר, ריילי</subfield>
+            <subfield code="9">heb</subfield>
+            <subfield code="e">PreferredLanguageHeading</subfield>
+          </datafield>
+          <datafield tag="245">
+            <subfield code="a">הבית מעבר לאגם /</subfield>
+          </datafield>
+        </record>
+      </recordData>
+    </record>
+  </records>
+</searchRetrieveResponse>
