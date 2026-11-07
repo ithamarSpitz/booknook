@@ -138,3 +138,47 @@ export function englishOnlyRecommendations(sql: Sql) {
       and r.simania_id is null
   `;
 }
+
+export function fallbackPopulationRows(sql: Sql) {
+  return sql`
+    select
+      source,
+      user_id,
+      display_name,
+      work_id,
+      hardcover_id,
+      original_title,
+      original_authors
+    from (
+      select
+        'recommendations'::text as source,
+        r.user_id,
+        p.display_name,
+        r.work_id,
+        w.hardcover_id,
+        w.original_title,
+        w.original_authors
+      from public.recommendations as r
+      inner join public.works as w on w.id = r.work_id
+      inner join public.profiles as p on p.id = r.user_id
+      where r.dismissed = false
+        and r.simania_id is null
+
+      union all
+
+      select
+        'genre_recommendations'::text as source,
+        g.user_id,
+        p.display_name,
+        g.work_id,
+        w.hardcover_id,
+        w.original_title,
+        w.original_authors
+      from public.genre_recommendations as g
+      inner join public.works as w on w.id = g.work_id
+      inner join public.profiles as p on p.id = g.user_id
+      where g.simania_id is null
+    ) as population
+    order by original_title, work_id, user_id, source
+  `;
+}

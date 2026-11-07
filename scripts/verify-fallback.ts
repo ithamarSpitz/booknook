@@ -7,6 +7,19 @@ import {
 import { hebrewCandidates } from "../supabase/functions/_shared/hebrew-candidates.ts";
 import { localizeFallback } from "../public/js/recs.js";
 import { fetchSimaniaPayload, searchBooks } from "../public/js/simania.js";
+import {
+  authorAgrees,
+  mainTitle,
+  nameHits,
+  soundAgrees,
+  titleMatch,
+} from "../public/js/hebrew-fallback.js";
+import {
+  fallbackPopulationRows,
+  loadOperatorEnv,
+  openProdDb,
+} from "./lib/prod-db.ts";
+import type { HebrewCandidate } from "../supabase/functions/_shared/hebrew-candidates.ts";
 
 type BookSpec = {
   title: string;
@@ -21,6 +34,8 @@ type GuardCase = BookSpec & {
   forbidden: number;
 };
 
+type NoDecisionCase = BookSpec;
+
 type OptionalCase = BookSpec & {
   allowed: number;
 };
@@ -29,6 +44,24 @@ type ProbeResult = {
   hardcoverId: number | null;
   decision: number | null;
   providerErrors: string[];
+};
+
+type PopulationRow = {
+  source: string;
+  user_id: string;
+  display_name: string;
+  work_id: string;
+  hardcover_id: number | null;
+  original_title: string;
+  original_authors: string[];
+};
+
+type PopulationBook = {
+  workId: string;
+  hardcoverId: number;
+  title: string;
+  author: string;
+  readers: Map<string, string>;
 };
 
 const EXPECTED_CASES: ExpectedCase[] = [
@@ -90,6 +123,13 @@ const EXPECTED_CASES: ExpectedCase[] = [
 const GUARD_CASES: GuardCase[] = [
   { title: "Aurora", author: "Kim Stanley Robinson", forbidden: 1013521 },
   { title: "Behind Closed Doors", author: "B.A. Paris", forbidden: 220768 },
+  { title: "Pretty Girls", author: "Karin Slaughter", forbidden: 41212 },
+  { title: "The Only One Left", author: "Riley Sager", forbidden: 1028558 },
+];
+
+const NO_DECISION_CASES: NoDecisionCase[] = [
+  { title: "The Lathe of Heaven", author: "Ursula K. Le Guin" },
+  { title: "Watchers", author: "Dean Koontz" },
 ];
 
 const OPTIONAL_CASES: OptionalCase[] = [
@@ -292,10 +332,297 @@ async function probe(spec: BookSpec): Promise<ProbeResult> {
   }
 }
 
+function simaniaIdOf(book: unknown): number | null {
+  if (!book || typeof book !== "object") return null;
+  const value = Number(
+    (book as { id?: unknown; bookId?: unknown }).id ??
+      (book as { bookId?: unknown }).bookId,
+  );
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function matchingSearchBook(
+  candidate: HebrewCandidate,
+  englishAuthor: string,
+  decision: number,
+  searches: Map<string, unknown[]>,
+): { id: number; title: string; author: string } | null {
+  const shortTitle = mainTitle(candidate.title);
+  const queries = [
+    `${shortTitle} ${candidate.author ?? ""}`.trim(),
+    shortTitle,
+  ];
+  for (const query of queries) {
+    for (const raw of searches.get(query) ?? []) {
+      const book = raw as { title?: unknown; author?: unknown };
+      if (simaniaIdOf(book) !== decision) continue;
+      const title = String(book.title ?? "");
+      const author = String(book.author ?? "");
+      if (!titleMatch(candidate.title, title)) continue;
+      const agrees = candidate.rule === "E" || candidate.rule === "F"
+        ? soundAgrees(author, englishAuthor)
+        : authorAgrees(candidate.author ?? "", author, englishAuthor);
+      if (agrees) return { id: decision, title, author };
+    }
+  }
+  return null;
+}
+
+async function populationDecision(spec: PopulationBook) {
+  const providerErrors: string[] = [];
+  const searches = new Map<string, unknown[]>();
+  const payloads = new Map<number, unknown>();
+  const originalFetch = globalThis.fetch;
+  const remember = (message: string) => {
+    if (!providerErrors.includes(message)) providerErrors.push(message);
+  };
+  const trackedFetch: typeof fetch = async (input, init) => {
+    const provider = providerName(input);
+    try {
+      const response = await originalFetch(input, init);
+      if (!response.ok) remember(`${provider} HTTP ${response.status}`);
+      return response;
+    } catch (error) {
+      remember(`${provider} ${error instanceof Error ? error.name : "Error"}`);
+      throw error;
+    }
+  };
+
+  globalThis.fetch = trackedFetch;
+  try {
+    let book;
+    let detailed;
+    try {
+      [book] = await hardcoverBooks([spec.hardcoverId]);
+      [detailed] = await hardcoverEnglishBooks([spec.hardcoverId]);
+    } catch (error) {
+      throw new Error(
+        `Hardcover failure for ${spec.title}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    if (!book || !detailed) {
+      throw new Error(`Hardcover failure for ${spec.title}: missing book data`);
+    }
+
+    const englishAuthor = authors(book)[0] ?? spec.author;
+    const response = await hebrewCandidates({
+      title: book.title,
+      author: englishAuthor,
+      description: detailed.description ?? null,
+    }, { fetch: trackedFetch });
+    const rec = {
+      work_id: spec.workId,
+      simania_id: null,
+      title: book.title,
+      author: englishAuthor,
+      cover_url: book.image?.url ?? null,
+      score: 0,
+      because: [],
+      because_titles: [],
+      shared_tags: [],
+      dismissed: false,
+      generated_at: "",
+      english_only: true,
+      can_add: true,
+      hebrew_hint: null,
+      hebrew_author: null,
+    };
+    const decision = await localizeFallback(rec, {
+      isCurrent: () => true,
+      callFunction: async () => ({ work_id: spec.workId, ...response }),
+      searchBooks: async (query: string, limit?: number) => {
+        try {
+          const books = await searchBooks(query, limit, trackedFetch);
+          searches.set(query, books);
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          return books;
+        } catch (error) {
+          remember(
+            `Simania search ${error instanceof Error ? error.name : "Error"}`,
+          );
+          throw error;
+        }
+      },
+      fetchPayload: async (simaniaId: number) => {
+        try {
+          const payload = await fetchSimaniaPayload(simaniaId, trackedFetch);
+          payloads.set(simaniaId, payload);
+          return payload;
+        } catch (error) {
+          remember(
+            `Simania details ${error instanceof Error ? error.name : "Error"}`,
+          );
+          throw error;
+        }
+      },
+    });
+
+    const decidedId = Number.isSafeInteger(decision) && Number(decision) > 0
+      ? Number(decision)
+      : null;
+    let rule: string | null = null;
+    let hebrewTitle: string | null = null;
+    if (decidedId != null) {
+      for (const tier of ["A", "B", "D", "C", "E", "F"] as const) {
+        for (
+          const candidate of response.candidates.filter((item) =>
+            item.rule === tier
+          )
+        ) {
+          const match = matchingSearchBook(
+            candidate,
+            englishAuthor,
+            decidedId,
+            searches,
+          );
+          if (match) {
+            rule = tier;
+            hebrewTitle = match.title;
+            break;
+          }
+        }
+        if (rule) break;
+      }
+      if (!rule) rule = "G";
+    }
+
+    const gEditions = [...payloads].map(([simaniaId, raw]) => {
+      const payload = raw as {
+        details?: { title?: unknown; description?: unknown };
+      };
+      return {
+        simania_id: simaniaId,
+        title: String(payload.details?.title ?? ""),
+        all_hits: nameHits(
+          response.english_names,
+          String(payload.details?.description ?? ""),
+        ),
+      };
+    });
+    const gEvidence = gEditions.map((edition) => ({
+      ...edition,
+      distinctive_hits: edition.all_hits.filter((name) =>
+        !gEditions.some((other) =>
+          other.simania_id !== edition.simania_id &&
+          other.all_hits.includes(name)
+        )
+      ),
+    }));
+    if (rule === "G") {
+      hebrewTitle = gEvidence.find((item) =>
+        item.simania_id === decidedId
+      )?.title ?? null;
+    }
+
+    return {
+      decision: decidedId,
+      rule,
+      hebrewTitle,
+      gEvidence,
+      providerErrors,
+    };
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+async function runPopulation(): Promise<void> {
+  loadOperatorEnv();
+  const sql = await openProdDb({ readOnly: true });
+  try {
+    const rows = await fallbackPopulationRows(
+      sql,
+    ) as unknown as PopulationRow[];
+    const books = new Map<string, PopulationBook>();
+    for (const row of rows) {
+      if (row.hardcover_id == null) {
+        throw new Error(`Work ${row.work_id} has no Hardcover ID.`);
+      }
+      let book = books.get(row.work_id);
+      if (!book) {
+        book = {
+          workId: row.work_id,
+          hardcoverId: row.hardcover_id,
+          title: row.original_title,
+          author: row.original_authors[0] ?? "",
+          readers: new Map(),
+        };
+        books.set(row.work_id, book);
+      }
+      book.readers.set(row.user_id, row.display_name);
+    }
+
+    let decided = 0;
+    let errors = 0;
+    const byRule: Record<string, number> = {};
+    for (const book of books.values()) {
+      let result;
+      try {
+        result = await populationDecision(book);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.startsWith("Hardcover failure")) throw error;
+        errors++;
+        console.log(JSON.stringify({
+          title: book.title,
+          author: book.author,
+          readers: [...book.readers.values()].sort(),
+          simania_id: null,
+          hebrew_title: null,
+          rule: null,
+          errors: [message],
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
+      if (result.decision != null) decided++;
+      if (result.rule) byRule[result.rule] = (byRule[result.rule] ?? 0) + 1;
+      if (result.providerErrors.length) errors++;
+      console.log(JSON.stringify({
+        title: book.title,
+        author: book.author,
+        readers: [...book.readers.values()].sort(),
+        simania_id: result.decision,
+        hebrew_title: result.hebrewTitle,
+        rule: result.rule,
+        ...(result.gEvidence.length ? { rule_g: result.gEvidence } : {}),
+        ...(result.providerErrors.length
+          ? { errors: result.providerErrors }
+          : {}),
+      }));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    console.log(JSON.stringify({
+      totals: { books: books.size, decided, by_rule: byRule, errors },
+    }));
+  } finally {
+    await sql.end();
+  }
+}
+
 loadHardcoverApiKey();
 
+if (Deno.args.includes("--population")) {
+  try {
+    await runPopulation();
+    Deno.exit(0);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    Deno.exit(2);
+  }
+}
+
 const results = new Map<string, ProbeResult>();
-for (const spec of [...EXPECTED_CASES, ...GUARD_CASES, ...OPTIONAL_CASES]) {
+for (
+  const spec of [
+    ...EXPECTED_CASES,
+    ...GUARD_CASES,
+    ...NO_DECISION_CASES,
+    ...OPTIONAL_CASES,
+  ]
+) {
   const key = caseKey(spec);
   if (!results.has(key)) results.set(key, await probe(spec));
 }
@@ -355,6 +682,17 @@ for (const spec of GUARD_CASES) {
     `${
       pass ? "PASS" : "FAIL"
     } ${spec.title} must not decide ${spec.forbidden}; decided ${
+      displayId(result.decision)
+    }${errorsSuffix(result.providerErrors)}`,
+  );
+}
+
+for (const spec of NO_DECISION_CASES) {
+  const result = results.get(caseKey(spec))!;
+  const pass = result.decision == null;
+  if (!pass) failed = true;
+  console.log(
+    `${pass ? "PASS" : "FAIL"} ${spec.title} must decide nothing; decided ${
       displayId(result.decision)
     }${errorsSuffix(result.providerErrors)}`,
   );
