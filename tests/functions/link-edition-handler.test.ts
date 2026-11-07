@@ -65,6 +65,8 @@ const valid = {
   simania,
 };
 
+const nliAuthor = { ...valid, source: "nli_author" };
+
 Deno.test("link-edition stores the supplied edition, links it and localizes the recommendation", async () => {
   const { db, handler } = setup();
   const response = await handler(request(valid));
@@ -98,6 +100,44 @@ Deno.test("link-edition never relinks an edition of another work", async () => {
   assertEquals(response.status, 409);
   assertEquals(db.tables.editions[0].work_id, "work-2");
   assertEquals(db.tables.recommendations[0].simania_id, null);
+});
+
+Deno.test("link-edition records an nli_author fallback link", async () => {
+  const { db, handler } = setup();
+  const response = await handler(request(nliAuthor));
+  assertEquals(response.status, 200);
+  assertEquals(db.tables.editions[0].work_id, "work-1");
+  assertEquals(db.tables.editions[0].resolve_status, "nli_author");
+});
+
+Deno.test("link-edition nli_author never relinks an edition of another work", async () => {
+  const existing = edition({
+    simania_id: 77,
+    work_id: "work-2",
+    resolve_status: "nli",
+    details_at: new Date().toISOString(),
+  });
+  const { db, handler } = setup([existing]);
+  const before = structuredClone(db.tables.editions[0]);
+  const response = await handler(request(nliAuthor));
+  assertEquals(response.status, 409);
+  assertEquals(db.tables.editions[0], before);
+  assertEquals(db.tables.recommendations[0].simania_id, null);
+});
+
+Deno.test("link-edition nli_author keeps the status of an existing same-work link", async () => {
+  const { db, handler } = setup([
+    edition({
+      simania_id: 77,
+      work_id: "work-1",
+      resolve_status: "wikidata",
+      details_at: new Date().toISOString(),
+    }),
+  ]);
+  const response = await handler(request(nliAuthor));
+  assertEquals(response.status, 200);
+  assertEquals(db.tables.editions[0].resolve_status, "wikidata");
+  assertEquals(db.tables.recommendations[0].simania_id, 77);
 });
 
 Deno.test("link-edition requires a non-dismissed recommendation of the caller", async () => {
