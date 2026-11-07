@@ -35,7 +35,7 @@ Contract: "Catalog fallback for English-only books", the **G** bullet (stop list
 
 # Tests (`tests/functions/hebrew-candidates.test.ts`)
 
-1. The Only One Left's description gives `english_names` with Lenora and Kit,, without Hope, Hung, End or Took.
+1. The Only One Left's description gives `english_names` with Lenora and Kit, without Hope, Hung, End or Took.
 2. Pretty Girls: Claire, Lydia, Julia and Atlanta are kept. Never Lie: Tricia, Ethan and Hale are kept, and Provided and Amazon are dropped.
 3. A MARC 100 whose subfields are `ריילי` / `heb PreferredLanguageHeading` / `סאגר` (build the fixture so that subfield `a` is `סאגר, ריילי`) gives author `ריילי סאגר`.
 4. Wikidata answers `429` and then `200`: rule D is still produced. `429` twice: rule D is dropped and the others are kept.
