@@ -617,3 +617,30 @@ sprints:
       - npm run test:functions
       - npm run test:web
       - npm run verify:fallback
+  S13-fallback-g:
+    name: Harden catalog fallback rule G (distinctive names, stop words, geresh tokens, author parsing, Wikidata retry) and population review
+    tasks:
+      S13-T1:
+        file: tasks/sprint-13-fallback-g/01-candidates-hardening.md
+        stage: 1
+        depends_on: []
+      S13-T2:
+        file: tasks/sprint-13-fallback-g/02-rule-g-distinctive.md
+        stage: 1
+        depends_on: []
+      S13-T3:
+        file: tasks/sprint-13-fallback-g/03-gate-population.md
+        stage: 2
+        depends_on:
+        - S13-T1
+        - S13-T2
+    stage_verification:
+      '1':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '2':
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      - npm run verify:fallback
