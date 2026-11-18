@@ -99,7 +99,18 @@ RLS: all operations where `user_id = auth.uid()`.
 | dismissed | boolean not null default false | |
 | generated_at | timestamptz | |
 
-RLS: select where `user_id = auth.uid()`; update only of `dismissed` (column-level grant or trigger). Rows written by the function with the service role.
+RLS: select where `user_id = auth.uid()`; clients have no write grant. Rows are written by the function with the service role, and `dismissed` is set only by `dismiss_work`.
+
+## dismissed_works
+
+| column | type | note |
+|---|---|---|
+| user_id | uuid references auth.users on delete cascade | PK with work_id |
+| work_id | uuid references works on delete cascade | |
+| kind | text check in (`hide`, `not_my_type`) | `hide` = "הסר", weight 0; `not_my_type` = "לא הסגנון שלי", negative seed with weight 5 |
+| dismissed_at | timestamptz | |
+
+RLS: select where `user_id = auth.uid()`; clients have no write grants. Writes go only through `dismiss_work` and `restore_work`.
 
 ## search_cache
 
@@ -145,3 +156,5 @@ Filled only by a trigger on `shelf_books`, so every path is recorded the same wa
 - `delete_shelf(p_shelf_id uuid)` RPC: custom shelves only; moves its books to the end of `want`, then deletes it.
 - `remove_book(p_simania_id int)` RPC: deletes the caller's shelf_books row and closes the position gap.
 - `set_rating(p_simania_id int, p_rating smallint)` RPC: sets the caller's 1-5 rating for a shelved book on any shelf; null clears it.
+- `dismiss_work(p_work_id uuid, p_kind text)` RPC: upserts the caller's dismissal and removes the work from current recommendation results.
+- `restore_work(p_work_id uuid)` RPC: removes the caller's dismissal so the work may be recommended again after regeneration.
