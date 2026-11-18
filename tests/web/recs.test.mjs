@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { SHELF_KINDS } from "../../public/js/contract.js";
+import { RPCS, SHELF_KINDS } from "../../public/js/contract.js";
 import {
   ENGLISH_ONLY_NOTE,
   LIBRARY_MOVE_LABEL,
   LIBRARY_REMOVE_LABEL,
   RECS_MOVE_LABEL,
+  RECS_NOT_MY_TYPE_LABEL,
   RECS_REMOVE_LABEL,
   addBookRequestForRecommendation,
   applyRecsCardChrome,
@@ -368,11 +369,16 @@ function createFakeOverlay(shelves = [{ id: "reading", name: "קורא עכשי�
   const removeBtn = createEl("button", "bk-remove");
   removeBtn.ownerDocument = doc;
   removeBtn.textContent = LIBRARY_REMOVE_LABEL;
-  actions.append(moveLabel, removeBtn);
+  const notMyTypeBtn = createEl("button", "bk-not-my-type");
+  notMyTypeBtn.ownerDocument = doc;
+  notMyTypeBtn.textContent = RECS_NOT_MY_TYPE_LABEL;
+  notMyTypeBtn.hidden = true;
+  actions.append(moveLabel, removeBtn, notMyTypeBtn);
   overlay.append(actions);
   overlay._select = select;
   overlay._move = moveLabel;
   overlay._remove = removeBtn;
+  overlay._notMyType = notMyTypeBtn;
   return overlay;
 }
 
@@ -400,6 +406,8 @@ describe("shared card chrome", () => {
     assert.equal(overlay.querySelector(".bk-remove"), removeBtn);
     assert.equal(firstText(overlay._move), RECS_MOVE_LABEL);
     assert.equal(removeBtn.textContent, RECS_REMOVE_LABEL);
+    assert.equal(overlay._notMyType.textContent, RECS_NOT_MY_TYPE_LABEL);
+    assert.equal(overlay._notMyType.hidden, false);
     assert.equal(select.childNodes[0].value, "");
     assert.equal(select.value, "");
 
@@ -408,6 +416,7 @@ describe("shared card chrome", () => {
     assert.equal(overlay.querySelector(".bk-remove"), removeBtn);
     assert.equal(firstText(overlay._move), LIBRARY_MOVE_LABEL);
     assert.equal(removeBtn.textContent, LIBRARY_REMOVE_LABEL);
+    assert.equal(overlay._notMyType.hidden, true);
     assert.equal(overlay._move.hidden, false);
     assert.equal(overlay.querySelector(".bk-rec-note"), null);
   });
@@ -715,9 +724,9 @@ describe("shared card chrome", () => {
           return { book: { simania_id: body.simania_id ?? -body.hardcover_id, title: "Spin" } };
         },
         getClient: () => ({
-          from() {
-            calls.push(["dismiss"]);
-            return { update: () => ({ eq: async () => ({ error: null }) }) };
+          rpc: async (name, args) => {
+            calls.push([name, args]);
+            return { error: null };
           },
         }),
       },
@@ -746,23 +755,20 @@ describe("shared card chrome", () => {
     can_add: true,
   };
 
-  it("allowDismiss: false hides the dismiss button, ignores it, and restores it", async () => {
+  it("shows both recommendation actions for an English-only card and restores library chrome", async () => {
     const overlay = createFakeOverlay();
     const calls = [];
     const deps = reusableCardDeps(calls, async () => {});
-    await openRecommendationCard(overlay, genreItem, deps, { allowDismiss: false });
-    assert.equal(overlay._remove.hidden, true);
+    await openRecommendationCard(overlay, genreItem, deps);
+    assert.equal(overlay._remove.hidden, false);
+    assert.equal(overlay._remove.textContent, RECS_REMOVE_LABEL);
+    assert.equal(overlay._notMyType.hidden, false);
+    assert.equal(overlay._notMyType.textContent, RECS_NOT_MY_TYPE_LABEL);
     assert.equal(overlay._move.hidden, false);
-    dispatch(overlay, "click", {
-      target: overlay._remove,
-      stopImmediatePropagation() {},
-      preventDefault() {},
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(calls.some(([name]) => name === "dismiss" || name === "onDismissed"), false);
     restoreRecsCardChrome(deps.session());
     assert.equal(overlay._remove.hidden, false);
     assert.equal(overlay._remove.textContent, LIBRARY_REMOVE_LABEL);
+    assert.equal(overlay._notMyType.hidden, true);
   });
 
   it("the recommendations path still shows the dismiss button by default", async () => {
@@ -771,6 +777,8 @@ describe("shared card chrome", () => {
     await openRecommendationCard(overlay, genreItem, reusableCardDeps(calls, async () => {}));
     assert.equal(overlay._remove.hidden, false);
     assert.equal(overlay._remove.textContent, RECS_REMOVE_LABEL);
+    assert.equal(overlay._notMyType.hidden, false);
+    assert.equal(overlay._notMyType.textContent, RECS_NOT_MY_TYPE_LABEL);
     assert.deepEqual(calls, [], "English-only recommendation cards open without book-details");
   });
 
@@ -780,7 +788,7 @@ describe("shared card chrome", () => {
     let added;
     const addedDone = new Promise((resolve) => { added = resolve; });
     const deps = reusableCardDeps(calls, async (workId, shelfId) => added([workId, shelfId]));
-    await openRecommendationCard(overlay, genreItem, deps, { allowDismiss: false, englishDetails: true });
+    await openRecommendationCard(overlay, genreItem, deps, { englishDetails: true });
     overlay._select.value = "want";
     dispatch(overlay, "change", { target: overlay._select, stopImmediatePropagation() {} });
     assert.deepEqual(await addedDone, ["genre-work", "want"]);
@@ -853,12 +861,10 @@ describe("shared card chrome", () => {
     const overlay = createFakeOverlay();
     const session = applyRecsCardChrome(overlay, rec);
     const picked = [];
-    let dismissed = 0;
+    const dismissed = [];
     bindRecsCardActions(session, rec, {
       onPickShelf: (id) => picked.push(id),
-      onDismiss: () => {
-        dismissed += 1;
-      },
+      onDismiss: (kind) => dismissed.push(kind),
     });
 
     overlay._select.value = "";
@@ -891,7 +897,14 @@ describe("shared card chrome", () => {
       preventDefault() {},
     };
     dispatch(overlay, "click", click);
-    assert.equal(dismissed, 1);
+    assert.deepEqual(dismissed, ["hide"]);
+
+    dispatch(overlay, "click", {
+      target: overlay._notMyType,
+      stopImmediatePropagation() {},
+      preventDefault() {},
+    });
+    assert.deepEqual(dismissed, ["hide", "not_my_type"]);
 
     restoreRecsCardChrome(session);
     overlay._select.value = "reading";
@@ -900,6 +913,70 @@ describe("shared card chrome", () => {
       stopImmediatePropagation() {},
     });
     assert.deepEqual(picked, ["reading"]);
+  });
+
+  for (const [button, kind, toast] of [
+    ["_remove", "hide", "הספר הוסר"],
+    ["_notMyType", "not_my_type", "הספר הוסר, ונמליץ פחות על ספרים דומים"],
+  ]) {
+    it(`dismisses with ${kind}, closes, and reports success`, async () => {
+      const overlay = createFakeOverlay();
+      const calls = [];
+      const toasts = [];
+      let closed = 0;
+      let dismissed;
+      let done;
+      const dismissedDone = new Promise((resolve) => { done = resolve; });
+      const deps = reusableCardDeps(calls, async () => {});
+      deps.card.close = () => { closed += 1; };
+      deps.showToast = (message) => toasts.push(message);
+      deps.onDismissed = (workId) => {
+        dismissed = workId;
+        done();
+      };
+      await openRecommendationCard(overlay, genreItem, deps);
+      dispatch(overlay, "click", {
+        target: overlay[button],
+        stopImmediatePropagation() {},
+        preventDefault() {},
+      });
+      assert.equal(overlay._remove.disabled, true);
+      assert.equal(overlay._notMyType.disabled, true);
+      await dismissedDone;
+      assert.deepEqual(calls, [[RPCS.DISMISS_WORK.name, {
+        p_work_id: genreItem.work_id,
+        p_kind: kind,
+      }]]);
+      assert.equal(closed, 1);
+      assert.equal(dismissed, genreItem.work_id);
+      assert.deepEqual(toasts, [toast]);
+    });
+  }
+
+  it("re-enables both actions and toasts when dismiss_work fails", async () => {
+    const overlay = createFakeOverlay();
+    const toasts = [];
+    let rpcDone;
+    const done = new Promise((resolve) => { rpcDone = resolve; });
+    const deps = reusableCardDeps([], async () => {});
+    deps.api.getClient = () => ({
+      rpc: async () => {
+        rpcDone();
+        return { error: new Error("dismiss failed") };
+      },
+    });
+    deps.showToast = (message) => toasts.push(message);
+    await openRecommendationCard(overlay, genreItem, deps);
+    dispatch(overlay, "click", {
+      target: overlay._notMyType,
+      stopImmediatePropagation() {},
+      preventDefault() {},
+    });
+    await done;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(overlay._remove.disabled, false);
+    assert.equal(overlay._notMyType.disabled, false);
+    assert.deepEqual(toasts, ["dismiss failed"]);
   });
 });
 

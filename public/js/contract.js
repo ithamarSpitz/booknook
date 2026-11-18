@@ -48,6 +48,14 @@ export const RPCS = Object.freeze({
     name: "set_rating",
     params: Object.freeze(["p_simania_id", "p_rating"]),
   }),
+  DISMISS_WORK: Object.freeze({
+    name: "dismiss_work",
+    params: Object.freeze(["p_work_id", "p_kind"]),
+  }),
+  RESTORE_WORK: Object.freeze({
+    name: "restore_work",
+    params: Object.freeze(["p_work_id"]),
+  }),
 });
 
 /**

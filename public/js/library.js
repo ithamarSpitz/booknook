@@ -393,7 +393,12 @@ function openGenreBookFromEl(bookEl, root, ctx) {
         genreCardSession = s;
       },
       isCurrent: () => token === genreCardGeneration && genreSession === session,
-      onDismissed: () => {},
+      onDismissed: (id) => {
+        if (genreSession === session && session.shelves) {
+          session.shelves = removeGenreBook(session.shelves, id);
+          paint(root, ctx);
+        }
+      },
       onAdded: async (id, shelfId, added) => {
         // Now on the reader's shelves: drop it from the genre shelf at once.
         if (genreSession === session && session.shelves) {
@@ -415,7 +420,7 @@ function openGenreBookFromEl(bookEl, root, ctx) {
         }
       },
     },
-    { allowDismiss: false, englishDetails: true },
+    { englishDetails: true },
   );
 }
 
