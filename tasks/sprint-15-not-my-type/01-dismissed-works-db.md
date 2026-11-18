@@ -9,6 +9,7 @@ depends_on: []
 allowed_paths:
   - supabase/migrations/20261118000100_dismissed_works.sql
   - supabase/tests/11_dismissed_works.sql
+  - supabase/tests/01_library.sql
   - supabase/functions/_shared/types.ts
 context:
   - contract
@@ -45,7 +46,12 @@ Contract: the "`dismissed_works`" section (table, RLS, `dismiss_work`, `restore_
    - A client cannot insert into, update or delete from `dismissed_works`, and cannot select another user's rows.
    - A client cannot `update recommendations set dismissed = true` any more.
    - The backfill turns an existing dismissed recommendation into a `hide` row.
-3. `supabase/functions/_shared/types.ts`: add `DismissKind = "hide" | "not_my_type"` and `DismissedWorkRow`. Change nothing else.
+3. `supabase/tests/01_library.sql`: the revoke changes three existing assertions, so update them and nothing else:
+   - The cross-user `update public.recommendations set dismissed = true` (around line 68) now fails with `42501`; wrap it in `throws_ok` and keep the check that the other user's row is unchanged.
+   - "a user can update dismissed on an owned recommendation" (around line 197) becomes a `throws_ok` with `42501` (a client cannot update `dismissed` any more).
+   - "a dismissed recommendation cannot be restored" (around line 206) still checks the one-way trigger (`22023`), run as the table owner instead of the client: `reset role`, then the update, then switch back to the client role as the file does elsewhere. Make the row dismissed first in the same way if needed.
+   Keep the plan count right.
+4. `supabase/functions/_shared/types.ts`: add `DismissKind = "hide" | "not_my_type"` and `DismissedWorkRow`. Change nothing else.
 
 Do not run `supabase db reset` or `supabase test db`; CI runs the database tests.
 
