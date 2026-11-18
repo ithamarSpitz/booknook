@@ -21,8 +21,11 @@ This is the binding interface for sprint S1. SQL, JSON, and TypeScript names are
 | `display_name` | `text` | no | `''` |
 | `locale` | `text` | no | `'he'` |
 | `created_at` | `timestamptz` | no | `now()` |
+| `genre_shelf_count` | `smallint` | no | `10`; check `genre_shelf_count between 1 and 20` (S17) |
 
 RLS permits select and update only where `id = auth.uid()`. Clients have column-level update grants only for `display_name` and `locale`; no client insert/delete or update of other columns.
+
+`genre_shelf_count` gets no client update grant; it changes only through `set_genre_shelf_count`.
 
 ### `works`
 
@@ -117,8 +120,9 @@ Recommendation shelves by genre, shown below the reader's own shelves.
 |---|---|---:|---|
 | `user_id` | `uuid` | no | references `auth.users(id)` on delete cascade; PK part 1 |
 | `work_id` | `uuid` | no | references `works`; PK part 2 (a work is on at most one genre shelf) |
-| `genre` | `text` | no | Hebrew shelf name from the genre map |
-| `shelf_position` | `smallint` | no | 0-4, shelf order |
+| `genre_key` | `text` | no | genre key (see "Genre keys and names (S17)"); the migration fills existing rows with their `genre` value |
+| `genre` | `text` | no | the genre's display name |
+| `shelf_position` | `smallint` | no | 0-19, shelf order |
 | `position` | `smallint` | no | 0-11, book order within the shelf |
 | `simania_id` | `integer` | yes | references `editions`; null is English-only; check `simania_id is null or simania_id > 0` (never an English edition) |
 | `score` | `real` | no | none |
@@ -144,8 +148,41 @@ Books the reader removed from the Recommendations page or from a genre shelf (S1
 RLS: a user may only `SELECT` own rows; clients get no write grants. Writes go only through two RPCs (security definer, `search_path = public`, execute granted only to `authenticated`, using `auth.uid()`; a null `auth.uid()` raises `42501`):
 - `dismiss_work(p_work_id uuid, p_kind text) returns void`: `p_kind` not in the two kinds raises `22023`; a missing work raises `23503`. Upserts the row; dismissing an already dismissed work replaces its `kind` and `dismissed_at`. In the same transaction: sets this user's `recommendations.dismissed = true` for that work if a row exists, and deletes this user's `genre_recommendations` rows for that work.
 - `restore_work(p_work_id uuid) returns void`: deletes this user's `dismissed_works` row and this user's `recommendations` row for that work (dismissed or not), so the next regeneration may recommend it again. Restoring a work that is not dismissed does nothing.
+- `set_genre_preference(p_genre_key text, p_label text, p_state text) returns void` (S17): security definer, caller = `auth.uid()`, execute granted only to `authenticated`. `p_state` not in `auto`, `pinned`, `hidden`, or a blank `p_genre_key` or `p_label`, raises `22023`. `auto` deletes the caller's row for that key. `hidden` upserts the row with `pin_order` null. `pinned` upserts it; a genre that is already pinned keeps its `pin_order`, otherwise `pin_order` = the caller's current highest `pin_order` + 1 (0 when none). Pinning a 20th genre (19 already pinned) raises `22023`. Every write sets `label` and `updated_at`.
+- `set_genre_shelf_count(p_count integer) returns void` (S17): security definer, caller = `auth.uid()`, execute granted only to `authenticated`. Outside 1-20 raises `22023`. Sets the caller's `profiles.genre_shelf_count`.
 
 Migration backfill: every `recommendations` row with `dismissed = true` becomes a `dismissed_works` row with `kind = 'hide'` and `dismissed_at = generated_at` (skip conflicts). Clients lose the `UPDATE (dismissed)` grant on `recommendations`; the one-way `dismissed` trigger stays (`restore_work` deletes the row instead of flipping it). Dismissing goes only through `dismiss_work`.
+
+### `genre_preferences`
+
+The reader's choices for genre shelves (S17). A genre with no row is automatic.
+
+| Column | SQL type | Null? | Default / constraint |
+|---|---|---:|---|
+| `user_id` | `uuid` | no | references `auth.users(id)` on delete cascade; PK part 1 |
+| `genre_key` | `text` | no | PK part 2; non-empty |
+| `label` | `text` | no | display name when the choice was made; non-empty |
+| `state` | `text` | no | check `state in ('pinned','hidden')` |
+| `pin_order` | `integer` | yes | not null exactly when `state = 'pinned'` |
+| `updated_at` | `timestamptz` | no | `now()` |
+
+RLS: a user may only `SELECT` own rows. Clients get no write grants; writes go only through `set_genre_preference`.
+
+### `reader_genres`
+
+The genres the latest `recommendations` run found for this reader (S17), listed by the shelf settings page.
+
+| Column | SQL type | Null? | Default / constraint |
+|---|---|---:|---|
+| `user_id` | `uuid` | no | references `auth.users(id)` on delete cascade; PK part 1 |
+| `genre_key` | `text` | no | PK part 2 |
+| `label` | `text` | no | display name |
+| `seed_count` | `integer` | no | check `>= 0` |
+| `candidate_count` | `integer` | no | check `>= 0` |
+| `position` | `smallint` | no | 0-99 |
+| `generated_at` | `timestamptz` | no | `now()` |
+
+RLS: a user may only `SELECT` own rows; clients get no write grants. Writes go only through `replace_reader_genres`.
 
 ### `search_cache`
 
@@ -194,7 +231,11 @@ The TS interfaces `MoveBookArgs`, `MoveShelfArgs`, `DeleteShelfArgs`, and `Remov
 
 ### Service-only genre recommendation replacement
 
-`replace_genre_recommendations(p_user_id uuid, p_rows jsonb) returns void`: transactional, security-invoker, execute granted only to service_role (revoked from PUBLIC, anon, authenticated). `p_rows` is an array of at most 60 `GenreRecommendationReplacement` objects (`work_id`, `genre` non-empty, `shelf_position` 0-4, `position` 0-11, nullable positive `simania_id`, finite `score`, optional `because`, an array of at most 10 distinct non-zero integers, stored as `{}` when absent); work IDs distinct; a non-null edition must belong to its work; at most 5 distinct genres and 12 rows per genre. Invalid payloads raise `22023`, missing references `23503`. Lock the user's `profiles` row first (same lock order as the other RPCs), delete all of this user's rows, insert the payload except works now on this user's shelves, with one `clock_timestamp()` as `generated_at`. Empty input clears the user's rows.
+`replace_genre_recommendations(p_user_id uuid, p_rows jsonb) returns void`: transactional, security-invoker, execute granted only to service_role (revoked from PUBLIC, anon, authenticated). `p_rows` is an array of at most 240 `GenreRecommendationReplacement` objects (`work_id`, `genre_key` non-empty string, `genre` non-empty, `shelf_position` 0-19, `position` 0-11, nullable positive `simania_id`, finite `score`, optional `because`, an array of at most 10 distinct non-zero integers, stored as `{}` when absent); work IDs distinct; a non-null edition must belong to its work; at most 12 rows per `genre_key`. An unknown or missing key in the object still raises `22023`, as for the other fields. Invalid payloads raise `22023`, missing references `23503`. Lock the user's `profiles` row first (same lock order as the other RPCs), delete all of this user's rows, insert the payload except works now on this user's shelves, with one `clock_timestamp()` as `generated_at`. Empty input clears the user's rows.
+
+### Service-only reader genre replacement
+
+`replace_reader_genres(p_user_id uuid, p_rows jsonb) returns void` (S17): transactional, security-invoker, execute granted only to service_role. `p_rows` is an array of at most 100 objects with exactly `genre_key` (non-empty string), `label` (non-empty string), `seed_count` and `candidate_count` (integers `>= 0`), `position` (integer 0-99, unique). A bad payload raises `22023` and changes nothing; an unknown profile raises `23503`. Deletes all of that user's `reader_genres` rows and inserts the new ones with one shared `generated_at`.
 
 ### Service-only recommendation replacement
 
@@ -294,20 +335,44 @@ Localization misses remain English-only: null Simania ID, title/authors/cover fr
 
 Computed in the same `recommendations` run, after the ordinary cards, and stored with `replace_genre_recommendations`; the response body does not change.
 
-1. **Genre map** (`supabase/functions/_shared/genres.ts`): a fixed list of Hebrew shelf names, each with Hardcover `Genre` tag aliases compared case-insensitively after trimming. Only mapped tags count; all others (for example `General`, `Fiction`, `did-not-finish`, `Audiobooks`) are ignored. Of each work, only its first 8 `Genre` tags are read. The list:
-   `מדע בדיוני`: Science Fiction, Sci-fi, Space, Aliens, Cyberpunk, Space Opera, Hard Science Fiction · `פנטזיה`: Fantasy, Epic Fantasy, High Fantasy, Urban Fantasy, Dark Fantasy · `דיסטופיה`: Dystopian, Dystopia, Post-Apocalyptic, Apocalyptic · `מותחנים`: Thriller, Thrillers, Thriller & Suspense, Suspense, Psychological Thriller · `מתח ובלש`: Mystery, Crime, Murder, Detective, Mystery & Detective · `רומנטיקה`: Romance, Contemporary Romance, Historical Romance · `ספרות יפה`: Literary Fiction, Literary, Literature & Fiction · `קלאסיקות`: Classics · `רומן היסטורי`: Historical Fiction · `אימה`: Horror · `הרפתקאות`: Adventure · `נוער`: Young Adult, Young Adult Fiction · `ריאליזם מאגי`: Magical Realism · `מלחמה`: War · `היסטוריה`: History · `ביוגרפיה וממואר`: Biography, Biography & Autobiography, Memoir, Autobiography · `קומיקס`: Comics, Graphic Novels · `הומור`: Humor · `עיון`: Nonfiction, Non-Fiction · `פילוסופיה`: Philosophy · `פסיכולוגיה`: Psychology · `מדע`: Science, Popular Science.
-   A work's genres are the distinct Hebrew names its mapped tags give, in tag order.
+1. **Genre keys and names (S17).** Genres come from the work's Hardcover `Genre` tags (its first 12; was 8). There is no fixed list of shelves. In `supabase/functions/_shared/genres.ts`:
+   - **Normalize** each tag: remove every `"`, `[`, `]` and `\`, replace `-` and `_` with a space, collapse spaces, trim, lower-case. Skip empty results.
+   - **Noise** (never a genre): the exact normalized tags `general`, `fiction`, `genre fiction`, `novel`, `novels`, `adult`, `adult fiction`, `literary collections`, `authors`, `audiobook`, `audiobooks`, `ebook`, `ebooks`, `english fiction`, `american fiction`, `british fiction`, `english`, `spanish`, `hebrew`, `french`, `german`, `book club`, `did not finish`, `dnf`, `owned`, `kindle`; and any normalized tag that contains `tbr`, `to read`, `favorite`, `favourite` or `read in`, or that is only digits.
+   - **Groups.** A fixed alias table maps known normalized tags to a Hebrew genre name. The Hebrew name is that genre's key and its display name. The table (aliases in normalized form):
+     `מדע בדיוני`: science fiction, sci fi, space, aliens, cyberpunk, space opera, hard science fiction · `פנטזיה`: fantasy, epic fantasy, high fantasy, urban fantasy, dark fantasy · `דיסטופיה`: dystopian, dystopia, post apocalyptic, apocalyptic · `מותחנים`: thriller, thrillers, thriller & suspense, suspense, psychological thriller, domestic thriller, legal thriller, espionage, spy · `מתח ובלש`: mystery, crime, murder, detective, mystery & detective, mystery thriller, mystery/thriller, detective and mystery stories, police, police procedural, cozy mystery, crime fiction, noir · `רומנטיקה`: romance, contemporary romance, historical romance · `ספרות יפה`: literary fiction, literary, literature & fiction, literature · `קלאסיקות`: classics · `רומן היסטורי`: historical fiction, historical · `אימה`: horror · `הרפתקאות`: adventure, action & adventure, action · `נוער`: young adult, young adult fiction, teen & young adult, teen, ya · `ריאליזם מאגי`: magical realism · `מלחמה`: war, military fiction · `היסטוריה`: history · `ביוגרפיה וממואר`: biography, biography & autobiography, memoir, autobiography · `קומיקס`: comics, graphic novels, comics & graphic novels · `הומור`: humor, humour, comedy · `עיון`: nonfiction, non fiction · `פילוסופיה`: philosophy · `פסיכולוגיה`: psychology · `מדע`: science, popular science · `ילדים`: children, childrens, juvenile fiction, juvenile nonfiction, middle grade, children's stories, children's literature, picture books · `שירה`: poetry · `סיפורים קצרים`: short stories, short story collections, anthologies · `פוליטיקה`: politics, political science · `מסעות`: travel · `דת ורוחניות`: religion, spirituality, christianity, judaism · `התבגרות`: coming of age · `על-טבעי`: paranormal, supernatural, ghosts, vampires · `מסע בזמן`: time travel · `קומדיה רומנטית`: romantic comedy, rom com · `סאטירה`: satire · `להט"ב`: lgbtq, lgbt, queer, lgbtqia+, lgbtq+ · `ספרות עכשווית`: contemporary, contemporary fiction, realistic fiction · `ספרות נשים`: women's fiction, women · `משפחה`: family, family life, family & relationships · `חברות`: friendship · `ספרות פסיכולוגית`: psychological · `דרמה`: drama · `ספרות ספקולטיבית`: speculative fiction · `פשע אמיתי`: true crime · `מיתולוגיה`: mythology · `אגדות`: fairy tales · `מסות`: essays · `ביקורת ספרות`: literary criticism · `עסקים וכלכלה`: business, economics · `עזרה עצמית`: self help · `פמיניזם`: feminism · `מערבונים`: western, westerns · `סטימפאנק`: steampunk · `LitRPG`: litrpg, gamelit.
+   - **Compound tags.** A normalized tag that is not an alias and contains ` & ` or `/` is split on those; when every trimmed part is an alias, the tag gives each part's genre (for example `science fiction & fantasy` gives `מדע בדיוני` and `פנטזיה`). Otherwise the whole tag is handled as below.
+   - **Other tags** (not noise, not an alias): the genre key is `en:` + the normalized tag, and its display name is the tag with only the quote/bracket/backslash removal and trimming applied, from the first genre seed (in seed order) whose work carries it, else from the first loaded candidate work that carries it (lowest `hardcover_id`).
+   - A work's genres are the distinct keys its tags give, in tag order.
+   - Existing rows: Hebrew keys equal the old Hebrew shelf names, so old `genre_recommendations` rows keep matching.
 2. **Genre seeds.** The ordinary seeds with their weights, plus every book on the caller's `reading` shelf that is not already a seed, with weight `2.5` (so a genre appears as soon as the reader starts reading in it). Only books with a `work_id`.
-3. **Qualifying genres.** For each Hebrew genre: `evidence` = sum of the weights of genre seeds whose work has it; `count` = number of such seeds. A genre qualifies when `count >= 2`. Order by evidence descending, then count descending, then Hebrew name; take at most the first 5 that end up with at least 4 books (step 4); fewer is fine, zero means no genre shelves.
-4. **Books per genre.** Candidates are the first 40 `similar_ids` of that genre's seeds, scored `weight * (1 - rank/40)` summed across those seeds. Keep only candidate works that are in `works` and have that genre (load missing candidate works from Hardcover in batches of 50, at most 100 new works per run in total across all genres, highest-scored first). Subtract the negative seeds exactly as in the ordinary scoring (only from candidates that a genre seed reached; drop scores `<= 0`). Exclude works on any of the caller's shelves, every work in the caller's `dismissed_works`, and works already placed on an earlier (higher-ordered) genre shelf. Negative seeds do not change which genres qualify (steps 2-3). Order by score descending, then `hardcover_id` ascending; take up to 12; a genre with fewer than 4 is dropped (the next qualifying genre may take its place). Each book's `because` lists the `simania_id` of each genre seed that contributed to its score (the seed's shelved edition), highest contribution first (ties: lower `simania_id`), at most 10.
+3. **Qualifying genres.** For each genre key: `evidence` = sum of the weights of genre seeds whose work has it; `count` = number of such seeds. A genre qualifies when `count >= 2`. Order by evidence descending, then count descending, then display name (Hebrew collation); these are the **automatic** genres. Step 3a decides which genres become shelves.
+
+3a. **Shelf plan (S17).** Read the caller's `profiles.genre_shelf_count` (N, default 10) and `genre_preferences`.
+   - Hidden genres never get a shelf.
+   - **Pinned** genres come first, by `pin_order`, at most N − 1 of them (so at least one slot stays automatic). A pinned genre is a shelf even when it does not qualify. Its candidates come from **all** genre seeds (not only the seeds that have the genre), filtered to works with that genre, scored as in step 4. It keeps any number of books from 1 to 12; with 0 books it gets no rows.
+   - Then the **automatic** genres (step 3 order), skipping hidden and pinned ones; each needs at least 4 books (step 4), and a genre with fewer is dropped so the next one may take its place. Stop when there are N shelves in total.
+   - Shelf positions follow this order, from 0.
+4. **Books per genre.** Candidates are the first 40 `similar_ids` of that genre's seeds, scored `weight * (1 - rank/40)` summed across those seeds. Keep only candidate works that are in `works` and have that genre (load missing candidate works from Hardcover in batches of 50, at most 200 new works per run in total across all planned genres, highest-scored first). Subtract the negative seeds exactly as in the ordinary scoring (only from candidates that a genre seed reached; drop scores `<= 0`). Exclude works on any of the caller's shelves, every work in the caller's `dismissed_works`, and works already placed on an earlier (higher-ordered) genre shelf. Negative seeds do not change which genres qualify (steps 2-3). Order by score descending, then `hardcover_id` ascending; take up to 12; the minimum is in step 3a. Each book's `because` lists the `simania_id` of each genre seed that contributed to its score (the seed's shelved edition), highest contribution first (ties: lower `simania_id`), at most 10.
 5. **Edition.** For each book, `simania_id` is the caller's ordinary recommendation's `simania_id` for that work if any, else the most recently resolved positive-ID edition linked to the work, else null (English-only). No bridge or Simania calls are made for genre shelves.
 6. **Failure.** Any failure while computing or storing genre shelves is logged and ignored; it never fails the ordinary recommendations response.
 
-**Reading them (browser).** The library screen loads the caller's `genre_recommendations` once when the screen mounts (with each row's work and edition fields) and renders them below the reader's own shelves. It never re-renders them while mounted: no spinner, no live replacement (except the in-place tile update in "Localizing them" below). New rows written by a background regeneration appear on the next mount or page load. A genre shelf's book opens the book card (Simania edition by `simania_id`; English-only by `book-details` with `simania_id = -hardcover_id`), and the card offers adding it to one of the reader's shelves (`add-book` with `simania_id`, or `hardcover_id` for English-only). The card shows the same reason line as a recommendation card (`buildReasonLine(because_titles, [])`).
+7. **Reader genres (S17).** In the same run, after the shelves, compute every genre key found on the works of the genre seeds or on the loaded candidate works (the first 40 `similar_ids` of every genre seed that are in `works`). For each: `seed_count` = genre seeds whose work has it, `candidate_count` = such candidate works, minus works on the caller's shelves or in `dismissed_works`. Keep keys with `seed_count >= 1` or `candidate_count >= 3`. Order by seed evidence (step 3) descending, then `candidate_count` descending, then display name; keep the first 100; store them with `replace_reader_genres`. A failure here is logged and ignored, like step 6.
+
+**Reading them (browser).** The library screen loads the caller's `genre_recommendations` once when the screen mounts (with each row's work and edition fields) and renders them below the reader's own shelves. Each shelf carries its `genre_key`. After the stored shelves, every pinned genre (from `genre_preferences`) that has no stored rows gets an empty shelf under its `label`. It never re-renders them while mounted: no spinner, no live replacement (except the in-place tile update in "Localizing them" below). New rows written by a background regeneration appear on the next mount or page load. A genre shelf's book opens the book card (Simania edition by `simania_id`; English-only by `book-details` with `simania_id = -hardcover_id`), and the card offers adding it to one of the reader's shelves (`add-book` with `simania_id`, or `hardcover_id` for English-only). The card shows the same reason line as a recommendation card (`buildReasonLine(because_titles, [])`).
 
 **Removing a recommended book (browser, S15).** A book card opened from the Recommendations page or from a genre shelf shows two buttons instead of "לא מעניין אותי": **"הסר"** (`dismiss_work` with `hide`) and **"לא הסגנון שלי"** (`not_my_type`). Both are also shown for English-only cards. While the call runs, both are disabled. On success the card closes, a toast says "הספר הוסר" or "הספר הוסר, ונמליץ פחות על ספרים דומים", and the book leaves the list or shelf at once (the genre shelf drops its tile in place, as after an add; the Recommendations page drops the item). On failure both buttons re-enable and a toast shows the error. Books on the reader's own shelves keep a single remove button, which reads "הסר" since S16 (see "Book card layout (S16)").
 
 **Refresh after removing or restoring (S16).** A successful `dismiss_work` (either kind) or `restore_work` asks for a background regeneration, exactly like a shelf change: `public/js/events.js` gains `RECS_INPUTS_CHANGED = "booknook:recs-inputs-changed"` and `notifyRecsInputsChanged()`, and `main.js` calls `recsRefresh.request()` on it. The existing debounce merges quick consecutive removals into one call. It does not repaint the library shelves (that is `SHELVES_CHANGED`, which stays as is). A failed call asks for nothing.
+
+**Hiding a genre shelf (browser, S17).** Every genre shelf's header (`.shelf-head`) has a small secondary button "הסתר מדף". It calls `set_genre_preference(genre_key, genre, 'hidden')`. While the call runs the button is disabled. On success the shelf section leaves the screen at once, a toast says "המדף הוסתר. אפשר להחזיר אותו בהגדרות מדפי ההמלצות", and `notifyRecsInputsChanged()` is called. On failure the button re-enables and a toast shows the error. A pinned genre's header also shows the label "נעוץ". A pinned shelf with fewer than 4 books (including an empty one) shows the note "אין עדיין מספיק ספרים במדף הזה. דרגו ספרים מהז'אנר הזה כדי לקבל עוד" under its books.
+
+**Recommendation shelf settings page (#genres, S17).** A menu (hamburger) item "הגדרות מדפי המלצות", after "ספרים שהסרתי". The page title is the same text. Loading and error states as on the other screens. The page burger shows on this screen like on the others.
+1. **Number of shelves:** a select with 1-20, showing `profiles.genre_shelf_count`. A change calls `set_genre_shelf_count`.
+2. **Genre list:** one row per genre in the union of the caller's `reader_genres` (in `position` order) and `genre_preferences` rows whose key is not in `reader_genres` (after them, by `label`). Each row shows the display name, the line "{seed_count} ספרים שלך · {candidate_count} ספרים מתאימים" (only for `reader_genres` rows), the tag "מוצג עכשיו" when that key has `genre_recommendations` rows, and a three-option control: "אוטומטי", "תמיד להציג", "לא להציג", showing the current state (no row = אוטומטי). A choice calls `set_genre_preference(genre_key, label, 'auto' | 'pinned' | 'hidden')`.
+3. While the caller has N − 1 pinned genres (N = shelf count), "תמיד להציג" is disabled on the rows that are not pinned, and the note "אפשר לנעוץ עד {N − 1} מדפים, כדי שיישאר מקום לז'אנר חדש" shows above the list. When more than N − 1 are pinned (after lowering N), the same note says only the first N − 1 pins are shown.
+4. Every successful change shows a toast "נשמר. המדפים יתעדכנו בעוד רגע" and calls `notifyRecsInputsChanged()`. A failed change restores the previous value and shows the error in a toast.
+5. Empty state, when the union is empty: "דרגו כמה ספרים כדי שנמצא ז'אנרים בשבילכם".
+6. The new shelves show on the library screen on its next mount, as with any regeneration.
 
 **Book card layout (S16).** The same order for every card (library book, recommendation, genre shelf book), following common book-site cards: identity and ratings first, then what you can do, then the long text.
 1. Cover, shelf tag, title, author.
@@ -490,7 +555,7 @@ No external-site URL is included.
 
 ### `GenreShelf` and `GenreBook`
 
-`GenreShelf` is `{ genre, books }` ordered by `shelf_position`; `books` ordered by `position`. `GenreBook`: `work_id`; `hardcover_id` = `works.hardcover_id`; `simania_id`; `title` = edition title, else `works.original_title`; `author` = edition author, else `works.original_authors` joined with `, ` (null if empty); `cover_url` = edition cover, else `works.hardcover_cover_url`; `english_only` = `simania_id === null`; `because` = `genre_recommendations.because`; `because_titles` = the exact edition title for each `because` ID, same order, unknown IDs skipped (the same lookup as `RecommendationCard.because_titles`).
+`GenreShelf` is `{ genre_key, genre, pinned, books }` ordered by `shelf_position` (`pinned` is true when the caller's `genre_preferences` pins that key; an empty pinned shelf from "Reading them" has `books: []`); `books` ordered by `position`. `GenreBook`: `work_id`; `hardcover_id` = `works.hardcover_id`; `simania_id`; `title` = edition title, else `works.original_title`; `author` = edition author, else `works.original_authors` joined with `, ` (null if empty); `cover_url` = edition cover, else `works.hardcover_cover_url`; `english_only` = `simania_id === null`; `because` = `genre_recommendations.because`; `because_titles` = the exact edition title for each `because` ID, same order, unknown IDs skipped (the same lookup as `RecommendationCard.because_titles`).
 
 ### `RecommendationCard`
 
