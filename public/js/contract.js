@@ -21,6 +21,7 @@ export const FUNCTIONS = Object.freeze({
 export const ROUTES = Object.freeze({
   LIBRARY: "#library",
   RECOMMENDATIONS: "#recs",
+  REMOVED: "#removed",
   SEARCH: "#search",
   SETTINGS: "#settings",
   INVITE: "#invite",
