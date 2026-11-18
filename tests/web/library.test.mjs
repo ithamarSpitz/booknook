@@ -98,16 +98,18 @@ async function settle(times = 6) {
 
 function createGenreOverlay() {
   const inserted = [];
-  const parentElement = {
+  const actions = {
     firstChild: null,
-    insertBefore(node) {
+    insertBefore(node, before) {
       inserted.unshift(node);
+      if (!before) actions.firstChild = node;
       node.remove = () => {
         const index = inserted.indexOf(node);
         if (index >= 0) inserted.splice(index, 1);
       };
     },
   };
+  const buttons = {};
   const doc = {
     createElement: () => ({ setAttribute() {}, remove() {}, className: "", textContent: "" }),
   };
@@ -122,10 +124,10 @@ function createGenreOverlay() {
   };
   const removeBtn = {
     ownerDocument: doc,
-    textContent: "הסר מהספרייה",
+    textContent: "הסר",
     hidden: false,
     disabled: false,
-    parentElement,
+    parentElement: buttons,
     contains: (t) => t === removeBtn,
   };
   const notMyTypeBtn = {
@@ -133,13 +135,15 @@ function createGenreOverlay() {
     textContent: "לא הסגנון שלי",
     hidden: true,
     disabled: false,
-    parentElement,
+    parentElement: buttons,
     contains: (t) => t === notMyTypeBtn,
   };
   const moveLabel = { ownerDocument: doc, childNodes: [], hidden: false };
   const nodes = new Map([
     [".bk-move", moveLabel],
     [".bk-move select", select],
+    [".bk-actions", actions],
+    [".bk-buttons", buttons],
     [".bk-remove", removeBtn],
     [".bk-not-my-type", notMyTypeBtn],
   ]);
@@ -470,7 +474,7 @@ describe("genre shelves on the library screen", async () => {
       assert.equal(overlay.querySelector(".bk-rec-reason"), null);
       cleanup();
       assert.equal(overlay._remove.hidden, false, "library card chrome restored");
-      assert.equal(overlay._remove.textContent, "הסר מהספרייה");
+      assert.equal(overlay._remove.textContent, "הסר");
       assert.equal(overlay._notMyType.hidden, true, "second action hidden for library cards");
     } finally {
       restore();

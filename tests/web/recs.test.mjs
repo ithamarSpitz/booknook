@@ -373,12 +373,17 @@ function createFakeOverlay(shelves = [{ id: "reading", name: "קורא עכשי�
   notMyTypeBtn.ownerDocument = doc;
   notMyTypeBtn.textContent = RECS_NOT_MY_TYPE_LABEL;
   notMyTypeBtn.hidden = true;
-  actions.append(moveLabel, removeBtn, notMyTypeBtn);
+  const buttons = createEl("div", "bk-buttons");
+  buttons.ownerDocument = doc;
+  buttons.append(removeBtn, notMyTypeBtn);
+  actions.append(moveLabel, buttons);
   overlay.append(actions);
   overlay._select = select;
   overlay._move = moveLabel;
   overlay._remove = removeBtn;
   overlay._notMyType = notMyTypeBtn;
+  overlay._actions = actions;
+  overlay._buttons = buttons;
   return overlay;
 }
 
@@ -408,6 +413,8 @@ describe("shared card chrome", () => {
     assert.equal(removeBtn.textContent, RECS_REMOVE_LABEL);
     assert.equal(overlay._notMyType.textContent, RECS_NOT_MY_TYPE_LABEL);
     assert.equal(overlay._notMyType.hidden, false);
+    assert.equal(removeBtn.parentElement, overlay._buttons);
+    assert.equal(overlay._notMyType.parentElement, overlay._buttons);
     assert.equal(select.childNodes[0].value, "");
     assert.equal(select.value, "");
 
@@ -432,6 +439,7 @@ describe("shared card chrome", () => {
       overlay.querySelector(".bk-rec-reason")?.textContent,
       "דומה ל־הנסיך הקטן, 1984 ו־חוות החיות",
     );
+    assert.equal(overlay._actions.firstChild, overlay.querySelector(".bk-rec-reason"));
     restoreRecsCardChrome(session);
     assert.equal(overlay.querySelector(".bk-rec-reason"), null);
   });
@@ -444,15 +452,22 @@ describe("shared card chrome", () => {
       simania_id: null,
       english_only: true,
       can_add: true,
+      because_titles: ["ספר אהוב"],
+      shared_tags: [],
     });
     assert.equal(overlay._move.hidden, false);
     assert.equal(overlay._select.disabled, false);
     assert.equal(overlay._select.childNodes[0].value, "");
     assert.equal(overlay.querySelector(".bk-rec-note")?.textContent, ENGLISH_ONLY_NOTE);
+    assert.equal(overlay._actions.firstChild, overlay.querySelector(".bk-rec-reason"));
+    const buttonsIndex = overlay._actions.childNodes.indexOf(overlay._buttons);
+    assert.equal(overlay._actions.childNodes[buttonsIndex - 1], overlay.querySelector(".bk-rec-note"));
     restoreRecsCardChrome(session);
     assert.equal(overlay._move.hidden, false);
     assert.equal(overlay.querySelector(".bk-rec-note"), null);
+    assert.equal(overlay.querySelector(".bk-rec-reason"), null);
     assert.equal(overlay._remove.textContent, LIBRARY_REMOVE_LABEL);
+    assert.equal(overlay._notMyType.hidden, true);
   });
 
   it("builds the provider-specific add-book payload", () => {
