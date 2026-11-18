@@ -35,7 +35,7 @@ The `search-books` function was removed. Search runs in the browser: under 2 cha
 - Behavior:
   1. Seeds: the caller's books with a non-null `work_id` and a positive weight. Weight is the reader's rating when it is 3-5 (any shelf), 2.5 for an unrated book on `read`, otherwise 0. No seed cap. Seeds are ordered by weight, then `finished_at` desc, then `added_at` desc.
   2. Candidate score: for each seed, the first 40 `works.similar_ids`, score `weight * (1 - rank/40)`, summed across seeds.
-  3. Exclude: works of any book on any of the caller's shelves (including want and stopped), and dismissed recommendations.
+  3. Exclude works of any book on any of the caller's shelves (including want and stopped) and every work in `dismissed_works`. Works marked `not_my_type` are negative seeds with weight 5: subtract their similarity score from candidates on both the ordinary list and genre shelves, and drop candidates whose final score is `<= 0`.
   4. Load missing candidate works from Hardcover in batches of 50; upsert `works`.
   5. Localize the top candidates (see `matching.md`), 5 in parallel, stop at 20 results or 40 attempts. The function finds only the Hebrew title (Wikidata, then NLI) and returns it as `hebrew_hint`, plus the author's Hebrew name as `hebrew_author` (catalog first, then Wikidata); the browser matches the title on Simania, or on a miss searches Simania by author and asks `match-by-author`, then calls `link-edition`. Until then, and on a miss, the card is English-only with `simania_id` null: Hardcover title and cover, dismiss but not add-to-shelf.
   6. `shared_tags`: tags present on the candidate and on at least one of its seeds.
