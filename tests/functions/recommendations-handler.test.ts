@@ -94,12 +94,10 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
       rows = this.db.library as Record<string, unknown>[];
     }
     if (this.table === "recommendations") {
-      const dismissedOnly = this.#filters.some((filter) =>
-        filter[0] === "dismissed" && filter[1] === true
-      );
-      return dismissedOnly
-        ? this.db.dismissed.map((work_id) => ({ work_id }))
-        : [];
+      return [];
+    }
+    if (this.table === "dismissed_works") {
+      rows = this.db.dismissed.map((row) => ({ ...row, user_id: "user" }));
     }
     if (this.table === "works") {
       rows = this.db.works as unknown as Record<string, unknown>[];
@@ -169,7 +167,10 @@ class FakeDb {
   constructor(
     public library: unknown[],
     public works: WorkRow[],
-    public dismissed: string[] = [],
+    public dismissed: Array<{
+      work_id: string;
+      kind: "hide" | "not_my_type";
+    }> = [],
     public editions: EditionRow[] = [],
   ) {}
   from(table: string): FakeQuery {
@@ -476,14 +477,18 @@ Deno.test("genre step failure leaves the ordinary response unchanged", async () 
 });
 
 Deno.test("handler excludes shelved and dismissed works and retains an English-only result", async () => {
-  const seed = work("seed", 1, [2, 3, 4]);
+  const seed = work("seed", 1, [2, 3, 4, 5]);
   const shelved = work("shelved", 2);
-  const dismissed = work("dismissed", 3);
-  const kept = work("kept", 4);
+  const hidden = work("hidden", 3, [5]);
+  const notMyType = work("not-my-type", 4, [999]);
+  const kept = work("kept", 5);
   const db = new FakeDb(
     [shelfBook(11, "read", seed), shelfBook(22, "want", shelved)],
-    [shelved, dismissed, kept],
-    ["dismissed"],
+    [shelved, hidden, notMyType, kept],
+    [
+      { work_id: "hidden", kind: "hide" },
+      { work_id: "not-my-type", kind: "not_my_type" },
+    ],
   );
   const response = await handleRecommendations(request(), {
     authenticate: async () => "user",
@@ -511,13 +516,53 @@ Deno.test("handler excludes shelved and dismissed works and retains an English-o
     "English-only flags mismatch",
   );
   assert(
-    payload.recommendations[0].hardcover_id === 4,
+    payload.recommendations[0].hardcover_id === 5,
     "English-only card should expose its Hardcover ID",
   );
   assert(
     payload.recommendations[0].hebrew_hint?.title === "נשמר",
     "English-only card should carry the Hebrew hint for the browser match",
   );
+});
+
+Deno.test("dismissed works of both kinds stay out of ordinary and genre outputs", async () => {
+  const candidateIds = [101, 102, 103, 104, 105, 106];
+  const first = withGenre(work("seed-1", 1, candidateIds), "Fantasy");
+  const second = withGenre(work("seed-2", 2, candidateIds), "Fantasy");
+  const candidates = candidateIds.map((id) =>
+    withGenre(work(`candidate-${id}`, id), "Fantasy")
+  );
+  candidates[5].similar_ids = [101];
+  const db = new FakeDb(
+    [
+      shelfBook(41, "read", first, { rating: 5 }),
+      shelfBook(42, "read", second, { rating: 4 }),
+    ],
+    [first, second, ...candidates],
+    [
+      { work_id: "candidate-105", kind: "hide" },
+      { work_id: "candidate-106", kind: "not_my_type" },
+    ],
+  );
+  const response = await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => null,
+  });
+
+  assert(response.status === 200, "expected 200");
+  const ordinaryIds = (db.replacement ?? []).map((row) => row.work_id);
+  const genreIds = (db.genreReplacement ?? []).map((row) => row.work_id);
+  for (const dismissedId of ["candidate-105", "candidate-106"]) {
+    assert(
+      !ordinaryIds.includes(dismissedId),
+      `${dismissedId} in ordinary output`,
+    );
+    assert(!genreIds.includes(dismissedId), `${dismissedId} in genre output`);
+  }
+  assert(genreIds.length === 4, "expected four remaining genre books");
 });
 
 Deno.test("unauthenticated request returns 401", async () => {

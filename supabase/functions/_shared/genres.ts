@@ -101,6 +101,10 @@ export type GenreCandidate = {
   contributors: Array<{ simaniaId: number; contribution: number }>;
 };
 
+export type GenreNegativeSeed = {
+  similarIds: number[];
+};
+
 export type GenreWork = Pick<WorkRow, "id" | "tags">;
 
 export type GenreShelf = {
@@ -166,6 +170,7 @@ export function qualifyingGenres(seeds: GenreSeed[]): QualifyingGenre[] {
 export function genreCandidates(
   _genre: string,
   genreSeeds: GenreSeed[],
+  negativeSeeds: readonly GenreNegativeSeed[] = [],
 ): GenreCandidate[] {
   const scores = new Map<
     number,
@@ -187,7 +192,16 @@ export function genreCandidates(
       scores.set(hardcoverId, current);
     }
   }
+  for (const seed of negativeSeeds) {
+    for (const [rank, hardcoverId] of seed.similarIds.slice(0, 40).entries()) {
+      if (!Number.isInteger(hardcoverId)) continue;
+      const current = scores.get(hardcoverId);
+      if (!current) continue;
+      current.score -= 5 * (1 - rank / 40);
+    }
+  }
   return [...scores.entries()]
+    .filter(([, value]) => value.score > 0)
     .map(([hardcoverId, { score, contributors }]) => ({
       hardcoverId,
       score,
@@ -200,10 +214,12 @@ export function genreCandidates(
 
 export function buildGenreShelves({
   seeds,
+  negativeSeeds = [],
   worksByHardcoverId,
   excludedWorkIds,
 }: {
   seeds: GenreSeed[];
+  negativeSeeds?: readonly GenreNegativeSeed[];
   worksByHardcoverId: ReadonlyMap<number, GenreWork>;
   excludedWorkIds: ReadonlySet<string>;
 }): GenreShelf[] {
@@ -212,7 +228,7 @@ export function buildGenreShelves({
 
   for (const { genre, seeds: genreSeeds } of qualifyingGenres(seeds)) {
     const books: GenreShelf["books"] = [];
-    for (const candidate of genreCandidates(genre, genreSeeds)) {
+    for (const candidate of genreCandidates(genre, genreSeeds, negativeSeeds)) {
       const work = worksByHardcoverId.get(candidate.hardcoverId);
       if (
         !work || excludedWorkIds.has(work.id) ||
@@ -248,11 +264,12 @@ export function missingCandidateIds(
   seeds: GenreSeed[],
   worksByHardcoverId: ReadonlyMap<number, GenreWork>,
   limit = 100,
+  negativeSeeds: readonly GenreNegativeSeed[] = [],
 ): number[] {
   if (limit <= 0) return [];
   const bestScore = new Map<number, number>();
   for (const { genre, seeds: genreSeeds } of qualifyingGenres(seeds)) {
-    for (const candidate of genreCandidates(genre, genreSeeds)) {
+    for (const candidate of genreCandidates(genre, genreSeeds, negativeSeeds)) {
       if (worksByHardcoverId.has(candidate.hardcoverId)) continue;
       bestScore.set(
         candidate.hardcoverId,
