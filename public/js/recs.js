@@ -1,4 +1,4 @@
-import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
+import { FUNCTIONS, RPCS, SHELF_KINDS } from "./contract.js";
 import { promptRating, shouldPromptRating } from "./my-rating.js";
 import {
   fetchSimaniaPayload,
@@ -20,7 +20,8 @@ import { notifyShelvesChanged } from "./events.js";
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
 export const LIBRARY_REMOVE_LABEL = "הסר מהספרייה";
 export const RECS_MOVE_LABEL = "הוסף למדף";
-export const RECS_REMOVE_LABEL = "לא מעניין אותי";
+export const RECS_REMOVE_LABEL = "הסר";
+export const RECS_NOT_MY_TYPE_LABEL = "לא הסגנון שלי";
 export const RECS_SHELF_PLACEHOLDER = "בחרו מדף";
 export const ENGLISH_ONLY_NOTE = "אין מהדורה עברית זמינה לספר זה.";
 
@@ -593,27 +594,27 @@ export function canCompleteRecsWrite(session, isCurrent) {
 }
 
 /**
- * Restyle the shared overlay in place. Never clone or replace `.bk-move select` / `.bk-remove`.
+ * Restyle the shared overlay in place. Never clone or replace the shared action controls.
  * @param {HTMLElement} overlay
  * @param {import('./contract.js').RecommendationCard} rec
  */
-export function applyRecsCardChrome(overlay, rec, options = {}) {
-  const allowDismiss = options.allowDismiss !== false;
+export function applyRecsCardChrome(overlay, rec) {
   const moveLabel = overlay.querySelector(".bk-move");
   const moveSelect = overlay.querySelector(".bk-move select");
   const removeBtn = overlay.querySelector(".bk-remove");
+  const notMyTypeBtn = overlay.querySelector(".bk-not-my-type");
   const session = {
     overlay,
     moveLabel,
     moveSelect,
     removeBtn,
+    notMyTypeBtn,
     placeholder: null,
     note: null,
     reason: null,
     onChange: null,
     onClick: null,
     restored: false,
-    allowDismiss,
   };
 
   if (moveLabel) {
@@ -625,7 +626,13 @@ export function applyRecsCardChrome(overlay, rec, options = {}) {
   if (removeBtn) {
     removeBtn.textContent = RECS_REMOVE_LABEL;
     removeBtn.disabled = false;
-    removeBtn.hidden = !allowDismiss;
+    removeBtn.hidden = false;
+  }
+
+  if (notMyTypeBtn) {
+    notMyTypeBtn.textContent = RECS_NOT_MY_TYPE_LABEL;
+    notMyTypeBtn.disabled = false;
+    notMyTypeBtn.hidden = false;
   }
 
   if (moveSelect) {
@@ -680,6 +687,11 @@ export function restoreRecsCardChrome(session) {
     session.removeBtn.disabled = false;
     session.removeBtn.hidden = false;
   }
+  if (session.notMyTypeBtn) {
+    session.notMyTypeBtn.textContent = RECS_NOT_MY_TYPE_LABEL;
+    session.notMyTypeBtn.disabled = false;
+    session.notMyTypeBtn.hidden = true;
+  }
   if (session.moveSelect) session.moveSelect.disabled = false;
   session.note?.remove?.();
   session.reason?.remove?.();
@@ -689,7 +701,7 @@ export function restoreRecsCardChrome(session) {
  * Capture-phase intercepts so `card.js` move/remove handlers do not run.
  * @param {ReturnType<typeof applyRecsCardChrome>} session
  * @param {import('./contract.js').RecommendationCard} rec
- * @param {{ onPickShelf: (shelfId: string) => void, onDismiss: () => void }} handlers
+ * @param {{ onPickShelf: (shelfId: string) => void, onDismiss: (kind: 'hide'|'not_my_type') => void }} handlers
  */
 export function bindRecsCardActions(session, rec, handlers) {
   session.onChange = (event) => {
@@ -701,13 +713,14 @@ export function bindRecsCardActions(session, rec, handlers) {
     handlers.onPickShelf(shelfId);
   };
   session.onClick = (event) => {
-    const btn = session.removeBtn;
-    if (!btn || session.allowDismiss === false) return;
     const t = event.target;
-    if (t !== btn && !btn.contains?.(t)) return;
+    const removeHit = session.removeBtn && (t === session.removeBtn || session.removeBtn.contains?.(t));
+    const notMyTypeHit = session.notMyTypeBtn
+      && (t === session.notMyTypeBtn || session.notMyTypeBtn.contains?.(t));
+    if (!removeHit && !notMyTypeHit) return;
     event.stopImmediatePropagation();
     event.preventDefault?.();
-    handlers.onDismiss();
+    handlers.onDismiss(notMyTypeHit ? "not_my_type" : "hide");
   };
   session.overlay.addEventListener("change", session.onChange, true);
   session.overlay.addEventListener("click", session.onClick, true);
@@ -728,8 +741,7 @@ export function addBookRequestForRecommendation(rec, shelfId) {
  * Card-opening path shared by the recommendations screen and the library's
  * genre shelves. `rec` needs `work_id`, `hardcover_id`, `simania_id`, `title`,
  * `author`, `cover_url`, `english_only` (and `can_add`).
- * Options: `allowDismiss` (default true) shows "לא מעניין אותי";
- * `englishDetails` loads an English-only book through `book-details` with
+ * Option `englishDetails` loads an English-only book through `book-details` with
  * `simania_id = -hardcover_id`, falling back to the item's own fields.
  * @param {HTMLElement} overlay
  * @param {import('./contract.js').RecommendationCard} rec
@@ -747,7 +759,6 @@ export function addBookRequestForRecommendation(rec, shelfId) {
  * }} deps
  */
 export async function openRecommendationCard(overlay, rec, deps, options = {}) {
-  const allowDismiss = options.allowDismiss !== false;
   let book;
   if (rec.can_add && rec.simania_id != null) {
     try {
@@ -826,7 +837,7 @@ export async function openRecommendationCard(overlay, rec, deps, options = {}) {
   deps.restorePrevious();
   deps.card.open(book, shelves);
 
-  const session = applyRecsCardChrome(overlay, rec, { allowDismiss });
+  const session = applyRecsCardChrome(overlay, rec);
   deps.beginSession(session);
 
   bindRecsCardActions(session, rec, {
@@ -857,24 +868,29 @@ export async function openRecommendationCard(overlay, rec, deps, options = {}) {
         }
       })();
     },
-    onDismiss: () => {
-      if (!allowDismiss || session.removeBtn?.disabled) return;
+    onDismiss: (kind) => {
+      if (session.removeBtn?.disabled || session.notMyTypeBtn?.disabled) return;
       if (session.removeBtn) session.removeBtn.disabled = true;
+      if (session.notMyTypeBtn) session.notMyTypeBtn.disabled = true;
       void (async () => {
         const client = deps.api.getClient();
         try {
-          const { error } = await client
-            .from("recommendations")
-            .update({ dismissed: true })
-            .eq("work_id", rec.work_id);
+          const { error } = await client.rpc(RPCS.DISMISS_WORK.name, {
+            p_work_id: rec.work_id,
+            p_kind: kind,
+          });
           if (error) throw error;
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             deps.card.close();
           }
           deps.onDismissed(rec.work_id);
+          deps.showToast(kind === "not_my_type"
+            ? "הספר הוסר, ונמליץ פחות על ספרים דומים"
+            : "הספר הוסר");
         } catch (err) {
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             if (session.removeBtn) session.removeBtn.disabled = false;
+            if (session.notMyTypeBtn) session.notMyTypeBtn.disabled = false;
           }
           if (deps.isCurrent()) {
             deps.showToast(err instanceof Error ? err.message : "לא הצלחנו לעדכן");

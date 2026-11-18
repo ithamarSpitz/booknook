@@ -128,11 +128,20 @@ function createGenreOverlay() {
     parentElement,
     contains: (t) => t === removeBtn,
   };
+  const notMyTypeBtn = {
+    ownerDocument: doc,
+    textContent: "לא הסגנון שלי",
+    hidden: true,
+    disabled: false,
+    parentElement,
+    contains: (t) => t === notMyTypeBtn,
+  };
   const moveLabel = { ownerDocument: doc, childNodes: [], hidden: false };
   const nodes = new Map([
     [".bk-move", moveLabel],
     [".bk-move select", select],
     [".bk-remove", removeBtn],
+    [".bk-not-my-type", notMyTypeBtn],
   ]);
   let open = false;
   const observers = [];
@@ -141,6 +150,7 @@ function createGenreOverlay() {
     listeners,
     _select: select,
     _remove: removeBtn,
+    _notMyType: notMyTypeBtn,
     _setOpen(value) {
       open = value;
       for (const callback of observers) callback();
@@ -315,7 +325,12 @@ function createLibraryCtx(lib) {
   const calls = { loadGenreShelves: 0, functions: [], cardOpens: [] };
   const ctx = {
     api: {
-      getClient: () => ({}),
+      getClient: () => ({
+        rpc: async (name, body) => {
+          calls.functions.push([name, body]);
+          return { error: null };
+        },
+      }),
       callFunction: async (name, body) => {
         calls.functions.push([name, body]);
         return { book: { simania_id: body.simania_id ?? -body.hardcover_id, title: "x" } };
@@ -446,12 +461,17 @@ describe("genre shelves on the library screen", async () => {
       assert.deepEqual(calls.functions, [["book-details", { simania_id: 501 }]]);
       assert.equal(calls.cardOpens.length, 1);
       assert.deepEqual(calls.cardOpens[0].shelves.map((s) => s.id), ["reading", "read"]);
-      assert.equal(overlay._remove.hidden, true);
+      assert.equal(overlay._remove.hidden, false);
+      assert.equal(overlay._remove.textContent, "הסר");
+      assert.equal(overlay._notMyType.hidden, false);
+      assert.equal(overlay._notMyType.textContent, "לא הסגנון שלי");
       assert.match(overlay.querySelector(".bk-rec-reason")?.textContent ?? "", /החברה הגאונה/);
       ctx.card.close();
       assert.equal(overlay.querySelector(".bk-rec-reason"), null);
       cleanup();
       assert.equal(overlay._remove.hidden, false, "library card chrome restored");
+      assert.equal(overlay._remove.textContent, "הסר מהספרייה");
+      assert.equal(overlay._notMyType.hidden, true, "second action hidden for library cards");
     } finally {
       restore();
     }
@@ -488,6 +508,35 @@ describe("genre shelves on the library screen", async () => {
       assert.ok(html.includes('data-work-id="w3"'));
       assert.equal(reloads, 1);
       assert.equal(calls.loadGenreShelves, 1);
+      cleanup();
+    } finally {
+      restore();
+    }
+  });
+
+  it("dismisses a genre book and drops its tile immediately", async () => {
+    const overlay = createGenreOverlay();
+    const restore = installFakeDom(overlay);
+    const root = createLibraryRoot();
+    const { ctx, calls } = createLibraryCtx(lib);
+    try {
+      const cleanup = await library.mount(root, ctx);
+      await settle();
+      click(root, genreBookEl("w1"));
+      await settle();
+      const event = {
+        target: overlay._notMyType,
+        stopImmediatePropagation() {},
+        preventDefault() {},
+      };
+      for (const l of overlay.listeners.filter((x) => x.type === "click" && x.capture)) l.fn(event);
+      await settle();
+      assert.deepEqual(calls.functions, [
+        ["book-details", { simania_id: 501 }],
+        ["dismiss_work", { p_work_id: "w1", p_kind: "not_my_type" }],
+      ]);
+      assert.equal(root.caseEl.innerHTML.includes('data-work-id="w1"'), false);
+      assert.ok(root.caseEl.innerHTML.includes('data-work-id="w2"'));
       cleanup();
     } finally {
       restore();
