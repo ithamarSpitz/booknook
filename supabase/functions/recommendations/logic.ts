@@ -19,15 +19,22 @@ export type ScoredCandidate = {
 
 export type Seed = LibraryItem & { weight: number };
 
+export type NegativeSeed = Pick<WorkRow, "similar_ids">;
+
 /** Weight of an unrated book on the "read" shelf: neutral, never shown to users. */
 export const UNRATED_READ_WEIGHT = 2.5;
+
+/** Weight of a work dismissed as "not my type". */
+export const NOT_MY_TYPE_WEIGHT = 5;
 
 /**
  * How much a shelved book pulls recommendations toward its similar books:
  * its rating when 3-5 (on any shelf), 2.5 when unrated on "read", otherwise 0.
  * Ratings 1-2 and unrated books on other shelves are not seeds.
  */
-export function seedWeight(item: Pick<LibraryItem, "rating" | "shelf_kind">): number {
+export function seedWeight(
+  item: Pick<LibraryItem, "rating" | "shelf_kind">,
+): number {
   if (item.rating != null) return item.rating >= 3 ? item.rating : 0;
   return item.shelf_kind === "read" ? UNRATED_READ_WEIGHT : 0;
 }
@@ -52,8 +59,11 @@ export function selectSeeds(items: LibraryItem[]): Seed[] {
     );
 }
 
-/** Sum over seeds of weight x closeness, closeness = 1 - rank/40 in the seed's Hardcover similar list. */
-export function scoreCandidates(seeds: Seed[]): ScoredCandidate[] {
+/** Sum positive seed contributions, then subtract matching "not my type" contributions. */
+export function scoreCandidates(
+  seeds: Seed[],
+  negativeSeeds: readonly NegativeSeed[] = [],
+): ScoredCandidate[] {
   const scores = new Map<number, { score: number; because: number[] }>();
   for (const seed of seeds) {
     for (
@@ -68,7 +78,18 @@ export function scoreCandidates(seeds: Seed[]): ScoredCandidate[] {
       scores.set(id, current);
     }
   }
-  return [...scores].map(([hardcover_id, value]) => ({
+  for (const seed of negativeSeeds) {
+    for (const [rank, id] of seed.similar_ids.slice(0, 40).entries()) {
+      if (!Number.isInteger(id)) continue;
+      const current = scores.get(id);
+      if (!current) continue;
+      current.score -= NOT_MY_TYPE_WEIGHT * (1 - rank / 40);
+    }
+  }
+  return [...scores].filter(([, value]) => value.score > 0).map(([
+    hardcover_id,
+    value,
+  ]) => ({
     hardcover_id,
     ...value,
   }))

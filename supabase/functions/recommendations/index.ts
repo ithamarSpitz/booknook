@@ -20,6 +20,7 @@ import { ensureResolved } from "../_shared/catalog.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import {
   buildGenreShelves,
+  type GenreNegativeSeed,
   type GenreSeed,
   missingCandidateIds,
 } from "../_shared/genres.ts";
@@ -36,6 +37,7 @@ import {
   cleanCachedTags,
   excludeCandidates,
   type LibraryItem,
+  type NegativeSeed,
   scoreCandidates,
   selectSeeds,
   sharedTags,
@@ -49,6 +51,7 @@ type GenreRecommendationInput = {
   library: LibraryItem[];
   seeds: ReturnType<typeof selectSeeds>;
   dismissed: ReadonlySet<string>;
+  negativeSeeds: readonly GenreNegativeSeed[];
   ordinaryRecommendations: RecommendationRow[];
   fetchHardcover: (ids: number[]) => Promise<HardcoverBook[]>;
 };
@@ -291,13 +294,34 @@ async function loadLibrary(
 async function loadDismissed(
   db: DbClient,
   userId: string,
-): Promise<Set<string>> {
-  const { data, error } = await db.from("recommendations").select("work_id").eq(
+): Promise<{ workIds: Set<string>; negativeSeeds: NegativeSeed[] }> {
+  const { data, error } = await db.from("dismissed_works").select(
+    "work_id,kind",
+  ).eq(
     "user_id",
     userId,
-  ).eq("dismissed", true);
+  );
   if (error) fail(error);
-  return new Set((data ?? []).map((row: { work_id: string }) => row.work_id));
+  const rows = (data ?? []) as Array<{
+    work_id: string;
+    kind: "hide" | "not_my_type";
+  }>;
+  const negativeWorkIds = rows.filter((row) => row.kind === "not_my_type").map(
+    (row) => row.work_id,
+  );
+  let negativeSeeds: NegativeSeed[] = [];
+  if (negativeWorkIds.length) {
+    const works = await db.from("works").select("similar_ids").in(
+      "id",
+      negativeWorkIds,
+    );
+    if (works.error) fail(works.error);
+    negativeSeeds = (works.data ?? []) as NegativeSeed[];
+  }
+  return {
+    workIds: new Set(rows.map((row) => row.work_id)),
+    negativeSeeds,
+  };
 }
 
 async function loadWorks(
@@ -382,6 +406,7 @@ export async function storeGenreRecommendations({
   library,
   seeds,
   dismissed,
+  negativeSeeds,
   ordinaryRecommendations,
   fetchHardcover,
 }: GenreRecommendationInput): Promise<void> {
@@ -410,6 +435,7 @@ export async function storeGenreRecommendations({
     genreSeedRows,
     worksByHardcoverId,
     100,
+    negativeSeeds,
   );
   const allWorks = await loadAndStoreMissingWorks(
     db,
@@ -429,6 +455,7 @@ export async function storeGenreRecommendations({
   ]);
   const shelves = buildGenreShelves({
     seeds: genreSeedRows,
+    negativeSeeds,
     worksByHardcoverId,
     excludedWorkIds,
   });
@@ -597,13 +624,16 @@ export async function handleRecommendations(
         userId,
         library,
         seeds,
-        dismissed,
+        dismissed: dismissed.workIds,
+        negativeSeeds: dismissed.negativeSeeds.map((seed) => ({
+          similarIds: seed.similar_ids,
+        })),
         ordinaryRecommendations: [],
       });
       return json({ recommendations: [] });
     }
 
-    const scored = scoreCandidates(seeds);
+    const scored = scoreCandidates(seeds, dismissed.negativeSeeds);
     const candidateIds = scored.map((item) => item.hardcover_id);
     const known = await loadWorks(serviceDb, candidateIds);
     const allWorks = await loadAndStoreMissingWorks(
@@ -624,7 +654,7 @@ export async function handleRecommendations(
       scored,
       byHardcover,
       shelved,
-      dismissed,
+      dismissed.workIds,
     )
       .filter((candidate) => byHardcover.has(candidate.hardcover_id)).slice(
         0,
@@ -672,7 +702,10 @@ export async function handleRecommendations(
       userId,
       library,
       seeds,
-      dismissed,
+      dismissed: dismissed.workIds,
+      negativeSeeds: dismissed.negativeSeeds.map((seed) => ({
+        similarIds: seed.similar_ids,
+      })),
       ordinaryRecommendations,
     });
     const preparedByWork = new Map(

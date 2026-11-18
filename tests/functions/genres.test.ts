@@ -86,6 +86,36 @@ Deno.test("candidate scores sum by zero-based rank and sort deterministically", 
   );
 });
 
+Deno.test("not-my-type seeds lower and reorder genre books without changing qualification", () => {
+  const seeds = [
+    seed("1", 5, ["Fantasy"], [100, 101, 102, 103, 104], 11),
+    seed("2", 4, ["Fantasy"], [100, 101, 102, 103, 104], 12),
+  ];
+  const works = new Map(
+    [100, 101, 102, 103, 104].map((id) => [
+      id,
+      { id: `work-${id}`, tags: tags("Fantasy") },
+    ]),
+  );
+  const withoutNegative = buildGenreShelves({
+    seeds,
+    worksByHardcoverId: works,
+    excludedWorkIds: new Set(),
+  });
+  const withNegative = buildGenreShelves({
+    seeds,
+    negativeSeeds: [{ similarIds: [100] }],
+    worksByHardcoverId: works,
+    excludedWorkIds: new Set(),
+  });
+
+  assertEquals(qualifyingGenres(seeds).map(({ genre }) => genre), ["פנטזיה"]);
+  assertEquals(withoutNegative[0].books[0].hardcoverId, 100);
+  assertEquals(withNegative[0].books[0].hardcoverId, 101);
+  assertEquals(withNegative[0].books[4].hardcoverId, 100);
+  assertEquals(withNegative[0].books[4].because, [11, 12]);
+});
+
 Deno.test("genre shelf reasons order contributors, omit non-contributors, and cap at ten", () => {
   const contributingSeeds = Array.from({ length: 12 }, (_, index) =>
     seed(
