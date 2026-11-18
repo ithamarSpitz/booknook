@@ -7,6 +7,7 @@ import { createCard } from "./card.js";
 import * as auth from "./auth.js";
 import * as settings from "./settings.js";
 import * as recs from "./recs.js";
+import * as removed from "./removed.js";
 import * as addBook from "./add-book.js";
 import * as invite from "./invite.js";
 import { createRecsRefresher } from "./recs-refresh.js";
@@ -37,6 +38,7 @@ async function refreshLibrary() {
 const screens = {
   [ROUTES.LIBRARY]: document.getElementById("screen-library"),
   [ROUTES.RECOMMENDATIONS]: document.getElementById("screen-recs"),
+  [ROUTES.REMOVED]: document.getElementById("screen-removed"),
   [ROUTES.SEARCH]: document.getElementById("screen-search"),
   [ROUTES.SETTINGS]: document.getElementById("screen-settings"),
   [ROUTES.INVITE]: document.getElementById("screen-invite"),
@@ -46,6 +48,7 @@ const screens = {
 const mounts = {
   [ROUTES.LIBRARY]: library,
   [ROUTES.RECOMMENDATIONS]: recs,
+  [ROUTES.REMOVED]: removed,
   [ROUTES.SEARCH]: addBook,
   [ROUTES.SETTINGS]: settings,
   [ROUTES.INVITE]: invite,
