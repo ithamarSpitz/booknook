@@ -43,6 +43,12 @@ claude:
 
 copilot:
   enabled: true
+  # Copilot CLI rejects reasoning effort with model "auto" (harness report item 21).
+  implementation_sequence:
+    - {model: auto, auto_tier: balance}
+    - {model: auto, auto_tier: intelligence}
+    - {model: auto, auto_tier: intelligence}
+  escalation_effort: null
 
 providers:
   # agy last-but-one until the harness lets it explore (exact allow rules deny ls/Get-ChildItem,
