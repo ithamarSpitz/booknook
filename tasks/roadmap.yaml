@@ -661,3 +661,35 @@ sprints:
       - npm run check:functions
       - npm run test:functions
       - npm run test:web
+  S15-not-my-type:
+    name: Two remove buttons on recommendations and genre shelves (hide / not my type as negative seed), removed-books page with restore
+    tasks:
+      S15-T1:
+        file: tasks/sprint-15-not-my-type/01-dismissed-works-db.md
+        stage: 1
+        depends_on: []
+      S15-T3:
+        file: tasks/sprint-15-not-my-type/03-two-remove-buttons.md
+        stage: 1
+        depends_on: []
+      S15-T2:
+        file: tasks/sprint-15-not-my-type/02-negative-seeds.md
+        stage: 2
+        depends_on:
+        - S15-T1
+      S15-T4:
+        file: tasks/sprint-15-not-my-type/04-removed-page.md
+        stage: 2
+        depends_on:
+        - S15-T3
+    stage_verification:
+      '1':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '2':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
