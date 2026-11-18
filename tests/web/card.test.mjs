@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { createCard } from "../../public/js/card.js";
+
+describe("book card markup", () => {
+  it("places actions below ratings and long content after actions", () => {
+    const html = readFileSync(new URL("../../public/index.html", import.meta.url), "utf8");
+    const myRating = html.indexOf('class="bk-my-rating"');
+    const actions = html.indexOf('class="bk-actions"');
+    const description = html.indexOf('class="bk-desc"');
+    const meta = html.indexOf('class="bk-meta"');
+
+    assert.ok(myRating < actions, "actions follow the reader rating");
+    assert.ok(actions < description, "actions precede the description");
+    assert.ok(description < meta, "details follow the description");
+    assert.match(html, /class="bk-buttons">\s*<button[^>]+class="bk-remove">הסר<\/button>\s*<button[^>]+class="bk-not-my-type"/);
+  });
+});
 
 function element() {
   const classes = new Set();

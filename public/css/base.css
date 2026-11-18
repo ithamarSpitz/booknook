@@ -258,10 +258,11 @@
   .screen-inner{padding:28px 16px 40px;max-width:1180px;margin:0 auto}
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:50;padding:12px 20px;border-radius:8px;background:#3a220c;color:#fffdf8;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2);max-width:min(92vw,420px);text-align:center}
   .toast[hidden]{display:none}
-  .bk-actions{margin-top:22px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
-  .bk-move{display:flex;flex-direction:column;gap:6px;font-weight:700;color:#6b4a2a}
-  .bk-move select{font:inherit;padding:8px 12px;border:1.5px solid #d6cfc2;border-radius:8px;background:#fff}
-  .bk-remove,.bk-not-my-type{border:0;border-radius:999px;padding:10px 18px;font:inherit;font-weight:700;cursor:pointer;background:#f3e6c8;color:#6b3d14}
+  .bk-actions{margin:14px 0 18px;display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+  .bk-move{display:flex;flex-direction:column;gap:6px;width:min(100%,320px);font-weight:700;color:#6b4a2a}
+  .bk-move select{box-sizing:border-box;width:100%;font:inherit;padding:8px 12px;border:1.5px solid #d6cfc2;border-radius:8px;background:#fff}
+  .bk-buttons{display:flex;flex-wrap:wrap;gap:8px;max-width:100%}
+  .bk-remove,.bk-not-my-type{border:0;border-radius:999px;padding:8px 14px;font:700 14px "Assistant",sans-serif;cursor:pointer;background:#f3e6c8;color:#6b3d14}
   .bk-remove:hover,.bk-not-my-type:hover{background:#e8d4b0}
   .bk-not-my-type[hidden]{display:none}
   .shelf-delete{display:grid;place-items:center;width:24px;height:24px;margin:0;padding:0;border:0;background:none;color:#f0a593;font-size:22px;line-height:1;cursor:pointer;opacity:0;transition:opacity .15s}

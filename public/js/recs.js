@@ -18,7 +18,7 @@ import {
 import { notifyShelvesChanged } from "./events.js";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
-export const LIBRARY_REMOVE_LABEL = "הסר מהספרייה";
+export const LIBRARY_REMOVE_LABEL = "הסר";
 export const RECS_MOVE_LABEL = "הוסף למדף";
 export const RECS_REMOVE_LABEL = "הסר";
 export const RECS_NOT_MY_TYPE_LABEL = "לא הסגנון שלי";
@@ -599,6 +599,8 @@ export function canCompleteRecsWrite(session, isCurrent) {
  * @param {import('./contract.js').RecommendationCard} rec
  */
 export function applyRecsCardChrome(overlay, rec) {
+  const actions = overlay.querySelector(".bk-actions");
+  const buttons = overlay.querySelector(".bk-buttons");
   const moveLabel = overlay.querySelector(".bk-move");
   const moveSelect = overlay.querySelector(".bk-move select");
   const removeBtn = overlay.querySelector(".bk-remove");
@@ -642,23 +644,23 @@ export function applyRecsCardChrome(overlay, rec) {
 
   // The grid clamps the reason to a few lines; the card always shows all of it.
   const reasonText = buildReasonLine(rec.because_titles, rec.shared_tags);
-  if (reasonText && removeBtn?.parentElement) {
+  if (reasonText && actions) {
     const reason = hostDocument(overlay)?.createElement("p");
     if (reason) {
       reason.className = "bk-rec-reason";
       reason.textContent = reasonText;
-      removeBtn.parentElement.insertBefore(reason, removeBtn.parentElement.firstChild);
+      actions.insertBefore(reason, actions.firstChild);
       session.reason = reason;
     }
   }
 
-  if (rec.english_only && removeBtn) {
+  if (rec.english_only && actions && buttons) {
     const doc = hostDocument(overlay);
     const note = doc?.createElement("p");
     if (note) {
       note.className = "bk-rec-note";
       note.textContent = ENGLISH_ONLY_NOTE;
-      removeBtn.parentElement?.insertBefore(note, removeBtn);
+      actions.insertBefore(note, buttons);
       session.note = note;
     }
   }
