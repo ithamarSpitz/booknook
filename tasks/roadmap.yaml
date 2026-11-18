@@ -11,7 +11,6 @@ sprints:
       '1':
       - npm run check:contract
       - npm run check:functions
-
   S1-build:
     name: Database, functions, app shell, screens, integration gate
     tasks:
@@ -79,7 +78,6 @@ sprints:
       '3':
       - npm run test:db
       - npm run verify:integration
-
   S2-release:
     name: Deployment preparation
     tasks:
@@ -92,7 +90,6 @@ sprints:
       - npm run test:db
       - npm run check:functions
       - npm run test:functions
-
   S3-polish:
     name: Visual polish
     tasks:
@@ -103,7 +100,6 @@ sprints:
     stage_verification:
       '1':
       - npm run test:web
-
   S4-resolution:
     name: Link more Hebrew editions and never recommend an owned book
     tasks:
@@ -148,7 +144,6 @@ sprints:
       - npm run test:functions
       - npm run test:web
       - npm run verify:resolution
-
   S5-open-refresh:
     name: Refresh recommendations when the app opens
     tasks:
@@ -159,7 +154,6 @@ sprints:
     stage_verification:
       '1':
       - npm run test:web
-
   S6-localization:
     name: Find Hebrew editions for English-only recommendations
     tasks:
@@ -232,7 +226,6 @@ sprints:
       - npm run test:web
       - npm run verify:resolution
       - npm run verify:localization
-
   S7-english-books:
     name: English books on shelves (Hardcover editions) and verified title matches
     tasks:
@@ -302,7 +295,6 @@ sprints:
       - npm run verify:resolution
       - npm run verify:localization
       - npm run verify:english
-
   S8-genre-shelves:
     name: Genre recommendation shelves below the reader's shelves
     tasks:
@@ -344,7 +336,6 @@ sprints:
       - npm run test:web
       - npm run verify:resolution
       - npm run verify:localization
-
   demo:
     name: Harness demo DAG
     tasks:
@@ -431,7 +422,8 @@ sprints:
       - npm run test:web
       - npm run verify:repair
   S10-relink:
-    name: Relink wrong-author editions; recommendations never use English editions; genre card reasons and Hebrew editions; shelf rating stars; swipe to close card
+    name: Relink wrong-author editions; recommendations never use English editions;
+      genre card reasons and Hebrew editions; shelf rating stars; swipe to close card
     tasks:
       S10-T1:
         file: tasks/sprint-10-relink/01-page-original.md
@@ -537,7 +529,8 @@ sprints:
       - npm run test:web
       - npm run verify:localization
   S11-refresh-all:
-    name: Operator refresh of every reader's recommendations and genre shelves after a deploy
+    name: Operator refresh of every reader's recommendations and genre shelves after
+      a deploy
     tasks:
       S11-T1:
         file: tasks/sprint-11-refresh-all/01-operator-session.md
@@ -556,7 +549,8 @@ sprints:
       - npm run check:functions
       - npm run test:functions
   S12-fallback:
-    name: Catalog fallback for English-only books (NLI by author, Simania verified, never relinks)
+    name: Catalog fallback for English-only books (NLI by author, Simania verified,
+      never relinks)
     tasks:
       S12-T1:
         file: tasks/sprint-12-fallback/01-nli-author-status.md
@@ -618,7 +612,8 @@ sprints:
       - npm run test:web
       - npm run verify:fallback
   S13-fallback-g:
-    name: Harden catalog fallback rule G (distinctive names, stop words, geresh tokens, author parsing, Wikidata retry) and population review
+    name: Harden catalog fallback rule G (distinctive names, stop words, geresh tokens,
+      author parsing, Wikidata retry) and population review
     tasks:
       S13-T1:
         file: tasks/sprint-13-fallback-g/01-candidates-hardening.md
@@ -662,7 +657,8 @@ sprints:
       - npm run test:functions
       - npm run test:web
   S15-not-my-type:
-    name: Two remove buttons on recommendations and genre shelves (hide / not my type as negative seed), removed-books page with restore
+    name: Two remove buttons on recommendations and genre shelves (hide / not my type
+      as negative seed), removed-books page with restore
     tasks:
       S15-T1:
         file: tasks/sprint-15-not-my-type/01-dismissed-works-db.md
@@ -682,6 +678,11 @@ sprints:
         stage: 2
         depends_on:
         - S15-T3
+      S15-T5:
+        file: tasks/sprint-15-not-my-type/S15-T5.md
+        stage: 2
+        depends_on:
+        - S15-T1
     stage_verification:
       '1':
       - npm run check:contract
