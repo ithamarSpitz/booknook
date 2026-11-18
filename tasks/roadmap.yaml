@@ -694,3 +694,31 @@ sprints:
       - npm run check:functions
       - npm run test:functions
       - npm run test:web
+  S16-card-order:
+    name: Book card actions below the ratings (shelf selector + remove buttons, details after description) and recommendations refresh after remove/restore
+    tasks:
+      S16-T1:
+        file: tasks/sprint-16-card-order/01-card-layout.md
+        stage: 1
+        depends_on: []
+      S16-T2:
+        file: tasks/sprint-16-card-order/02-refresh-on-dismiss.md
+        stage: 2
+        depends_on:
+        - S16-T1
+      S16-T3:
+        file: tasks/sprint-16-card-order/03-frontend-doc.md
+        stage: 2
+        depends_on:
+        - S16-T1
+    stage_verification:
+      '1':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '2':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
