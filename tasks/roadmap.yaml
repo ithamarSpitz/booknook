@@ -728,3 +728,73 @@ sprints:
       - npm run check:functions
       - npm run test:functions
       - npm run test:web
+  S17-genre-control:
+    name: Genres from data (normalized tags, aliases, en-prefixed genres) and reader control over
+      genre shelves (pin, hide, 1-20 shelves, settings page)
+    tasks:
+      S17-T1:
+        file: tasks/sprint-17-genre-control/01-contract.md
+        stage: 1
+        depends_on: []
+      S17-T2:
+        file: tasks/sprint-17-genre-control/02-genre-keys.md
+        stage: 2
+        depends_on:
+        - S17-T1
+      S17-T3:
+        file: tasks/sprint-17-genre-control/03-genre-tables.md
+        stage: 2
+        depends_on:
+        - S17-T1
+      S17-T4:
+        file: tasks/sprint-17-genre-control/04-shelf-plan.md
+        stage: 3
+        depends_on:
+        - S17-T2
+      S17-T6:
+        file: tasks/sprint-17-genre-control/06-library-shelves.md
+        stage: 3
+        depends_on:
+        - S17-T3
+      S17-T5:
+        file: tasks/sprint-17-genre-control/05-handler-wiring.md
+        stage: 4
+        depends_on:
+        - S17-T3
+        - S17-T4
+      S17-T7:
+        file: tasks/sprint-17-genre-control/07-settings-page.md
+        stage: 4
+        depends_on:
+        - S17-T3
+        - S17-T6
+      S17-T8:
+        file: tasks/sprint-17-genre-control/08-architecture-docs.md
+        stage: 5
+        depends_on:
+        - S17-T2
+        - S17-T3
+        - S17-T4
+        - S17-T5
+        - S17-T6
+        - S17-T7
+    stage_verification:
+      '1':
+      - npm run check:contract
+      '2':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '3':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '4':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '5':
+      - npm run check:contract
