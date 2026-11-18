@@ -1,4 +1,5 @@
 import { RPCS } from "./contract.js";
+import { notifyRecsInputsChanged } from "./events.js";
 
 export const RESTORED_TOAST = "הספר יחזור להמלצות בפעם הבאה שהן יתעדכנו";
 export const REMOVED_EMPTY = "לא הסרת ספרים";
@@ -112,6 +113,7 @@ export async function mount(root, ctx) {
     button.disabled = true;
     try {
       await restoreRemovedWork(client, workId);
+      notifyRecsInputsChanged();
       if (!alive) return;
       row.remove();
       if (!content?.querySelector(".removed-row")) {

@@ -15,7 +15,7 @@ import {
   soundAgrees,
   titleMatch,
 } from "./hebrew-fallback.js";
-import { notifyShelvesChanged } from "./events.js";
+import { notifyRecsInputsChanged, notifyShelvesChanged } from "./events.js";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
 export const LIBRARY_REMOVE_LABEL = "הסר";
@@ -882,6 +882,7 @@ export async function openRecommendationCard(overlay, rec, deps, options = {}) {
             p_kind: kind,
           });
           if (error) throw error;
+          notifyRecsInputsChanged();
           if (canCompleteRecsWrite(session, deps.isCurrent())) {
             deps.card.close();
           }

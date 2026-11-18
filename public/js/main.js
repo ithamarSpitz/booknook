@@ -12,7 +12,7 @@ import * as addBook from "./add-book.js";
 import * as invite from "./invite.js";
 import { createRecsRefresher } from "./recs-refresh.js";
 import { createOpenRefresh } from "./app-open-refresh.js";
-import { SHELVES_CHANGED } from "./events.js";
+import { RECS_INPUTS_CHANGED, SHELVES_CHANGED } from "./events.js";
 
 /** @type {import('./data.js').LibraryState | null} */
 let libraryState = null;
@@ -74,6 +74,7 @@ const openRefresh = createOpenRefresh({
 
 // Any book landing on a shelf regenerates recommendations quietly in the background.
 document.addEventListener(SHELVES_CHANGED, () => ctx.recsRefresh.request());
+document.addEventListener(RECS_INPUTS_CHANGED, () => ctx.recsRefresh.request());
 
 document.addEventListener("visibilitychange", () => {
   openRefresh.visibility(document.visibilityState === "visible");
