@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(45);
+select plan(46);
 
 insert into auth.users (id, aud, role, email, encrypted_password, raw_user_meta_data)
 values
@@ -65,8 +65,11 @@ select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002
 select is((select name from public.shelves where kind = 'custom'),
           'Bob Custom', 'RLS prevents updating another user shelves');
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', true);
-update public.recommendations set dismissed = true
- where user_id = '00000000-0000-0000-0000-000000000002';
+select throws_ok(
+  $$update public.recommendations set dismissed = true
+     where user_id = '00000000-0000-0000-0000-000000000002'$$,
+  '42501', 'permission denied for table recommendations',
+  'clients cannot update another user recommendation');
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
 select is((select dismissed from public.recommendations where user_id = auth.uid()),
           false, 'RLS prevents updating another user recommendation');
@@ -193,19 +196,28 @@ select results_eq(
     where s.kind = 'want' order by sb.position$$,
   $$values (105,0), (106,1)$$, 'remove_book closes the book gap');
 
-select lives_ok(
+select throws_ok(
   $$update public.recommendations set dismissed = true
     where user_id = auth.uid() and work_id = '10000000-0000-0000-0000-000000000007'$$,
-  'a user can update dismissed on an owned recommendation');
+  '42501', 'permission denied for table recommendations',
+  'a client cannot update dismissed on an owned recommendation');
 select throws_ok(
   $$update public.recommendations set score = 9
     where user_id = auth.uid() and work_id = '10000000-0000-0000-0000-000000000007'$$,
   '42501', 'permission denied for table recommendations',
   'a recommendation client cannot update score');
+reset role;
+update public.recommendations set dismissed = true
+ where user_id = '00000000-0000-0000-0000-000000000001'
+   and work_id = '10000000-0000-0000-0000-000000000007';
 select throws_ok(
   $$update public.recommendations set dismissed = false
-    where user_id = auth.uid() and work_id = '10000000-0000-0000-0000-000000000007'$$,
+    where user_id = '00000000-0000-0000-0000-000000000001'
+      and work_id = '10000000-0000-0000-0000-000000000007'$$,
   '22023', 'dismissal is permanent', 'a dismissed recommendation cannot be restored');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
 
 -- Create one Bob book as Bob, then verify Alice cannot see it.
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);

@@ -5,6 +5,8 @@ export type SimaniaBook = SimaniaBookShape;
 
 export type ShelfKind = "reading" | "read" | "want" | "stopped" | "custom";
 
+export type DismissKind = "hide" | "not_my_type";
+
 export type ResolveStatus =
   | "pending"
   | "wikidata"
@@ -91,6 +93,13 @@ export interface RecommendationRow {
   shared_tags: string[];
   dismissed: boolean;
   generated_at: string;
+}
+
+export interface DismissedWorkRow {
+  user_id: string;
+  work_id: string;
+  kind: DismissKind;
+  dismissed_at: string;
 }
 
 export interface SearchCacheRow {
