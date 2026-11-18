@@ -41,12 +41,16 @@ agy:
 claude:
   enabled: true
 
+copilot:
+  enabled: true
+
 providers:
   # agy last-but-one until the harness lets it explore (exact allow rules deny ls/Get-ChildItem,
   # which burns attempts; harness report items 11-13).
   priority:
     - codex
     - claude
+    - copilot
     - agy
     - cursor
 
