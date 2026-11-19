@@ -21,13 +21,17 @@ import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import {
   buildGenreShelves,
   type GenreNegativeSeed,
+  type GenrePreference,
   type GenreSeed,
   missingCandidateIds,
+  type ReaderGenre,
+  readerGenres,
 } from "../_shared/genres.ts";
 import type {
   EditionRow,
   GenreRecommendationReplacement,
   HebrewHint,
+  ReaderGenreReplacement,
   RecommendationCard,
   RecommendationReplacement,
   RecommendationRow,
@@ -417,8 +421,28 @@ export async function storeGenreRecommendations({
       p_rows: [],
     });
     if (cleared.error) fail(cleared.error);
+    await storeReaderGenresSafely(db, userId, []);
     return;
   }
+
+  const profile = await db.from("profiles").select("genre_shelf_count")
+    .eq("id", userId).maybeSingle();
+  if (profile.error) fail(profile.error);
+  const storedCount = (profile.data as { genre_shelf_count?: number } | null)
+    ?.genre_shelf_count;
+  const shelfCount = typeof storedCount === "number" ? storedCount : 10;
+  const preferenceRows = await db.from("genre_preferences")
+    .select("genre_key,state,pin_order").eq("user_id", userId);
+  if (preferenceRows.error) fail(preferenceRows.error);
+  const preferences: GenrePreference[] = (
+    (preferenceRows.data ?? []) as Array<
+      { genre_key: string; state: "pinned" | "hidden"; pin_order: number | null }
+    >
+  ).map((row) => ({
+    genreKey: row.genre_key,
+    state: row.state,
+    pinOrder: row.pin_order,
+  }));
 
   const candidateIds = [
     ...new Set(
@@ -434,8 +458,9 @@ export async function storeGenreRecommendations({
   const missingIds = missingCandidateIds(
     genreSeedRows,
     worksByHardcoverId,
-    100,
+    200,
     negativeSeeds,
+    { shelfCount, preferences },
   );
   const allWorks = await loadAndStoreMissingWorks(
     db,
@@ -458,6 +483,8 @@ export async function storeGenreRecommendations({
     negativeSeeds,
     worksByHardcoverId,
     excludedWorkIds,
+    shelfCount,
+    preferences,
   });
   const shelfWorkIds = shelves.flatMap((shelf) =>
     shelf.books.map((book) => book.workId)
@@ -493,7 +520,7 @@ export async function storeGenreRecommendations({
       shelf.books.map((book, position) => ({
         work_id: book.workId,
         genre: shelf.genre,
-        genre_key: shelf.genre,
+        genre_key: shelf.genreKey,
         shelf_position: shelfPosition,
         position,
         simania_id: recommendationEditionByWork.has(book.workId)
@@ -508,6 +535,51 @@ export async function storeGenreRecommendations({
     p_rows: replacements,
   });
   if (replaced.error) fail(replaced.error);
+
+  try {
+    await storeReaderGenres(
+      db,
+      userId,
+      readerGenres({
+        seeds: genreSeedRows,
+        worksByHardcoverId,
+        excludedWorkIds,
+      }),
+    );
+  } catch (error) {
+    console.warn("Reader genres failed:", error);
+  }
+}
+
+async function storeReaderGenres(
+  db: DbClient,
+  userId: string,
+  genres: ReaderGenre[],
+): Promise<void> {
+  const rows: ReaderGenreReplacement[] = genres.map((genre, position) => ({
+    genre_key: genre.genreKey,
+    label: genre.genre,
+    seed_count: genre.seedCount,
+    candidate_count: genre.candidateCount,
+    position,
+  }));
+  const stored = await db.rpc("replace_reader_genres", {
+    p_user_id: userId,
+    p_rows: rows,
+  });
+  if (stored.error) fail(stored.error);
+}
+
+async function storeReaderGenresSafely(
+  db: DbClient,
+  userId: string,
+  genres: ReaderGenre[],
+): Promise<void> {
+  try {
+    await storeReaderGenres(db, userId, genres);
+  } catch (error) {
+    console.warn("Reader genres failed:", error);
+  }
 }
 
 async function updateGenreRecommendationsSafely(
