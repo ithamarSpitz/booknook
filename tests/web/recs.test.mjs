@@ -17,6 +17,7 @@ import {
   canCompleteRecsWrite,
   hasRecommendationSeeds,
   mapStoredRecommendationRow,
+  mount,
   openRecommendationCard,
   removeRecommendationByWorkId,
   restoreRecsCardChrome,
@@ -32,6 +33,119 @@ import {
 } from "../../public/js/recs.js";
 
 const recsCss = readFileSync(new URL("../../public/css/recs.css", import.meta.url), "utf8");
+
+describe("recommendation refresh failure status", () => {
+  it("shows when failed and idle, hides while busy, and stays hidden after success", async () => {
+    const inner = {
+      innerHTML: "",
+      querySelectorAll: () => [],
+    };
+    const refresh = createRefreshState({ failed: true });
+    const result = Promise.resolve({ data: [], error: null });
+    result.eq = () => result;
+    result.order = () => result;
+    const previousDocument = globalThis.document;
+    globalThis.document = { getElementById: () => null };
+    const cleanup = await mount(
+      { querySelector: () => inner },
+      {
+        api: {
+          getClient: () => ({ from: () => ({ select: () => result }) }),
+          callFunction: async () => ({}),
+        },
+        getLibrary: () => ({
+          shelves: [{ kind: SHELF_KINDS.READ, books: [{ work_id: "seed" }] }],
+        }),
+        showToast: () => {},
+        card: { open() {}, close() {} },
+        recsRefresh: refresh.api,
+      },
+    );
+
+    assert.match(inner.innerHTML, /class="recs-refresh-failed" role="status"/);
+    assert.match(inner.innerHTML, /העדכון האחרון של ההמלצות נכשל/);
+    refresh.set({ busy: true });
+    assert.doesNotMatch(inner.innerHTML, /recs-refresh-failed/);
+    refresh.set({ busy: false, failed: false });
+    assert.doesNotMatch(inner.innerHTML, /recs-refresh-failed/);
+    cleanup();
+    globalThis.document = previousDocument;
+  });
+});
+
+describe("recommendation refresh completion render", () => {
+  it("keeps the spinner, with no empty-state flash, until the reload resolves", async () => {
+    const inner = {
+      innerHTML: "",
+      querySelectorAll: () => [],
+    };
+    const refresh = createRefreshState();
+    let release = null;
+    let hold = false;
+    const makeResult = () => {
+      const result = hold
+        ? new Promise((resolve) => {
+          release = () => resolve({ data: [], error: null });
+        })
+        : Promise.resolve({ data: [], error: null });
+      result.eq = () => result;
+      result.order = () => result;
+      return result;
+    };
+    const previousDocument = globalThis.document;
+    globalThis.document = { getElementById: () => null };
+    const cleanup = await mount(
+      { querySelector: () => inner },
+      {
+        api: {
+          getClient: () => ({ from: () => ({ select: makeResult }) }),
+          callFunction: async () => ({}),
+        },
+        getLibrary: () => ({
+          shelves: [{ kind: SHELF_KINDS.READ, books: [{ work_id: "seed" }] }],
+        }),
+        showToast: () => {},
+        card: { open() {}, close() {} },
+        recsRefresh: refresh.api,
+      },
+    );
+
+    refresh.set({ busy: true });
+    assert.match(inner.innerHTML, /recs-updating/);
+    hold = true;
+    refresh.set({ busy: false });
+    assert.match(inner.innerHTML, /recs-updating/);
+    assert.doesNotMatch(inner.innerHTML, /עדיין לא מצאנו המלצות/);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.doesNotMatch(inner.innerHTML, /recs-updating/);
+    assert.match(inner.innerHTML, /עדיין לא מצאנו המלצות/);
+    cleanup();
+    globalThis.document = previousDocument;
+  });
+});
+
+function createRefreshState(initial = {}) {
+  let busy = Boolean(initial.busy);
+  let failed = Boolean(initial.failed);
+  const listeners = new Set();
+  return {
+    api: {
+      busy: () => busy,
+      failed: () => failed,
+      request() {},
+      subscribe(fn) {
+        listeners.add(fn);
+        return () => listeners.delete(fn);
+      },
+    },
+    set(next) {
+      if (Object.hasOwn(next, "busy")) busy = next.busy;
+      if (Object.hasOwn(next, "failed")) failed = next.failed;
+      for (const listener of listeners) listener(busy);
+    },
+  };
+}
 
 describe("buildReasonLine", () => {
   it("formats one seed title", () => {

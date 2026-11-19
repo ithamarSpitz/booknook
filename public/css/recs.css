@@ -22,6 +22,14 @@
   animation: recs-pulse 1.6s ease-in-out infinite;
 }
 
+.recs-refresh-failed {
+  margin: 0 0 14px;
+  color: var(--muted, #6b5a48);
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: start;
+}
+
 @keyframes recs-pulse {
   0%,
   100% {

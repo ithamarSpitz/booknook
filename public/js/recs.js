@@ -24,6 +24,7 @@ export const RECS_REMOVE_LABEL = "הסר";
 export const RECS_NOT_MY_TYPE_LABEL = "לא הסגנון שלי";
 export const RECS_SHELF_PLACEHOLDER = "בחרו מדף";
 export const ENGLISH_ONLY_NOTE = "אין מהדורה עברית זמינה לספר זה.";
+const REFRESH_FAILED_STATUS = "העדכון האחרון של ההמלצות נכשל. ננסה שוב בשינוי הבא.";
 
 /**
  * @param {string[]} becauseTitles
@@ -917,7 +918,7 @@ export async function openRecommendationCard(overlay, rec, deps, options = {}) {
  *   showToast: (msg: string) => void,
  *   card: { open: (book: import('./contract.js').BookCard, shelves: unknown[]) => void, close: () => void },
  *   reloadLibrary?: () => Promise<void>,
- *   recsRefresh?: { busy: () => boolean, request: () => void, subscribe: (fn: (busy: boolean) => void) => () => void },
+ *   recsRefresh?: { busy: () => boolean, failed?: () => boolean, request: () => void, subscribe: (fn: (busy: boolean) => void) => () => void },
  * }} ctx
  */
 export async function mount(root, ctx) {
@@ -928,6 +929,7 @@ export async function mount(root, ctx) {
   // Recommendations regenerate in the background after shelf changes
   // (recs-refresh.js); this screen shows the stored list until that finishes.
   let refreshing = ctx.recsRefresh?.busy() ?? false;
+  let refreshFailed = ctx.recsRefresh?.failed?.() ?? false;
   let alive = true;
   let libraryChecked = Boolean(ctx.getLibrary());
   let loadedLibrary = ctx.getLibrary();
@@ -955,12 +957,16 @@ export async function mount(root, ctx) {
 
   function render() {
     if (!alive) return;
+    const failedStatus = refreshFailed && !refreshing
+      ? `<p class="recs-refresh-failed" role="status">${REFRESH_FAILED_STATUS}</p>`
+      : "";
 
     if (!libraryChecked) {
       inner.innerHTML = `
         <header class="recs-head">
           <h1>המלצות בשבילי</h1>
         </header>
+        ${failedStatus}
         <p class="recs-loading" role="status">טוען…</p>`;
       return;
     }
@@ -970,6 +976,7 @@ export async function mount(root, ctx) {
         <header class="recs-head">
           <h1>המלצות בשבילי</h1>
         </header>
+        ${failedStatus}
         <p class="empty" role="status">כדי לקבל המלצות, סמן בספרייה ספרים שאתה קורא או שכבר קראת.</p>
         <p class="recs-to-library"><a href="#library">לספרייה שלי</a></p>`;
       return;
@@ -1010,6 +1017,7 @@ export async function mount(root, ctx) {
       <header class="recs-head">
         <h1>המלצות בשבילי</h1>
       </header>
+      ${failedStatus}
       ${status}
       ${listHtml}`;
 
@@ -1061,6 +1069,9 @@ export async function mount(root, ctx) {
     if (!alive) return;
     const finished = refreshing && !busy;
     refreshing = busy;
+    refreshFailed = ctx.recsRefresh?.failed?.() ?? false;
+    // reloadStored() ends with render(); rendering first would flash the
+    // pre-refresh list (or the empty state) without the spinner.
     if (finished) void reloadStored();
     else render();
   });

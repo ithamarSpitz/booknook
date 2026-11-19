@@ -50,19 +50,53 @@ describe("background recommendations refresh", () => {
     assert.equal(refresher.busy(), false);
   });
 
-  it("stays quiet and idle after a failure", async () => {
+  it("sets failed after a call error, notifies, and clears it after a successful run", async () => {
     const warn = console.warn;
     console.warn = () => {};
     try {
+      let shouldFail = true;
+      const states = [];
       const refresher = createRecsRefresher({
         delayMs: 1,
         callFunction: async () => {
-          throw new Error("offline");
+          if (shouldFail) throw new Error("offline");
+          return { recommendations: [] };
         },
+        localize: async () => {},
       });
+      refresher.subscribe((busy) => states.push([busy, refresher.failed()]));
+      assert.equal(refresher.failed(), false);
       refresher.request();
       await tick(10);
       assert.equal(refresher.busy(), false);
+      assert.equal(refresher.failed(), true);
+      assert.deepEqual(states.at(-1), [false, true]);
+
+      shouldFail = false;
+      refresher.request();
+      await tick(10);
+      assert.equal(refresher.failed(), false);
+      assert.deepEqual(states.at(-1), [false, false]);
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  it("sets failed when localization throws", async () => {
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      const states = [];
+      const refresher = createRecsRefresher({
+        delayMs: 1,
+        callFunction: async () => ({ recommendations: [] }),
+        localize: async () => { throw new Error("localization failed"); },
+      });
+      refresher.subscribe((busy) => states.push([busy, refresher.failed()]));
+      refresher.request();
+      await tick(10);
+      assert.equal(refresher.failed(), true);
+      assert.deepEqual(states.at(-1), [false, true]);
     } finally {
       console.warn = warn;
     }

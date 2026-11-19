@@ -92,6 +92,18 @@ describe("genre settings page", () => {
     cleanup();
   });
 
+  it("shows a refresh failure only while the refresher is idle and failed", async () => {
+    const h = createHarness({ refreshFailed: true });
+    const cleanup = await mount(h.root, h.ctx);
+    assert.match(h.content.innerHTML, /class="genre-refresh-failed" role="status"/);
+    assert.match(h.content.innerHTML, /העדכון האחרון של ההמלצות נכשל/);
+    h.setRefresh({ busy: true });
+    assert.doesNotMatch(h.content.innerHTML, /genre-refresh-failed/);
+    h.setRefresh({ busy: false, failed: false });
+    assert.doesNotMatch(h.content.innerHTML, /genre-refresh-failed/);
+    cleanup();
+  });
+
   it("registers #genres and links it after the removed books item", async () => {
     assert.equal(ROUTES.GENRES, "#genres");
     const html = await readFile(new URL("../../public/index.html", import.meta.url), "utf8");
@@ -105,11 +117,20 @@ describe("genre settings page", () => {
   });
 });
 
-function createHarness({ count = 1 + 9, genres = readerGenres, prefs: prefRows = prefs } = {}) {
+function createHarness({
+  count = 1 + 9,
+  genres = readerGenres,
+  prefs: prefRows = prefs,
+  refreshBusy = false,
+  refreshFailed = false,
+} = {}) {
   const handlers = {};
   const rpcCalls = [];
   const toasts = [];
   const events = [];
+  const refreshListeners = new Set();
+  let busy = refreshBusy;
+  let failed = refreshFailed;
   const target = new EventTarget();
   globalThis.document = target;
   target.addEventListener(RECS_INPUTS_CHANGED, () => events.push(1));
@@ -151,6 +172,14 @@ function createHarness({ count = 1 + 9, genres = readerGenres, prefs: prefRows =
         }),
       },
       showToast: (m) => toasts.push(m),
+      recsRefresh: {
+        busy: () => busy,
+        failed: () => failed,
+        subscribe(fn) {
+          refreshListeners.add(fn);
+          return () => refreshListeners.delete(fn);
+        },
+      },
     },
     clickOption(key, state) {
       const row = { dataset: { genreKey: key } };
@@ -166,6 +195,11 @@ function createHarness({ count = 1 + 9, genres = readerGenres, prefs: prefRows =
     change(value) {
       const select = { value, closest: (s) => (s === ".genre-count" ? select : null) };
       return handlers.change({ target: select });
+    },
+    setRefresh(next) {
+      if (Object.hasOwn(next, "busy")) busy = next.busy;
+      if (Object.hasOwn(next, "failed")) failed = next.failed;
+      for (const listener of refreshListeners) listener(busy);
     },
   };
   return h;

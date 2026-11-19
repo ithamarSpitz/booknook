@@ -102,10 +102,11 @@ function countSelectHtml(count, pending) {
 }
 
 const errorText = (error, fallback) => (error instanceof Error && error.message ? error.message : fallback);
+const REFRESH_FAILED_STATUS = "העדכון האחרון של ההמלצות נכשל. ננסה שוב בשינוי הבא.";
 
 /**
  * @param {HTMLElement} root
- * @param {{ api: { getClient: Function }, showToast?: (message: string) => void }} ctx
+ * @param {{ api: { getClient: Function }, showToast?: (message: string) => void, recsRefresh?: { busy: () => boolean, failed?: () => boolean, subscribe: (fn: (busy: boolean) => void) => () => void } }} ctx
  */
 export async function mount(root, ctx) {
   const inner = root.querySelector(".screen-inner") ?? root;
@@ -114,6 +115,10 @@ export async function mount(root, ctx) {
   let rows = [];
   let shelfCount = DEFAULT_SHELF_COUNT;
   let shelfCountPending = false;
+  let loaded = false;
+  let loadError = null;
+  let refreshBusy = ctx.recsRefresh?.busy() ?? false;
+  let refreshFailed = ctx.recsRefresh?.failed?.() ?? false;
 
   inner.innerHTML = `<div class="genre-wrap">
     <h1 class="genre-title">${GENRES_TITLE}</h1>
@@ -123,8 +128,24 @@ export async function mount(root, ctx) {
 
   const render = () => {
     if (!alive || !content) return;
-    content.innerHTML = `${countSelectHtml(shelfCount, shelfCountPending)}${genreListHtml(rows, shelfCount)}`;
+    const failedStatus = refreshFailed && !refreshBusy
+      ? `<p class="genre-refresh-failed" role="status">${REFRESH_FAILED_STATUS}</p>`
+      : "";
+    const body = loadError
+      ? `<p class="genre-state genre-error" role="alert">${escapeHtml(loadError)}</p>`
+      : loaded
+        ? `${countSelectHtml(shelfCount, shelfCountPending)}${genreListHtml(rows, shelfCount)}`
+        : `<p class="genre-state" role="status">טוען…</p>`;
+    content.innerHTML = `${failedStatus}${body}`;
   };
+
+  const unsubscribe = ctx.recsRefresh?.subscribe((busy) => {
+    if (!alive) return;
+    refreshBusy = busy;
+    refreshFailed = ctx.recsRefresh?.failed?.() ?? false;
+    render();
+  });
+  render();
 
   const saved = () => {
     notifyRecsInputsChanged();
@@ -201,15 +222,16 @@ export async function mount(root, ctx) {
       prefs.data ?? [],
       (shelves.data ?? []).map((r) => r.genre_key),
     );
+    loaded = true;
     render();
   } catch (error) {
-    if (alive && content) {
-      content.innerHTML = `<p class="genre-state genre-error" role="alert">${escapeHtml(errorText(error, "לא הצלחנו לטעון את ההגדרות"))}</p>`;
-    }
+    loadError = errorText(error, "לא הצלחנו לטעון את ההגדרות");
+    render();
   }
 
   return () => {
     alive = false;
+    unsubscribe?.();
     inner.removeEventListener("click", onClick);
     inner.removeEventListener("change", onChange);
     inner.innerHTML = "";
