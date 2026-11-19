@@ -432,7 +432,7 @@ Measured 2026-11-07, both readers: of 55 English-only books, 23 had a Hebrew edi
 | Never Lie (Freida McFadden) | 1029088 | G |
 | Don Quixote (Miguel de Cervantes Saavedra) | 183461 | F (Simania year 0; S19) |
 
-Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (David Koepp); Behind Closed Doors to 220768 (an Israeli book by another author); Pretty Girls (Karin Slaughter) to 41212 הנקודה העיוורת (it is Blindsighted); The Only One Left (Riley Sager) to 1028558 רכבת הנקמה (it is With a Vengeance); The Lathe of Heaven and Watchers to anything by rule G; Regeneration (Pat Barker) to 844 דרך הרפאים (it is The Ghost Road). The Folk of the Faraway Tree (Enid Blyton) to 103718 הרפתקאות ג'ימי ילד הקרקס; North Woods (Daniel Mason) to 223491 ארץ רחוקה (S18; NLI has no Hebrew edition of either, checked 2026-11-19). The two wrong links were made in production on 2026-11-07 by the first rule G (it matched "Julia"/"Atlanta" and "Took"/"Kit") and were undone with `unlink:fallback`. Rule G v2 (S13) was probed over all 61 English-only books on 2026-11-07 and made 20 links, all correct (`tasks/sprint-13-fallback-g/`). Known misses, left English-only: Grass (20895, no Simania description) and Stories of Your Life and Others (42098, no character names). The working probes are in `tasks/sprint-12-fallback/reference/`, a read-only reference that the implementation follows; where they differ from this section, this section wins.
+Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (David Koepp); Behind Closed Doors to 220768 (an Israeli book by another author); Pretty Girls (Karin Slaughter) to 41212 הנקודה העיוורת (it is Blindsighted); The Only One Left (Riley Sager) to 1028558 רכבת הנקמה (it is With a Vengeance); The Lathe of Heaven and Watchers to anything by rule G; Regeneration (Pat Barker) to 844 דרך הרפאים (it is The Ghost Road). The Folk of the Faraway Tree (Enid Blyton) to 103718 הרפתקאות ג'ימי ילד הקרקס; North Woods (Daniel Mason) to 223491 ארץ רחוקה (S18; NLI has no Hebrew edition of either, checked 2026-11-19). Blue Exorcist (Kazue Kato) to 2970 מגרש השדים (The Exorcist; S21). The two wrong links were made in production on 2026-11-07 by the first rule G (it matched "Julia"/"Atlanta" and "Took"/"Kit") and were undone with `unlink:fallback`. Rule G v2 (S13) was probed over all 61 English-only books on 2026-11-07 and made 20 links, all correct (`tasks/sprint-13-fallback-g/`). Known misses, left English-only: Grass (20895, no Simania description) and Stories of Your Life and Others (42098, no character names). The working probes are in `tasks/sprint-12-fallback/reference/`, a read-only reference that the implementation follows; where they differ from this section, this section wins.
 
 **It is a fallback only.** It runs for a card only after the title path and the author path (`match-by-author`) have both missed, and only while the card is still English-only. It never touches a card that has a `simania_id`. It links only through `link-edition`, so an edition already linked to a different work is never relinked (`409`, a miss).
 
@@ -446,6 +446,8 @@ Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (D
   - Server: `supabase/functions/_shared/names.ts` (`nameSoundScore`, moved from `scripts/lib/names.ts`, which now re-exports it) and `_shared/fallback-match.ts` (`mainTitle`, `titleMatch`).
   - Browser: `public/js/names.js` and `public/js/hebrew-fallback.js` (all five helpers).
   - A parity test (`tests/functions/fallback-parity.test.ts`) runs both copies on the same fixed cases and requires identical results.
+
+**Name sound fixes (S21).** `nameSoundScore` (the same algorithm in `public/js/names.js` and `supabase/functions/_shared/names.ts`) must score these pairs of the same person at least 0.6: ג'ו היל / Joe Hill; ג'וג'ו מויס / Jojo Moyes; רוברט מ. פירסיג / Robert M. Pirsig; רואלד דאל / Roald Dahl; אלדוס האקסלי / Aldous Huxley; פאולו קואלו / Paulo Coelho; אן פאצ'ט / Ann Patchett; צ'אק פלאניוק / Chuck Palahniuk; ג'ורג' אורוול / George Orwell; הרוקי מורקמי / Haruki Murakami; אליסון נואל / Alyson Noël; ניקולה יון / Nicola Yoon. It must score these pairs of different people at most 0.3: וויליאם פיטר בלאטי / Kazue Kato; מילן קונדרה / Louis Sachar; ד'ר ד.אשבל / David Mitchell; ליאת רוטנר / Fanny Blake; אריקה לאונרד ג'יימס / Jasper Fforde; אשכר ארבליך-בריפמן / Boualem Sansal; ג'קלין ווילסטון / Pedro Mañas. All the pairs already in the name-sound tests keep their expected side. Measured 2026-11-19: ג'ו היל / Joe Hill scored 0.00, the same as וויליאם פיטר בלאטי / Kazue Kato.
 
 **`hebrew-candidates` (Edge Function, server side; NLI, Wikidata and Hardcover answer from Supabase).**
 - Request `HebrewCandidatesRequest` `{"work_id":"..."}`. Response `HebrewCandidatesResponse` `{"work_id":"...","candidates":[{"title":"...","author":"..."|null,"rule":"A"|"B"|"C"|"D"|"E"|"F"|"G"}],"english_names":["..."],"original_year":1987|null}`. `original_year` (S18) is the work's Hardcover `release_year`, taken from the same single Hardcover request that gives the description; null when Hardcover has none or the request fails. Both the handler and the operator scripts compute it with the shared `originalYearOf(book)` in `supabase/functions/_shared/hebrew-candidates.ts` (S19): the book's `release_year` when it is a positive integer, otherwise null.
@@ -463,6 +465,17 @@ Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (D
   - Measured 2026-11-19 (S18): short names sound-match ordinary Hebrew words. The Folk of the Faraway Tree (Enid Blyton) hit 103718 הרפתקאות ג'ימי ילד הקרקס only through "Beth" and "Wood". North Woods (Daniel Mason) hit 223491 ארץ רחוקה (his 2008 novel A Far Country) through "Poe", "Thoreau", "Choice" and "Chicago", which are authors and a city named in the blurb. The first is stopped by the length rule; the second by the year guard below.
   - NLI 100 author: only subfield `a` is used, and any word with a Latin letter is dropped. Live case: one record came back as "ריילי heb PreferredLanguageHeading סאגר".
 - Bounds: at most 4 NLI (3 creator pages and the uniform-title query), 4 Wikidata and 1 Hardcover requests per call, within 25 seconds. A Wikidata `429` is retried once after 2 seconds; the retry does not count toward the 4. Measured: a bulk run lost Anxious People (rule D) to Wikidata `429`.
+
+**Author guard (browser, S21).** Before any `link-edition` call from `localizeRecommendations`, from the title path, the author path or the fallback, the browser checks `authorGuardRejects(simaniaAuthor, englishAuthors, hebrewAuthor)` from `public/js/hebrew-fallback.js`:
+- `englishAuthors` is the card's English author split on commas;
+- `hebrewAuthor` is the card's `hebrew_author` or empty.
+
+It rejects, and the card stays English-only with no link and no error, exactly when all of these hold:
+- `simaniaAuthor` contains a Hebrew letter;
+- `nameSoundScore(simaniaAuthor, englishAuthors) < 0.3`;
+- not (`hebrewAuthor` is non-empty and `similarity(hebrewAuthor, simaniaAuthor) >= 0.5`).
+
+An empty or Latin-script Simania author is never rejected. Measured 2026-11-19: Blue Exorcist (Kazue Kato) was linked by the title path to 2970 מגרש השדים by וויליאם פיטר בלאטי (The Exorcist).
 
 **Browser decision (`localizeFallback` in `public/js/recs.js`).** It runs after the existing paths miss, for every English-only card, including ones with no `hebrew_hint` or `hebrew_author`.
 1. Call `hebrew-candidates`.
@@ -488,6 +501,8 @@ Must not link: Aurora (Kim Stanley Robinson) to 1013521 כיבוי אורות (D
 - Operator rule for S18 and later fallback changes: run `--population` and `--replay-linked` on the code before the change and on the code after it, then `--compare` each pair. No `refresh:all -- --apply` until every changed book is reviewed, and every book that was decided correctly before is still decided the same way.
 
 **`resolve_status` gains `nli_author`** (linked by this fallback). `link-edition` accepts `source` `nli_author`. **`npm run unlink:fallback`** (`scripts/unlink-fallback.ts`, off-cloud, dry-run by default) lists every edition with `resolve_status = 'nli_author'`: `simania_id`, Hebrew title, work `hardcover_id` and English title. With `--apply` it sets `work_id = null`, `resolve_status = 'pending'` and `resolved_at = null`, and nulls `simania_id` on the recommendation and genre rows that point to those editions, in one transaction. With `--apply --simania <id>` it does the same for one edition.
+
+**`npm run audit:authors`** (`scripts/audit-authors.ts`, read-only, S21) lists every linked positive-ID edition that is on any reader's shelf, recommendation or genre row and that `authorGuardRejects(edition.author, work.original_authors, "")` would reject. One JSON line per edition: `simania_id`, Hebrew title and author, `resolve_status`, work `hardcover_id`, English title and authors, and the best `nameSoundScore`. Then the totals. It writes nothing. The operator reviews this list. Repairs need the operator's OK, one by one: `npm run unlink:fallback -- --apply --simania <id> --any-status` unlinks one edition whatever its `resolve_status` (S21; without `--any-status`, `--simania` still accepts only `nli_author`).
 
 ### `match-by-author`
 
@@ -530,6 +545,7 @@ Relinks: it also plans a relink for each `author_mismatches` entry whose proposa
   5. Print per reader: English-only cards before and after, genre English-only before and after, books linked, and editions filled.
 - **Errors.** A failure on one book is counted and skipped. A failure to get credentials or a session stops with exit `2`, naming the step but no secret.
 - **Dry run.** The default is a dry run: it gets the keys, lists the readers and prints the "before" counts, read-only, with no sessions and no function calls. `--apply` runs the steps.
+- **Failure details (S21).** Every failed book is printed as one JSON line `{ "failed": { "title", "step", "function", "status", "message" } }`: `step` is recommendations, localize, genre-hint or details; `status` is the HTTP status or null; `message` is cut to 200 characters with any token-like string (`eyJ…`) replaced by `[redacted]`. Per-reader totals are as before.
 
 ### `link-edition`
 
