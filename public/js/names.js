@@ -48,8 +48,13 @@ const SOUND_CLASSES = {
   r: "r",
 };
 
-/** @param {string} name @returns {string} */
-export function hebrewSkeleton(name) {
+/**
+ * @param {string} name
+ * @param {boolean} vowelAwareVav
+ * @param {boolean} latinX
+ * @returns {string}
+ */
+function buildHebrewSkeleton(name, vowelAwareVav, latinX) {
   const chars = Array.from(name ?? "");
   let out = "";
   for (let i = 0; i < chars.length; i++) {
@@ -60,15 +65,33 @@ export function hebrewSkeleton(name) {
       i++;
       continue;
     }
+    if (vowelAwareVav && ch === "ו") {
+      if (next === "ו") {
+        out += "v";
+        i++;
+      }
+      continue;
+    }
+    if (latinX && ch === "ק" && next === "ס") {
+      out += "x";
+      i++;
+      continue;
+    }
     out += HEBREW_LETTERS[ch] ?? "";
   }
   return out;
 }
 
 /** @param {string} name @returns {string} */
+export function hebrewSkeleton(name) {
+  return buildHebrewSkeleton(name, false, false);
+}
+
+/** @param {string} name @returns {string} */
 export function latinSkeleton(name) {
   return (name ?? "").normalize("NFKD").replace(/\p{M}/gu, "")
     .toLowerCase().replace(/ph/g, "f").replace(/th/g, "t")
+    .replace(/tch/g, "ch")
     .replace(/ch/g, "k").replace(/sh/g, "s").replace(/ck/g, "k")
     .replace(/c(?=[eiy])/g, "s").replace(/[aeiouy]/g, "")
     .replace(/[^a-z]/g, "");
@@ -76,6 +99,7 @@ export function latinSkeleton(name) {
 
 /** @param {string} skeleton @returns {string} */
 function soundKey(skeleton) {
+  skeleton = skeleton.replace(/ch/g, "k");
   let out = "";
   for (const ch of skeleton) {
     const cls = SOUND_CLASSES[ch];
@@ -112,12 +136,30 @@ function bigramDice(a, b) {
 
 /** @param {string} hebrewName @param {string[]} latinNames @returns {number} */
 export function nameSoundScore(hebrewName, latinNames) {
-  const hebrew = soundKey(hebrewSkeleton(hebrewName));
-  if (hebrew === "" || !Array.isArray(latinNames)) return 0;
+  const fullName = /\s/u.test((hebrewName ?? "").trim());
+  const skeletons = [hebrewSkeleton(hebrewName)];
+  if (fullName) {
+    skeletons.push(
+      buildHebrewSkeleton(hebrewName, true, false),
+      buildHebrewSkeleton(hebrewName, false, true),
+      buildHebrewSkeleton(hebrewName, true, true),
+    );
+  }
+  const hebrewKeys = [...new Set(skeletons.map(soundKey))];
+  if (hebrewKeys[0] === "" || !Array.isArray(latinNames)) return 0;
+  // Alternate vowel/x readings and omitted h are for full names. Keeping
+  // single-token description hits strict avoids short-name false positives.
+  const allowOmittedH = fullName;
   let best = 0;
   for (const latin of latinNames) {
-    const score = bigramDice(hebrew, soundKey(latinSkeleton(latin)));
-    if (score > best) best = score;
+    const latinKey = soundKey(latinSkeleton(latin));
+    for (const hebrew of hebrewKeys) {
+      const comparableLatin = hebrew.includes("h") || !allowOmittedH
+        ? latinKey
+        : latinKey.replace(/h/g, "");
+      const score = bigramDice(hebrew, comparableLatin);
+      if (score > best) best = score;
+    }
   }
   return best;
 }
