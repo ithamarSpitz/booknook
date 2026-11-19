@@ -6,7 +6,7 @@ import { normalize, similarity } from "./utils.ts";
 const NLI = "https://nli.alma.exlibrisgroup.com/view/sru/972NNL_INST";
 const WIKIDATA = "https://www.wikidata.org/w/api.php";
 const HEBREW = /[\u0590-\u05ff]/;
-const LIMIT_MS = 20_000;
+const LIMIT_MS = 25_000;
 
 export type HebrewCandidateRule = "A" | "B" | "C" | "D" | "E" | "F" | "G";
 export type HebrewCandidate = {
@@ -129,7 +129,8 @@ async function nliRecords(
   query: string,
   deps: Deps,
   remaining: () => number,
-): Promise<Record[]> {
+  startRecord?: number,
+): Promise<{ records: Record[]; count: number }> {
   const params = new URLSearchParams({
     version: "1.2",
     operation: "searchRetrieve",
@@ -137,9 +138,14 @@ async function nliRecords(
     maximumRecords: "100",
     recordSchema: "marcxml",
   });
-  return parseNliMarc(
-    await fetchText(deps.fetch, `${NLI}?${params}`, remaining()),
-  );
+  if (startRecord !== undefined) {
+    params.set("startRecord", String(startRecord));
+  }
+  const xml = await fetchText(deps.fetch, `${NLI}?${params}`, remaining());
+  const count = [...xml.matchAll(
+    /<(?:[\w-]+:)?recordData\b/gi,
+  )].length;
+  return { records: parseNliMarc(xml), count };
 }
 
 async function wikidataJson(
@@ -320,18 +326,32 @@ export async function hebrewCandidates(
       }
     }
   };
-  for (
-    const query of [
+  try {
+    const uniform = await nliRecords(
       `alma.creator all "${creator}" AND alma.uniform_title all "${
         cleanQuery(title)
       }"`,
-      `alma.creator all "${creator}"`,
-    ]
-  ) {
+      deps,
+      remaining,
+    );
+    addRecords(uniform.records);
+  } catch {
+    // The creator query remains usable when the uniform-title request fails.
+  }
+  const creatorQuery = `alma.creator all "${creator}"`;
+  for (const startRecord of [1, 101, 201]) {
     try {
-      addRecords(await nliRecords(query, deps, remaining));
+      const page = await nliRecords(
+        creatorQuery,
+        deps,
+        remaining,
+        startRecord,
+      );
+      addRecords(page.records);
+      if (page.count < 100) break;
     } catch {
-      // Each NLI request is independent; records from the other one remain usable.
+      // Keep earlier pages, but do not skip over a failed page.
+      break;
     }
   }
 
