@@ -1219,10 +1219,11 @@ describe("catalog fallback localization", () => {
     ...extra,
   });
 
-  const candidateResponse = (candidates, english_names = []) => ({
+  const candidateResponse = (candidates, english_names = [], original_year = undefined) => ({
     work_id: "fallback-work",
     candidates,
     english_names,
+    original_year,
   });
 
   it("links a single rule-A winner with nli_author", async () => {
@@ -1274,6 +1275,98 @@ describe("catalog fallback localization", () => {
       isCurrent: () => true,
     });
     assert.equal(result, null);
+  });
+
+  it("guards rules E and F below original_year minus one", async () => {
+    const candidate = { title: "ספר", author: null, rule: "F" };
+    const decide = (year) => localizeFallback(rec(), {
+      callFunction: async () => candidateResponse([candidate], [], 2010),
+      searchBooks: async () => [{ id: year, title: "ספר", author: "קים סטנלי רובינסון", year }],
+      isCurrent: () => true,
+    });
+
+    assert.equal(await decide(1990), null);
+    assert.equal(await decide(2009), 2009);
+  });
+
+  it("keeps rules A-D independent of original_year", async () => {
+    for (const rule of ["A", "B", "C", "D"]) {
+      const result = await localizeFallback(rec(), {
+        callFunction: async () => candidateResponse([
+          { title: "ספר", author: "קים סטנלי רובינסון", rule },
+        ], [], 2023),
+        searchBooks: async () => [{
+          id: 100 + rule.charCodeAt(0),
+          title: "ספר",
+          author: "קים סטנלי רובינסון",
+          year: 1990,
+        }],
+        isCurrent: () => true,
+      });
+      assert.equal(result, 100 + rule.charCodeAt(0), `rule ${rule}`);
+    }
+  });
+
+  it("keeps existing rule-F behavior without original_year", async () => {
+    const result = await localizeFallback(rec(), {
+      callFunction: async () => candidateResponse([
+        { title: "ספר", author: null, rule: "F" },
+      ]),
+      searchBooks: async () => [{
+        id: 1990,
+        title: "ספר",
+        author: "קים סטנלי רובינסון",
+        year: 1990,
+      }],
+      isCurrent: () => true,
+    });
+    assert.equal(result, 1990);
+  });
+
+  it("guards a rule-G edition according to original_year before reading details", async () => {
+    const candidate = { title: "ספר", author: "קים סטנלי רובינסון", rule: "G" };
+    const reads = [];
+    const decide = (originalYear) => localizeFallback(rec(), {
+      callFunction: async () => candidateResponse([candidate], ["Alice", "Bobby", "Carol", "David"], originalYear),
+      searchBooks: async () => [{
+        id: 2008,
+        title: "ספר",
+        author: "קים סטנלי רובינסון",
+        year: 2008,
+      }],
+      fetchPayload: async (id) => {
+        reads.push(id);
+        return { details: { description: "אליס בובי קרול דיוויד" } };
+      },
+      isCurrent: () => true,
+    });
+
+    assert.equal(await decide(2023), null);
+    assert.deepEqual(reads, []);
+    assert.equal(await decide(2005), 2008);
+    assert.deepEqual(reads, [2008]);
+  });
+
+  it("does not let a skipped old rule-G edition block a newer edition", async () => {
+    const candidates = [
+      { title: "ספר ישן", author: "קים סטנלי רובינסון", rule: "G" },
+      { title: "ספר חדש", author: "קים סטנלי רובינסון", rule: "G" },
+    ];
+    const reads = [];
+    const result = await localizeFallback(rec(), {
+      callFunction: async () => candidateResponse(candidates, ["Alice", "Bobby"], 2023),
+      searchBooks: async (query) => query.startsWith("ספר ישן")
+        ? [{ id: 1, title: "ספר ישן", author: "קים סטנלי רובינסון", year: 2008 }]
+        : [{ id: 2, title: "ספר חדש", author: "קים סטנלי רובינסון", year: 2023 }],
+      fetchPayload: async (id) => {
+        reads.push(id);
+        return { details: { description: "אליס בובי" } };
+      },
+      isCurrent: () => true,
+    });
+
+    assert.equal(result, 2);
+    assert.deepEqual(reads, [2]);
   });
 
   it("links The Sea shape when only one edition has name hits", async () => {
