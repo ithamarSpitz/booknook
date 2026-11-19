@@ -52,8 +52,8 @@ The `search-books` function was removed. Search runs in the browser: under 2 cha
 
 ## hebrew-candidates
 
-- In: `{ work_id }`. Out: `{ work_id, candidates: [{ title, author, rule }], english_names }`.
-- Behavior: the caller must have a non-dismissed recommendation or a `genre_recommendations` row for `work_id` (404). It searches NLI by the author's Latin authority name, and uses Wikidata original-language titles and the Hardcover description, to list Hebrew titles that may be this work (rules A-G in `docs/contract.md`). It writes nothing. The browser uses it only as a last fallback for English-only cards, verifies each candidate on Simania, and links through `link-edition` with `source: "nli_author"`.
+- In: `{ work_id }`. Out: `{ work_id, candidates: [{ title, author, rule }], english_names, original_year }`.
+- Behavior: the caller must have a non-dismissed recommendation or a `genre_recommendations` row for `work_id` (404). It searches NLI by the author's Latin authority name, and uses Wikidata original-language titles and the Hardcover description, to list Hebrew titles that may be this work (rules A-G in `docs/contract.md`). After one uniform-title request, the creator search pages with `startRecord` 1, 101 and 201, stopping after a short page: at most 300 creator records and four NLI requests total. `original_year` is the Hardcover release year, and `english_names` contains eligible description words of length at least 5. It writes nothing. The browser uses it only as a last fallback for English-only cards, verifies each candidate on Simania, and links through `link-edition` with `source: "nli_author"`.
 
 ## match-by-author
 

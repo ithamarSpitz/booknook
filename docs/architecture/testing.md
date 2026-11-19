@@ -25,3 +25,7 @@ There is one local Supabase stack (`project_id = "booknook"`, API on 54321, DB o
 ## Fixtures
 
 Use real recorded shapes. The prototype (`prototype/test-page.html` and the current `_shared` code) shows the response formats.
+
+## Fallback no-regression routine
+
+Before and after changing the fallback, run `npm run verify:fallback -- --population` and `npm run verify:fallback -- --replay-linked`, saving each JSONL result. Compare matching before/after runs with `npm run verify:fallback -- --compare <before> <after> [--keep <file>]`; `--keep` supplies additional work keys whose existing decisions must be preserved, and comparison exits 1 when a protected linked decision is lost (0 otherwise). Live probes retry Wikidata HTTP 429 responses up to three times with a 30-second wait. Review every change and unverified result; do not run `npm run refresh:all -- --apply` until the changes are reviewed.
