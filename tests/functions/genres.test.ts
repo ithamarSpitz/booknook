@@ -7,6 +7,7 @@ import {
   missingCandidateIds,
   normalizeGenreTag,
   qualifyingGenres,
+  readerGenres,
   workGenres,
 } from "../../supabase/functions/_shared/genres.ts";
 
@@ -354,4 +355,197 @@ Deno.test("genre shelf computation is deterministic", () => {
     excludedWorkIds: new Set<string>(),
   };
   assertEquals(buildGenreShelves(input), buildGenreShelves(input));
+});
+
+type TestWork = { id: string; tags: ReturnType<typeof tags> };
+
+function worksFor(
+  ids: number[],
+  genres: string[],
+  prefix = "w",
+): Map<number, TestWork> {
+  return new Map(
+    ids.map((id) => [id, { id: `${prefix}${id}`, tags: tags(...genres) }]),
+  );
+}
+
+function range(start: number, count: number): number[] {
+  return Array.from({ length: count }, (_, i) => start + i);
+}
+
+Deno.test("a hidden genre gets no shelf and the next genre takes its place", () => {
+  const seeds = [
+    seed("f1", 9, ["Fantasy"], range(100, 5)),
+    seed("f2", 9, ["Fantasy"], range(100, 5)),
+    seed("h1", 5, ["Horror"], range(200, 5)),
+    seed("h2", 5, ["Horror"], range(200, 5)),
+  ];
+  const works = new Map([
+    ...worksFor(range(100, 5), ["Fantasy"]),
+    ...worksFor(range(200, 5), ["Horror"]),
+  ]);
+  const input = {
+    seeds,
+    worksByHardcoverId: works,
+    excludedWorkIds: new Set<string>(),
+    shelfCount: 1,
+  };
+  assertEquals(buildGenreShelves(input).map((s) => s.genreKey), ["פנטזיה"]);
+  assertEquals(
+    buildGenreShelves({
+      ...input,
+      preferences: [{ genreKey: "פנטזיה", state: "hidden", pinOrder: null }],
+    }).map((s) => s.genreKey),
+    ["אימה"],
+  );
+});
+
+Deno.test("a pinned genre needs no qualification and keeps 1 to 12 books", () => {
+  const seeds = [
+    seed("f1", 9, ["Fantasy", "Horror"], [100, 101, 102, 103]),
+    seed("f2", 9, ["Fantasy"], [100, 101, 102, 103, 200, 201]),
+    seed("f3", 9, ["Fantasy"], [200, 201]),
+  ];
+  const works = new Map([
+    ...worksFor([100, 101, 102, 103], ["Fantasy"]),
+    ...worksFor([200, 201], ["Horror"]),
+  ]);
+  const shelves = buildGenreShelves({
+    seeds,
+    worksByHardcoverId: works,
+    excludedWorkIds: new Set(),
+    shelfCount: 5,
+    preferences: [{ genreKey: "אימה", state: "pinned", pinOrder: 0 }],
+  });
+  assertEquals(qualifyingGenres(seeds).some(({ genre }) => genre === "אימה"), false);
+  assertEquals(shelves[0].genreKey, "אימה");
+  assertEquals(shelves[0].pinned, true);
+  assertEquals(shelves[0].books.map((b) => b.hardcoverId).toSorted(), [200, 201]);
+  assertEquals(shelves[1].genreKey, "פנטזיה");
+  assertEquals(shelves[1].pinned, false);
+});
+
+Deno.test("only the first N-1 pins by pinOrder show, plus one automatic shelf", () => {
+  const genres = ["Fantasy", "Horror", "History", "War"];
+  const seeds = genres.flatMap((g, i) => [
+    seed(`${g}-a`, 5, [g], range(i * 100 + 1, 5)),
+    seed(`${g}-b`, 5, [g], range(i * 100 + 1, 5)),
+  ]);
+  const works = new Map(
+    genres.flatMap((g, i) => [...worksFor(range(i * 100 + 1, 5), [g], `${g}-`)]),
+  );
+  const shelves = buildGenreShelves({
+    seeds,
+    worksByHardcoverId: works,
+    excludedWorkIds: new Set(),
+    shelfCount: 3,
+    preferences: [
+      { genreKey: "מלחמה", state: "pinned", pinOrder: 2 },
+      { genreKey: "אימה", state: "pinned", pinOrder: 0 },
+      { genreKey: "היסטוריה", state: "pinned", pinOrder: 1 },
+    ],
+  });
+  assertEquals(shelves.map((s) => [s.genreKey, s.pinned]), [
+    ["אימה", true],
+    ["היסטוריה", true],
+    ["פנטזיה", false],
+  ]);
+});
+
+Deno.test("N = 20 gives up to 20 shelves and a book sits on one shelf only", () => {
+  const keys = Array.from({ length: 22 }, (_, i) => `genre-${i}`);
+  const seeds = keys.flatMap((g, i) => [
+    seed(`${g}-a`, 30 - i, [g], range(i * 10 + 1, 5)),
+    seed(`${g}-b`, 30 - i, [g], range(i * 10 + 1, 5)),
+  ]);
+  const works = new Map(
+    keys.flatMap((g, i) => [...worksFor(range(i * 10 + 1, 5), [g], `${g}-`)]),
+  );
+  // Book 1 also carries the second genre; it may only appear on one shelf.
+  works.set(11, { id: "genre-0-1", tags: tags("genre-0", "genre-1") });
+  const shelves = buildGenreShelves({
+    seeds,
+    worksByHardcoverId: works,
+    excludedWorkIds: new Set(),
+    shelfCount: 20,
+  });
+  const ids = shelves.flatMap((s) => s.books.map((b) => b.workId));
+  assertEquals(new Set(ids).size, ids.length);
+  assertEquals(shelves.length <= 20, true);
+  assertEquals(shelves.length >= 19, true);
+});
+
+Deno.test("no preferences with N = 5 matches the default behavior", () => {
+  const seeds = [
+    seed("a", 5, ["Fantasy"], [4, 3, 2, 1]),
+    seed("b", 4, ["Fantasy"], [1, 2, 3, 4]),
+  ];
+  const input = {
+    seeds,
+    worksByHardcoverId: worksFor([1, 2, 3, 4], ["Fantasy"]),
+    excludedWorkIds: new Set<string>(),
+  };
+  assertEquals(
+    buildGenreShelves({ ...input, shelfCount: 5, preferences: [] }),
+    buildGenreShelves(input),
+  );
+  assertEquals(buildGenreShelves(input)[0].pinned, false);
+});
+
+Deno.test("reader genres count, filter, order and cap", () => {
+  const seeds = [
+    seed("a", 5, ["Fantasy", "Horror"], [100, 101, 102, 103]),
+    seed("b", 4, ["Fantasy"], [100, 104]),
+  ];
+  const works = new Map<number, TestWork>([
+    [100, { id: "w100", tags: tags("Fantasy", "Poetry") }],
+    [101, { id: "w101", tags: tags("Poetry") }],
+    [102, { id: "w102", tags: tags("Poetry") }],
+    [103, { id: "w103", tags: tags("Poetry", "Satire") }],
+    [104, { id: "w104", tags: tags("Satire") }],
+  ]);
+  const result = readerGenres({
+    seeds,
+    worksByHardcoverId: works,
+    excludedWorkIds: new Set(["w102"]),
+  });
+  assertEquals(
+    result.map(({ genreKey, seedCount, candidateCount }) => [
+      genreKey,
+      seedCount,
+      candidateCount,
+    ]),
+    [
+      ["פנטזיה", 2, 1],
+      ["אימה", 1, 0],
+      // Poetry: 4 candidates minus the excluded one = 3, no seeds, kept.
+      ["שירה", 0, 3],
+      // Satire: 2 candidates, no seeds, dropped.
+    ],
+  );
+
+  const many = Array.from({ length: 120 }, (_, i) =>
+    seed(`s${i}`, 1 + i / 1000, [`genre-${i}`]));
+  assertEquals(
+    readerGenres({
+      seeds: many,
+      worksByHardcoverId: new Map(),
+      excludedWorkIds: new Set(),
+    }).length,
+    100,
+  );
+});
+
+Deno.test("missing candidates include pinned genre candidates and cap at 200", () => {
+  const seeds = [seed("a", 5, ["Fantasy"], range(1, 40)), seed("b", 5, [], [500])];
+  assertEquals(missingCandidateIds(seeds, new Map()), []);
+  assertEquals(
+    missingCandidateIds(seeds, new Map(), 200, [], {
+      preferences: [{ genreKey: "אימה", state: "pinned", pinOrder: 0 }],
+    }).includes(500),
+    true,
+  );
+  const big = Array.from({ length: 10 }, (_, i) =>
+    seed(`big-${i}`, 5, ["Fantasy"], range(i * 40 + 1, 40)));
+  assertEquals(missingCandidateIds(big, new Map()).length, 200);
 });
