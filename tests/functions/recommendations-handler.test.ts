@@ -99,6 +99,12 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
     if (this.table === "dismissed_works") {
       rows = this.db.dismissed.map((row) => ({ ...row, user_id: "user" }));
     }
+    if (this.table === "profiles" && this.db.shelfCount !== null) {
+      rows = [{ id: "user", genre_shelf_count: this.db.shelfCount }];
+    }
+    if (this.table === "genre_preferences") {
+      rows = this.db.preferences.map((row) => ({ ...row, user_id: "user" }));
+    }
     if (this.table === "works") {
       rows = this.db.works as unknown as Record<string, unknown>[];
     }
@@ -163,6 +169,14 @@ type Filter =
 class FakeDb {
   replacement: Record<string, unknown>[] | null = null;
   genreReplacement: Record<string, unknown>[] | null = null;
+  readerGenreRows: Record<string, unknown>[] | null = null;
+  failReaderGenres = false;
+  shelfCount: number | null = null;
+  preferences: Array<{
+    genre_key: string;
+    state: "pinned" | "hidden";
+    pin_order: number | null;
+  }> = [];
   ordinaryResultWorkIds: Set<string> | null = null;
   constructor(
     public library: unknown[],
@@ -179,7 +193,14 @@ class FakeDb {
   rpc(
     name: string,
     args: { p_rows: Record<string, unknown>[] },
-  ): Promise<{ data: unknown[]; error: null }> {
+  ): Promise<{ data: unknown[]; error: { message: string } | null }> {
+    if (name === "replace_reader_genres") {
+      if (this.failReaderGenres) {
+        return Promise.resolve({ data: [], error: { message: "boom" } });
+      }
+      this.readerGenreRows = args.p_rows;
+      return Promise.resolve({ data: [], error: null });
+    }
     if (name === "replace_genre_recommendations") {
       this.genreReplacement = args.p_rows;
       return Promise.resolve({ data: [], error: null });
@@ -413,7 +434,116 @@ Deno.test("genre shelves are ordered and choose recommendation, catalog, then nu
   );
 });
 
-Deno.test("reading shelf books seed genre shelves with weight 2.5", async () => {
+function twoGenreFixture() {
+  const fantasyCandidates = [101, 102, 103, 104];
+  const mysteryCandidates = [201, 202, 203, 204];
+  const seeds = [
+    withGenre(work("f1", 1, fantasyCandidates), "Fantasy"),
+    withGenre(work("f2", 2, fantasyCandidates), "Fantasy"),
+    withGenre(work("m1", 3, mysteryCandidates), "Mystery"),
+    withGenre(work("m2", 4, mysteryCandidates), "Mystery"),
+  ];
+  const candidates = [
+    ...fantasyCandidates.map((id) =>
+      withGenre(work(`c-${id}`, id), "Fantasy")
+    ),
+    ...mysteryCandidates.map((id) => withGenre(work(`c-${id}`, id), "Mystery")),
+  ];
+  const db = new FakeDb(
+    seeds.map((seed, index) =>
+      shelfBook(31 + index, "read", seed, { rating: 5 })
+    ),
+    [...seeds, ...candidates],
+  );
+  return db;
+}
+
+async function runRecommendations(db: FakeDb): Promise<Response> {
+  return await handleRecommendations(request(), {
+    authenticate: async () => "user",
+    userDatabase: () => db as never,
+    serviceDatabase: () => db as never,
+    hebrewHint: async () => null,
+    wikidataHebrewAuthor: async () => null,
+  });
+}
+
+Deno.test("genre rows carry genre_key and a hidden genre gets no shelf", async () => {
+  const db = twoGenreFixture();
+  db.preferences = [{
+    genre_key: GENRE_MAP[1].name,
+    state: "hidden",
+    pin_order: null,
+  }];
+  const response = await runRecommendations(db);
+  assert(response.status === 200, "expected 200");
+  const rows = db.genreReplacement ?? [];
+  assert(rows.length === 4, "only the mystery shelf expected");
+  assert(
+    rows.every((row) =>
+      row.genre_key === GENRE_MAP[4].name && row.genre === GENRE_MAP[4].name
+    ),
+    "rows must carry genre_key",
+  );
+});
+
+Deno.test("a pinned genre comes first and genre_shelf_count limits shelves", async () => {
+  const db = twoGenreFixture();
+  db.preferences = [{
+    genre_key: GENRE_MAP[4].name,
+    state: "pinned",
+    pin_order: 0,
+  }];
+  db.shelfCount = 2;
+  let response = await runRecommendations(db);
+  assert(response.status === 200, "expected 200");
+  let rows = db.genreReplacement ?? [];
+  assert(rows.length === 8, "pinned plus one automatic shelf");
+  assert(rows[0].genre_key === GENRE_MAP[4].name, "pinned shelf first");
+  assert(rows[4].genre_key === GENRE_MAP[1].name, "fantasy second");
+
+  db.shelfCount = 1;
+  db.preferences = [];
+  response = await runRecommendations(db);
+  assert(response.status === 200, "expected 200");
+  rows = db.genreReplacement ?? [];
+  assert(rows.length === 4, "one shelf only");
+});
+
+Deno.test("reader genres are stored, and a failure there is ignored", async () => {
+  const db = twoGenreFixture();
+  const response = await runRecommendations(db);
+  assert(response.status === 200, "expected 200");
+  const stored = db.readerGenreRows ?? [];
+  assert(stored.length === 2, "two reader genres expected");
+  const fantasy = stored.find((row) => row.genre_key === GENRE_MAP[1].name);
+  assert(
+    fantasy?.label === GENRE_MAP[1].name && fantasy.seed_count === 2 &&
+      fantasy.candidate_count === 4,
+    "wrong fantasy reader genre",
+  );
+  assert(
+    stored.map((row) => row.position).join() === "0,1",
+    "wrong positions",
+  );
+
+  const failing = twoGenreFixture();
+  failing.failReaderGenres = true;
+  const failed = await runRecommendations(failing);
+  assert(failed.status === 200, "reader genre failure must not fail");
+  assert(failing.genreReplacement?.length === 8, "shelves must be stored");
+});
+
+Deno.test("no seeds also clears reader genres", async () => {
+  const db = new FakeDb([], []);
+  await runRecommendations(db);
+  assert(
+    db.readerGenreRows?.length === 0,
+    "expected reader genres to be cleared",
+  );
+});
+
+Deno.test("reading shelf books seed genre shelves with weight 2.5",async () => {
   const candidateIds = [301, 302, 303, 304];
   const rated = withGenre(work("rated", 1, candidateIds), "Fantasy");
   const reading = withGenre(work("reading", 2, candidateIds), "Fantasy");
