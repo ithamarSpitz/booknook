@@ -89,14 +89,24 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
       };
 
       let description: string | null = null;
+      let originalYear: number | null = null;
       if (typeof work.hardcover_id === "number") {
         try {
           const books = await deps.hardcoverBooks([work.hardcover_id]);
-          const value = (books[0] as { description?: unknown } | undefined)
-            ?.description;
-          description = typeof value === "string" ? value : null;
+          const book = books[0] as {
+            description?: unknown;
+            release_year?: unknown;
+          } | undefined;
+          description = typeof book?.description === "string"
+            ? book.description
+            : null;
+          originalYear = typeof book?.release_year === "number" &&
+              Number.isFinite(book.release_year) &&
+              Number.isInteger(book.release_year)
+            ? book.release_year
+            : null;
         } catch {
-          // Description is optional; a Hardcover failure does not fail fallback.
+          // Hardcover metadata is optional; a failure does not fail fallback.
         }
       }
       const result = await deps.candidates({
@@ -107,6 +117,7 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
       const response: HebrewCandidatesResponse = {
         work_id: input.work_id,
         ...result,
+        original_year: originalYear,
       };
       return json(response);
     } catch (error) {

@@ -211,6 +211,7 @@ export interface HebrewCandidatesResponse {
     rule: "A" | "B" | "C" | "D" | "E" | "F" | "G";
   }>;
   english_names: string[];
+  original_year: number | null;
 }
 
 export interface LinkEditionRequest {
