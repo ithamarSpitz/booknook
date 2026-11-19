@@ -4,6 +4,7 @@ import {
   wikidataOriginal,
 } from "./bridges.ts";
 import { authors, findHardcoverBook, type HardcoverBook } from "./hardcover.ts";
+import { type ChunkQueryResult, selectInChunks } from "./chunked.ts";
 import {
   bookDetails,
   bookRating,
@@ -331,13 +332,22 @@ async function englishAuthorHint(
   if (!linked?.length) return null;
 
   const workIds = [...new Set(linked.map((row) => row.work_id))];
-  const worksResult = await db.from("works")
-    .select("id, original_authors")
-    .in("id", workIds);
+  const worksResult = await selectInChunks(
+    workIds,
+    (chunk) =>
+      db.from("works")
+        .select("id, original_authors")
+        .in("id", chunk) as PromiseLike<
+          ChunkQueryResult<
+            Pick<WorkRow, "id" | "original_authors">,
+            { message?: string }
+          >
+        >,
+  );
   if (worksResult.error) return null;
 
   const authorsByWorkId = new Map(
-    (worksResult.data as Pick<WorkRow, "id" | "original_authors">[]).map((
+    worksResult.data.map((
       work,
     ) => [work.id, work.original_authors]),
   );

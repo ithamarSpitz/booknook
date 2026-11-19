@@ -180,3 +180,59 @@ Deno.test("ensureResolved stores not_found only when every provider answered", a
   assertEquals(result.resolve_status, "not_found");
   assertEquals(result.resolved_at, NOW.toISOString());
 });
+
+Deno.test("ensureResolved looks up 250 linked works in chunks of at most 100", async () => {
+  const current = edition({ author: "Author" }) as EditionRow;
+  const ids = Array.from({ length: 250 }, (_, i) => `work-${i + 1}`);
+  const base = new FakeDb({
+    editions: [current],
+    works: ids.map((id, i) => ({
+      id,
+      original_authors: [`Original ${i + 1}`],
+    })),
+  });
+  const inSizes: number[] = [];
+  const db = {
+    from(table: string) {
+      if (table === "editions") {
+        const chain: any = new Proxy({}, {
+          get: (_t, prop) =>
+            prop === "then"
+              ? (resolve: (value: unknown) => unknown) =>
+                resolve({
+                  data: ids.map((work_id) => ({ work_id })),
+                  error: null,
+                })
+              : () => chain,
+        });
+        return chain;
+      }
+      const wrap = (query: any): any =>
+        new Proxy(query, {
+          get(target, prop) {
+            const value = target[prop];
+            if (typeof value !== "function") return value;
+            return (...args: unknown[]) => {
+              if (prop === "in") inSizes.push((args[1] as unknown[]).length);
+              const out = value.apply(target, args);
+              return out === target ? wrap(target) : out;
+            };
+          },
+        });
+      return wrap(base.from(table));
+    },
+  };
+  const searched: (string | undefined)[] = [];
+  await ensureResolved(db, current, {
+    now: () => NOW,
+    wikidataOriginal: noBridge,
+    nliOriginal: async () => ({ title: "NLI", author: "Bridge", source: "NLI" }),
+    wikidataEnglishAuthor: async () => null,
+    findHardcoverBook: async (_title, author) => {
+      searched.push(author);
+      return null;
+    },
+  });
+  assertEquals(inSizes, [100, 100, 50]);
+  assertEquals(searched[0], "Original 1");
+});

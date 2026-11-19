@@ -4,6 +4,7 @@ import {
   suppliedProviders,
   suppliedSimania,
 } from "../_shared/catalog.ts";
+import { type ChunkQueryResult, selectInChunks } from "../_shared/chunked.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type {
   EditionRow,
@@ -122,12 +123,18 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
           .map((row: { simania_id: number }) => row.simania_id)
           .filter((id: number) => id !== simaniaId);
         if (siblingIds.length > 0) {
-          const shelved = await callerDb.from("shelf_books").select(
-            "simania_id",
-          )
-            .eq("user_id", userId).in("simania_id", siblingIds);
+          const shelved = await selectInChunks(
+            siblingIds,
+            (chunk) =>
+              callerDb.from("shelf_books").select("simania_id")
+                .eq("user_id", userId).in("simania_id", chunk) as PromiseLike<
+                  ChunkQueryResult<{ simania_id: number }, {
+                    message?: string;
+                  }>
+                >,
+          );
           if (shelved.error) dbFailure(shelved.error);
-          onShelf = (shelved.data?.length ?? 0) > 0;
+          onShelf = shelved.data.length > 0;
         }
       }
       if (onShelf) {
