@@ -325,8 +325,7 @@ Deno.test("rule G names exclude common words, demonyms and review sources", () =
     "Riley Sager",
   );
   assert(onlyOneLeft.includes("Lenora"));
-  assert(onlyOneLeft.includes("Kit"));
-  for (const excluded of ["Hope", "Hung", "End", "Took"]) {
+  for (const excluded of ["Hope", "Kit", "Hung", "End", "Took"]) {
     assert(!onlyOneLeft.includes(excluded));
   }
 
@@ -344,12 +343,23 @@ Deno.test("rule G names exclude common words, demonyms and review sources", () =
     "Never Lie",
     "Freida McFadden",
   );
-  for (const kept of ["Tricia", "Ethan", "Hale"]) {
+  for (const kept of ["Tricia", "Ethan"]) {
     assert(neverLie.includes(kept));
   }
-  for (const excluded of ["Provided", "Amazon"]) {
+  for (const excluded of ["Hale", "Provided", "Amazon"]) {
     assert(!neverLie.includes(excluded));
   }
+});
+
+Deno.test("rule G ignores short names and Choice", () => {
+  assertEquals(
+    extractEnglishNames(
+      "The blurb mentions Beth, Wood, Poe, Choice, Thoreau and Chicago.",
+      "Unrelated Title",
+      "Unrelated Author",
+    ),
+    ["Thoreau", "Chicago"],
+  );
 });
 
 Deno.test("MARC 100 uses only subfield a and drops Latin words", async () => {
