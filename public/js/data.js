@@ -46,8 +46,11 @@ function firstRelatedRow(relation) {
  * @param {Map<number, string>} [titleBySimaniaId]
  * @returns {import('./contract.js').GenreShelf[]}
  */
-export function mapGenreRows(rows, titleBySimaniaId = new Map()) {
+export function mapGenreRows(rows, titleBySimaniaId = new Map(), preferences = []) {
   const shelves = new Map();
+  const pinnedKeys = new Set(
+    preferences.filter((p) => p.state === "pinned").map((p) => p.genre_key),
+  );
   const orderedRows = [...rows].sort(
     (a, b) => a.shelf_position - b.shelf_position || a.position - b.position,
   );
@@ -55,10 +58,11 @@ export function mapGenreRows(rows, titleBySimaniaId = new Map()) {
   for (const row of orderedRows) {
     const work = firstRelatedRow(row.works);
     const edition = firstRelatedRow(row.editions);
-    let shelf = shelves.get(row.genre);
+    const key = row.genre_key ?? row.genre;
+    let shelf = shelves.get(key);
     if (!shelf) {
-      shelf = { genre: row.genre, books: [] };
-      shelves.set(row.genre, shelf);
+      shelf = { genre_key: key, genre: row.genre, pinned: pinnedKeys.has(key), books: [] };
+      shelves.set(key, shelf);
     }
 
     const originalAuthors = Array.isArray(work.original_authors)
@@ -78,7 +82,30 @@ export function mapGenreRows(rows, titleBySimaniaId = new Map()) {
     });
   }
 
+  const pinned = preferences
+    .filter((p) => p.state === "pinned")
+    .sort((a, b) => (a.pin_order ?? 0) - (b.pin_order ?? 0));
+  for (const pref of pinned) {
+    if (shelves.has(pref.genre_key)) continue;
+    shelves.set(pref.genre_key, {
+      genre_key: pref.genre_key,
+      genre: pref.label,
+      pinned: true,
+      books: [],
+    });
+  }
+
   return [...shelves.values()];
+}
+
+/** @param {import('@supabase/supabase-js').SupabaseClient} client */
+export async function setGenrePreference(client, genreKey, genre, state) {
+  const { error } = await client.rpc("set_genre_preference", {
+    p_genre_key: genreKey,
+    p_label: genre,
+    p_state: state,
+  });
+  if (error) throw error;
 }
 
 /** @param {Record<string, unknown>} row */
@@ -304,7 +331,7 @@ export async function loadGenreShelves(client) {
   const { data, error } = await client
     .from("genre_recommendations")
     .select(
-      `work_id, simania_id, genre, shelf_position, position, because,
+      `work_id, simania_id, genre_key, genre, shelf_position, position, because,
       works (hardcover_id, original_title, original_authors, hardcover_cover_url),
       editions (title, author, cover_url)`,
     )
@@ -312,6 +339,15 @@ export async function loadGenreShelves(client) {
     .order("position");
   if (error) return [];
   const rows = data ?? [];
+  let preferences = [];
+  try {
+    const { data: prefs, error: prefsError } = await client
+      .from("genre_preferences")
+      .select("genre_key, label, state, pin_order");
+    if (!prefsError) preferences = prefs ?? [];
+  } catch {
+    // Pinned markers are optional; stored shelves remain usable.
+  }
   const becauseIds = new Set();
   for (const row of rows) {
     for (const id of row.because ?? []) becauseIds.add(Number(id));
@@ -333,7 +369,7 @@ export async function loadGenreShelves(client) {
       // Reason titles are optional; the genre shelves themselves remain usable.
     }
   }
-  return mapGenreRows(rows, titleBySimaniaId);
+  return mapGenreRows(rows, titleBySimaniaId, preferences);
 }
 
 /** @param {import('@supabase/supabase-js').SupabaseClient} client */

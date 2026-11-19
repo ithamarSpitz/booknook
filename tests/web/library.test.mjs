@@ -552,6 +552,126 @@ describe("genre shelves on the library screen", async () => {
     assert.deepEqual(next.map((s) => s.genre), ["מדע בדיוני"]);
     assert.equal(genreShelves[1].books.length, 1, "input not mutated");
   });
+
+  /** Builds the hide button from the rendered markup of the shelf with this key. */
+  function hideButton(root, genreKey) {
+    const html = root.caseEl.innerHTML;
+    const start = html.indexOf(`<section class="shelf genre-shelf" data-genre="`);
+    const sections = html.slice(start).split(/(?=<section )/);
+    const section = sections.find((s) => s.includes(`data-genre-key="${genreKey}">`));
+    assert.ok(section, `shelf ${genreKey} rendered`);
+    const tag = section.match(/<button[^>]*class="genre-hide"[^>]*>/)?.[0];
+    assert.ok(tag, "hide button rendered");
+    const dataset = {};
+    for (const [, name, value] of tag.matchAll(/data-([a-z-]+)="([^"]*)"/g)) {
+      dataset[name.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = value;
+    }
+    const el = {
+      dataset,
+      disabled: false,
+      closest: (sel) => (sel === ".genre-hide" ? el : null),
+    };
+    return el;
+  }
+
+  const hideShelves = [
+    { genre_key: "scifi", genre: "מדע בדיוני", pinned: false, books: genreShelves[0].books },
+    { genre_key: "fantasy", genre: "פנטזיה", pinned: false, books: genreShelves[1].books },
+  ];
+
+  it("hides a genre shelf: rpc, removal, toast and one RECS_INPUTS_CHANGED", async () => {
+    const { RECS_INPUTS_CHANGED } = await import("../../public/js/events.js");
+    const restore = installFakeDom(createGenreOverlay());
+    const root = createLibraryRoot();
+    const { ctx, calls } = createLibraryCtx(lib);
+    ctx.data.loadGenreShelves = async () => structuredClone(hideShelves);
+    const toasts = [];
+    ctx.showToast = (m) => toasts.push(m);
+    let fired = 0;
+    document.addEventListener(RECS_INPUTS_CHANGED, () => { fired += 1; });
+    try {
+      const cleanup = await library.mount(root, ctx);
+      await settle();
+      assert.match(
+        root.caseEl.innerHTML,
+        /class="genre-hide" data-genre-key="scifi" data-genre="מדע בדיוני">הסתר מדף<\/button>/,
+      );
+      const button = hideButton(root, "scifi");
+      click(root, button);
+      assert.equal(button.disabled, true);
+      await settle();
+      assert.deepEqual(calls.functions, [
+        ["set_genre_preference", { p_genre_key: "scifi", p_label: "מדע בדיוני", p_state: "hidden" }],
+      ]);
+      assert.equal(root.caseEl.innerHTML.includes('data-genre-key="scifi"'), false);
+      assert.ok(root.caseEl.innerHTML.includes('data-genre-key="fantasy"'));
+      assert.deepEqual(toasts, ["המדף הוסתר. אפשר להחזיר אותו בהגדרות מדפי ההמלצות"]);
+      assert.equal(fired, 1);
+      cleanup();
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the shelf and re-enables the button when hiding fails", async () => {
+    const { RECS_INPUTS_CHANGED } = await import("../../public/js/events.js");
+    const restore = installFakeDom(createGenreOverlay());
+    const root = createLibraryRoot();
+    const { ctx } = createLibraryCtx(lib);
+    ctx.data.loadGenreShelves = async () => structuredClone(hideShelves);
+    ctx.api.getClient = () => ({ rpc: async () => ({ error: new Error("נכשל") }) });
+    const toasts = [];
+    ctx.showToast = (m) => toasts.push(m);
+    let fired = 0;
+    document.addEventListener(RECS_INPUTS_CHANGED, () => { fired += 1; });
+    try {
+      const cleanup = await library.mount(root, ctx);
+      await settle();
+      const button = hideButton(root, "scifi");
+      click(root, button);
+      await settle();
+      assert.equal(button.disabled, false);
+      assert.ok(root.caseEl.innerHTML.includes('data-genre-key="scifi"'));
+      assert.deepEqual(toasts, ["נכשל"]);
+      assert.equal(fired, 0);
+      cleanup();
+    } finally {
+      restore();
+    }
+  });
+
+  it("marks only pinned shelves and notes pinned shelves with fewer than 4 books", () => {
+    const book = (n) => ({ ...genreShelves[0].books[0], work_id: `b${n}` });
+    const four = [1, 2, 3, 4].map(book);
+    const plain = library.genreShelfSection({ genre_key: "a", genre: "א", pinned: false, books: [book(1)] });
+    const pinnedFew = library.genreShelfSection({ genre_key: "b", genre: "ב", pinned: true, books: [book(1)] });
+    const pinnedEmpty = library.genreShelfSection({ genre_key: "c", genre: "ג", pinned: true, books: [] });
+    const pinnedFull = library.genreShelfSection({ genre_key: "d", genre: "ד", pinned: true, books: four });
+    assert.equal(plain.includes("נעוץ"), false);
+    assert.equal(plain.includes("genre-few-note"), false);
+    for (const html of [pinnedFew, pinnedEmpty, pinnedFull]) assert.ok(html.includes(">נעוץ<"));
+    for (const html of [pinnedFew, pinnedEmpty]) {
+      assert.ok(html.includes("אין עדיין מספיק ספרים במדף הזה. דרגו ספרים מהז'אנר הזה כדי לקבל עוד"));
+    }
+    assert.equal(pinnedFull.includes("genre-few-note"), false);
+  });
+
+  it("keeps empty pinned shelves on screen", async () => {
+    const restore = installFakeDom(createGenreOverlay());
+    const root = createLibraryRoot();
+    const { ctx } = createLibraryCtx(lib);
+    ctx.data.loadGenreShelves = async () => [
+      { genre_key: "poetry", genre: "שירה", pinned: true, books: [] },
+    ];
+    try {
+      const cleanup = await library.mount(root, ctx);
+      await settle();
+      assert.ok(root.caseEl.innerHTML.includes('data-genre-key="poetry"'));
+      cleanup();
+    } finally {
+      restore();
+    }
+  });
 });
 
 function englishGenreShelves(count) {
