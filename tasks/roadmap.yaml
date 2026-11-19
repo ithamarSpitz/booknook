@@ -1001,3 +1001,27 @@ sprints:
         depends_on:
         - S22-T2
         - S22-T3
+  S23-resolver-guard:
+    name: Author guard in the server resolver and rule B from 0.7 (finds transliterated
+      titles)
+    tasks:
+      S23-T1:
+        file: tasks/sprint-23-resolver-guard/01-contract.md
+        stage: 1
+        depends_on: []
+      S23-T2:
+        file: tasks/sprint-23-resolver-guard/02-resolver-guard.md
+        stage: 2
+        depends_on:
+        - S23-T1
+      S23-T3:
+        file: tasks/sprint-23-resolver-guard/03-rule-b.md
+        stage: 2
+        depends_on:
+        - S23-T1
+      S23-T4:
+        file: tasks/sprint-23-resolver-guard/04-docs.md
+        stage: 3
+        depends_on:
+        - S23-T2
+        - S23-T3
