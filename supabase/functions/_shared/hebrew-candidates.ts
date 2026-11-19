@@ -15,6 +15,15 @@ export type HebrewCandidate = {
   rule: HebrewCandidateRule;
 };
 
+export function originalYearOf(
+  book: { release_year?: unknown } | null | undefined,
+): number | null {
+  const year = book?.release_year;
+  return typeof year === "number" && Number.isInteger(year) && year > 0
+    ? year
+    : null;
+}
+
 type Record = { title: string; author: string; original: string };
 type BridgeLookup = (
   title: string,

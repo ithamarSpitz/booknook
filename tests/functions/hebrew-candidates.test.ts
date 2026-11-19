@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   extractEnglishNames,
   hebrewCandidates,
+  originalYearOf,
   parseNliMarc,
 } from "../../supabase/functions/_shared/hebrew-candidates.ts";
 
@@ -61,6 +62,14 @@ function isCreatorRequest(url: string): boolean {
   if (!nliRequest(url)) return false;
   return !new URL(url).searchParams.get("query")?.includes("uniform_title");
 }
+
+Deno.test("originalYearOf accepts only positive integer years", () => {
+  assertEquals(originalYearOf({ release_year: 2023 }), 2023);
+  for (const release_year of [0, -5, 2023.5, "2023", undefined]) {
+    assertEquals(originalYearOf({ release_year }), null);
+  }
+  assertEquals(originalYearOf({}), null);
+});
 
 Deno.test("rule A parses MARC 240, Hebrew title and reordered author", async () => {
   const p = providers(await fixture("to-hate-adam-connor.xml"));

@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  buildFallbackCandidatesResponse,
   compareFallbackRuns,
   retryWikidata429,
 } from "../../scripts/lib/fallback-compare.ts";
@@ -32,6 +33,42 @@ Deno.test("identical fallback files have no changes or losses", () => {
     only_before: 0,
     only_after: 0,
   });
+});
+
+Deno.test("fallback comparison ignores non-JSON output lines", () => {
+  const clean = jsonl({
+    hardcover_id: 10,
+    simania_id: 20,
+    rule: "A",
+  });
+  const withInitialization = [
+    "Initialize deno@2.9.6",
+    "Initialize @std/assert@1",
+    JSON.stringify("not an output object"),
+    "[]",
+    clean,
+  ].join("\n");
+
+  assertEquals(
+    compareFallbackRuns(withInitialization, clean),
+    compareFallbackRuns(clean, clean),
+  );
+});
+
+Deno.test("fallback script response includes the loaded Hardcover year", () => {
+  assertEquals(
+    buildFallbackCandidatesResponse(
+      "work-1",
+      { candidates: [], english_names: [] },
+      { release_year: 2023 },
+    ),
+    {
+      work_id: "work-1",
+      candidates: [],
+      english_names: [],
+      original_year: 2023,
+    },
+  );
 });
 
 Deno.test("only a replay decision that matched its linked IDs is lost", () => {
