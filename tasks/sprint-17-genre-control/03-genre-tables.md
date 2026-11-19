@@ -13,6 +13,9 @@ allowed_paths:
   - supabase/tests/06_genre_recommendations.sql
   - supabase/tests/09_genre_because.sql
   - supabase/tests/01_library.sql
+  - supabase/tests/08_positive_recommendation_editions.sql
+  - supabase/tests/11_dismissed_works.sql
+  - supabase/functions/recommendations/index.ts
   - supabase/functions/_shared/types.ts
 context:
   - contract
@@ -46,6 +49,14 @@ Contract: the `profiles` table, `genre_recommendations`, `genre_preferences`, `r
 # Protected-path permission (operator decision, 2026-11-19)
 
 `supabase/functions/_shared/types.ts` is protected. Permitted: adding the types and fields listed in Scope 2. Not permitted: any other change to that file, or any other protected file. The reviewer must fail the task otherwise.
+
+# Operator decision on the 2026-11-19 review (no trigger)
+
+The first attempts added a `BEFORE INSERT` trigger that defaults `genre_key` to `genre`. That is not allowed: no trigger, no default, and `genre_key` stays `not null` with no fallback. Resolve the conflict this way instead:
+1. `supabase/tests/08_positive_recommendation_editions.sql` and `supabase/tests/11_dismissed_works.sql`: add `genre_key` (same value as `genre`) to every direct insert into `genre_recommendations`. Change nothing else in those files; the expected errors (for example `23514` in 08) must stay the same.
+2. `supabase/functions/recommendations/index.ts`: the only permitted change is one added line in the `replace_genre_recommendations` row object, `genre_key: shelf.genre,` (today's Hebrew names are the keys). S17-T5 replaces it later. Nothing else in that file.
+3. `types.ts`: `genre_key` is a required `string` on `GenreRecommendationReplacement` and `GenreRecommendationRow`, not optional.
+4. Test 5 below ("the migration fills `genre_key`") must not read `supabase_migrations.schema_migrations`. Instead, check in the catalog that the column exists and is `not null`. Then check that a `replace_genre_recommendations` call stores the given `genre_key`.
 
 # Tests (`12_genre_control.sql`)
 
