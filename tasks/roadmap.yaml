@@ -856,3 +856,37 @@ sprints:
       - npm run test:web
       '4':
       - npm run check:contract
+  S19-year-guard-fixes:
+    name: Year guard ignores Simania year 0 (keeps Don Quixote), review script passes
+      original_year like the browser, compare ignores non-JSON lines
+    tasks:
+      S19-T1:
+        file: tasks/sprint-19-year-guard-fixes/01-contract.md
+        stage: 1
+        depends_on: []
+      S19-T2:
+        file: tasks/sprint-19-year-guard-fixes/02-guard-unknown-year.md
+        stage: 2
+        depends_on:
+        - S19-T1
+      S19-T3:
+        file: tasks/sprint-19-year-guard-fixes/03-script-parity.md
+        stage: 2
+        depends_on:
+        - S19-T1
+      S19-T4:
+        file: tasks/sprint-19-year-guard-fixes/04-docs.md
+        stage: 3
+        depends_on:
+        - S19-T2
+        - S19-T3
+    stage_verification:
+      '1':
+      - npm run check:contract
+      '2':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '3':
+      - npm run check:contract
