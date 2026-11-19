@@ -3,11 +3,43 @@ import test from "node:test";
 
 import {
   authorAgrees,
+  authorGuardRejects,
   mainTitle,
   nameHits,
   soundAgrees,
   titleMatch,
 } from "../../public/js/hebrew-fallback.js";
+
+test("author guard rejects a different Hebrew author", () => {
+  assert.equal(
+    authorGuardRejects("וויליאם פיטר בלאטי", ["Kazue Kato"], ""),
+    true,
+  );
+});
+
+test("author guard accepts matching authors and absent Hebrew authors", () => {
+  assert.equal(authorGuardRejects("ג'ו היל", ["Joe Hill"], ""), false);
+  assert.equal(authorGuardRejects("", ["Joe Hill"], ""), false);
+  assert.equal(authorGuardRejects("Joe Hill", ["Kazue Kato"], ""), false);
+});
+
+test("author guard accepts an agreeing Hebrew bridge", () => {
+  assert.equal(
+    authorGuardRejects(
+      "וויליאם פיטר בלאטי",
+      ["Kazue Kato"],
+      "וויליאם פיטר בלאטי",
+    ),
+    false,
+  );
+});
+
+test("author guard checks every English author", () => {
+  assert.equal(
+    authorGuardRejects("ג'ו היל", ["Kazue Kato", "Joe Hill"], ""),
+    false,
+  );
+});
 
 test("mainTitle removes edition labels and subtitles", () => {
   assert.equal(mainTitle("הימנון ללייבוביץ [מהדורת 2003]"), "הימנון ללייבוביץ");
