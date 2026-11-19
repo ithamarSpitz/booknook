@@ -8,6 +8,7 @@ import * as auth from "./auth.js";
 import * as settings from "./settings.js";
 import * as recs from "./recs.js";
 import * as removed from "./removed.js";
+import * as genreSettings from "./genre-settings.js";
 import * as addBook from "./add-book.js";
 import * as invite from "./invite.js";
 import { createRecsRefresher } from "./recs-refresh.js";
@@ -39,6 +40,7 @@ const screens = {
   [ROUTES.LIBRARY]: document.getElementById("screen-library"),
   [ROUTES.RECOMMENDATIONS]: document.getElementById("screen-recs"),
   [ROUTES.REMOVED]: document.getElementById("screen-removed"),
+  [ROUTES.GENRES]: document.getElementById("screen-genres"),
   [ROUTES.SEARCH]: document.getElementById("screen-search"),
   [ROUTES.SETTINGS]: document.getElementById("screen-settings"),
   [ROUTES.INVITE]: document.getElementById("screen-invite"),
@@ -49,6 +51,7 @@ const mounts = {
   [ROUTES.LIBRARY]: library,
   [ROUTES.RECOMMENDATIONS]: recs,
   [ROUTES.REMOVED]: removed,
+  [ROUTES.GENRES]: genreSettings,
   [ROUTES.SEARCH]: addBook,
   [ROUTES.SETTINGS]: settings,
   [ROUTES.INVITE]: invite,
