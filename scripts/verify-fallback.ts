@@ -19,6 +19,10 @@ import {
   loadOperatorEnv,
   openProdDb,
 } from "./lib/prod-db.ts";
+import {
+  compareFallbackRuns,
+  retryWikidata429,
+} from "./lib/fallback-compare.ts";
 import type { HebrewCandidate } from "../supabase/functions/_shared/hebrew-candidates.ts";
 
 type BookSpec = {
@@ -62,6 +66,19 @@ type PopulationBook = {
   title: string;
   author: string;
   readers: Map<string, string>;
+};
+
+type LinkedEdition = {
+  simania_id: number;
+  resolve_status: string;
+};
+
+type ReplayRow = {
+  work_id: string;
+  hardcover_id: number | null;
+  original_title: string;
+  original_authors: string[];
+  linked: LinkedEdition[];
 };
 
 const EXPECTED_CASES: ExpectedCase[] = [
@@ -126,6 +143,12 @@ const GUARD_CASES: GuardCase[] = [
   { title: "Pretty Girls", author: "Karin Slaughter", forbidden: 41212 },
   { title: "The Only One Left", author: "Riley Sager", forbidden: 1028558 },
   { title: "Regeneration", author: "Pat Barker", forbidden: 844 },
+  {
+    title: "The Folk of the Faraway Tree",
+    author: "Enid Blyton",
+    forbidden: 103718,
+  },
+  { title: "North Woods", author: "Daniel Mason", forbidden: 223491 },
 ];
 
 const NO_DECISION_CASES: NoDecisionCase[] = [
@@ -529,6 +552,17 @@ async function populationDecision(spec: PopulationBook) {
   }
 }
 
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function decideWithRetries(book: PopulationBook) {
+  return retryWikidata429(
+    () => populationDecision(book),
+    () => wait(30_000),
+  );
+}
+
 async function runPopulation(): Promise<void> {
   loadOperatorEnv();
   const sql = await openProdDb({ readOnly: true });
@@ -561,7 +595,7 @@ async function runPopulation(): Promise<void> {
     for (const book of books.values()) {
       let result;
       try {
-        result = await populationDecision(book);
+        result = await decideWithRetries(book);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.startsWith("Hardcover failure")) throw error;
@@ -603,11 +637,201 @@ async function runPopulation(): Promise<void> {
   }
 }
 
+async function runReplayLinked(): Promise<void> {
+  loadOperatorEnv();
+  const sql = await openProdDb({ readOnly: true });
+  try {
+    const rows = await sql`
+      select
+        w.id as work_id,
+        w.hardcover_id,
+        w.original_title,
+        w.original_authors,
+        json_agg(
+          json_build_object(
+            'simania_id', linked.simania_id,
+            'resolve_status', linked.resolve_status
+          ) order by linked.simania_id
+        ) as linked
+      from public.works as w
+      inner join public.editions as linked
+        on linked.work_id = w.id and linked.simania_id > 0
+      where exists (
+          select 1
+          from public.shelf_books as sb
+          inner join public.editions as shelved on shelved.simania_id = sb.simania_id
+          where shelved.work_id = w.id
+        )
+        or exists (
+          select 1 from public.recommendations as r where r.work_id = w.id
+        )
+        or exists (
+          select 1
+          from public.genre_recommendations as g
+          where g.work_id = w.id
+        )
+      group by w.id, w.hardcover_id, w.original_title, w.original_authors
+      order by w.original_title, w.id
+    ` as unknown as ReplayRow[];
+
+    let decided = 0;
+    let sameAsLinked = 0;
+    let differentFromLinked = 0;
+    let none = 0;
+    let errors = 0;
+    for (const row of rows) {
+      const linked = row.linked.map((edition) => ({
+        simania_id: Number(edition.simania_id),
+        resolve_status: edition.resolve_status,
+      }));
+      const title = row.original_title;
+      const author = row.original_authors[0] ?? "";
+      if (row.hardcover_id == null) {
+        errors++;
+        none++;
+        console.log(JSON.stringify({
+          hardcover_id: null,
+          title,
+          author,
+          linked,
+          simania_id: null,
+          rule: null,
+          errors: [`Work ${row.work_id} has no Hardcover ID.`],
+        }));
+        await wait(1000);
+        continue;
+      }
+
+      const book: PopulationBook = {
+        workId: row.work_id,
+        hardcoverId: row.hardcover_id,
+        title,
+        author,
+        readers: new Map(),
+      };
+      try {
+        const result = await decideWithRetries(book);
+        if (result.decision == null) {
+          none++;
+        } else {
+          decided++;
+          if (
+            linked.some((edition) => edition.simania_id === result.decision)
+          ) {
+            sameAsLinked++;
+          } else {
+            differentFromLinked++;
+          }
+        }
+        if (result.providerErrors.length) errors++;
+        console.log(JSON.stringify({
+          hardcover_id: row.hardcover_id,
+          title,
+          author,
+          linked,
+          simania_id: result.decision,
+          rule: result.rule,
+          ...(result.gEvidence.length ? { rule_g: result.gEvidence } : {}),
+          ...(result.providerErrors.length
+            ? { errors: result.providerErrors }
+            : {}),
+        }));
+      } catch (error) {
+        errors++;
+        none++;
+        console.log(JSON.stringify({
+          hardcover_id: row.hardcover_id,
+          title,
+          author,
+          linked,
+          simania_id: null,
+          rule: null,
+          errors: [error instanceof Error ? error.message : String(error)],
+        }));
+      }
+      await wait(1000);
+    }
+    console.log(JSON.stringify({
+      totals: {
+        works: rows.length,
+        decided,
+        same_as_linked: sameAsLinked,
+        different_from_linked: differentFromLinked,
+        none,
+        errors,
+      },
+    }));
+  } finally {
+    await sql.end();
+  }
+}
+
+function readKeepFile(path: string): Set<string> {
+  return new Set(
+    Deno.readTextFileSync(path).split(/\r?\n/).map((line) => line.trim())
+      .filter(
+        Boolean,
+      ),
+  );
+}
+
+function runCompare(args: string[]): never {
+  const compareAt = args.indexOf("--compare");
+  const beforePath = args[compareAt + 1];
+  const afterPath = args[compareAt + 2];
+  if (
+    !beforePath || !afterPath || beforePath.startsWith("--") ||
+    afterPath.startsWith("--")
+  ) {
+    console.error("Usage: --compare <before> <after> [--keep <file>]");
+    Deno.exit(2);
+  }
+  const keepAt = args.indexOf("--keep");
+  const keepPath = keepAt >= 0 ? args[keepAt + 1] : undefined;
+  if (keepAt >= 0 && (!keepPath || keepPath.startsWith("--"))) {
+    console.error("Usage: --compare <before> <after> [--keep <file>]");
+    Deno.exit(2);
+  }
+
+  try {
+    const comparison = compareFallbackRuns(
+      Deno.readTextFileSync(beforePath),
+      Deno.readTextFileSync(afterPath),
+      keepPath ? readKeepFile(keepPath) : new Set(),
+    );
+    for (const change of comparison.changes) {
+      console.log(JSON.stringify(change));
+    }
+    console.log(JSON.stringify({ unverified: comparison.unverified }));
+    console.log(JSON.stringify({
+      only_before: comparison.onlyBefore,
+      only_after: comparison.onlyAfter,
+    }));
+    console.log(JSON.stringify({ counts: comparison.counts }));
+    Deno.exit(comparison.exitCode);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    Deno.exit(2);
+  }
+}
+
+if (Deno.args.includes("--compare")) runCompare(Deno.args);
+
 loadHardcoverApiKey();
 
 if (Deno.args.includes("--population")) {
   try {
     await runPopulation();
+    Deno.exit(0);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    Deno.exit(2);
+  }
+}
+
+if (Deno.args.includes("--replay-linked")) {
+  try {
+    await runReplayLinked();
     Deno.exit(0);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
@@ -625,7 +849,12 @@ for (
   ]
 ) {
   const key = caseKey(spec);
-  if (!results.has(key)) results.set(key, await probe(spec));
+  if (!results.has(key)) {
+    results.set(
+      key,
+      await retryWikidata429(() => probe(spec), () => wait(30_000)),
+    );
+  }
 }
 
 let failed = false;
