@@ -29,7 +29,7 @@ public/js/contract.js      shared constants: shelf kinds, function names
 public/js/simania.js       browser Simania client: search, details, rating, Hebrew match
 public/js/my-rating.js     five-star rating widget and the "how was it?" prompt
 public/js/events.js        shelves-changed event fired on every shelf change
-public/js/recs-refresh.js  debounced background recommendation refresh
+public/js/recs-refresh.js  debounced background recommendation refresh and last-run failure state
 public/js/app-open-refresh.js  one refresh per app open, and after 30+ minutes away
 public/js/invite.js        invite-friends screen (#invite)
 public/css/invite.css      invite screen styles
@@ -37,6 +37,8 @@ public/sw.js               network-first service worker (Android install, offlin
 ```
 
 `scripts/build-site.mjs` adds `?v=<hash>` to every module when the site is published, so a cached old module never mixes with new ones.
+
+`recs-refresh.js` exposes `failed()` in addition to `busy()`: it starts false, becomes true when the latest background `recommendations` call or localization fails, and returns to false after a successful run. Subscribers are notified after either outcome. While `failed()` is true and no refresh is running, both `#recs` and `#genres` show the status line "העדכון האחרון של ההמלצות נכשל. ננסה שוב בשינוי הבא." at the top with `role="status"`.
 
 The shell lane creates every file above, including empty stubs for the lane-owned modules with their exported function names, and links every CSS file and script from `index.html`. Later lanes edit only their own files, so they never conflict on `index.html`.
 

@@ -72,4 +72,4 @@ The `search-books` function was removed. Search runs in the browser: under 2 cha
 
 ## Shared code
 
-`_shared/` holds `simania.ts`, `hardcover.ts`, `bridges.ts`, `catalog.ts`, `utils.ts`, `types.ts` (contract) and `db.ts` (service and user clients). Functions import `supabase-js` as `npm:@supabase/supabase-js@2.45.4`.
+`_shared/` holds `simania.ts`, `hardcover.ts`, `bridges.ts`, `catalog.ts`, `utils.ts`, `types.ts` (contract), `db.ts` (service and user clients), and `chunked.ts`. The `selectInChunks` helper in `chunked.ts` deduplicates values, sends at most 100 values in each PostgREST `in` request, runs at most 4 requests at a time, and concatenates their rows; an error in any chunk fails the whole lookup. All Edge Function lookups that use an `in` filter go through this helper. Functions import `supabase-js` as `npm:@supabase/supabase-js@2.45.4`.
