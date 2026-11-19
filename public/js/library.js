@@ -1,4 +1,4 @@
-import { notifyShelvesChanged, SHELVES_CHANGED } from "./events.js";
+import { notifyRecsInputsChanged, notifyShelvesChanged, SHELVES_CHANGED } from "./events.js";
 import { promptRating, shouldPromptRating } from "./my-rating.js";
 import { FUNCTIONS, SHELF_KINDS } from "./contract.js";
 import {
@@ -15,6 +15,7 @@ import {
   moveBook,
   moveShelf,
   renameShelf,
+  setGenrePreference,
   shelfIndexById,
 } from "./data.js";
 import * as addBook from "./add-book.js";
@@ -27,6 +28,11 @@ const EDIT_SVG = `<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><p
 let chromeWired = false;
 
 export const GENRE_SHELF_LABEL = "מומלצים בשבילך";
+export const GENRE_HIDE_LABEL = "הסתר מדף";
+export const GENRE_PINNED_LABEL = "נעוץ";
+export const GENRE_FEW_NOTE = "אין עדיין מספיק ספרים במדף הזה. דרגו ספרים מהז'אנר הזה כדי לקבל עוד";
+export const GENRE_HIDDEN_TOAST = "המדף הוסתר. אפשר להחזיר אותו בהגדרות מדפי ההמלצות";
+const GENRE_FEW_BOOKS = 4;
 export const GENRE_LOCALIZE_TRIED_KEY = "booknook.genreLocalizeTried";
 
 const GENRE_LOCALIZE_LIMIT = 12;
@@ -51,7 +57,7 @@ let genreCardGeneration = 0;
 export function removeGenreBook(shelves, workId) {
   return shelves
     .map((s) => ({ ...s, books: s.books.filter((b) => b.work_id !== workId) }))
-    .filter((s) => s.books.length);
+    .filter((s) => s.books.length || s.pinned);
 }
 
 /** @param {HTMLElement} row */
@@ -151,15 +157,49 @@ function genreBookTile(book) {
 /** @param {{ genre: string, books: object[] }} shelf */
 export function genreShelfSection(shelf) {
   const genre = escapeHtml(shelf.genre);
-  return `<section class="shelf genre-shelf" data-genre="${genre}">
-    <div class="shelf-head"><h2>${genre}</h2><span>${GENRE_SHELF_LABEL}</span></div>
+  const key = escapeHtml(shelf.genre_key ?? shelf.genre);
+  const pinnedLabel = shelf.pinned ? `<span class="genre-pinned">${GENRE_PINNED_LABEL}</span>` : "";
+  const note =
+    shelf.pinned && shelf.books.length < GENRE_FEW_BOOKS
+      ? `<p class="genre-few-note">${GENRE_FEW_NOTE}</p>`
+      : "";
+  return `<section class="shelf genre-shelf" data-genre="${genre}" data-genre-key="${key}">
+    <div class="shelf-head"><h2>${genre}</h2><span>${GENRE_SHELF_LABEL}</span>${pinnedLabel}<button type="button" class="genre-hide" data-genre-key="${key}" data-genre="${genre}">${GENRE_HIDE_LABEL}</button></div>
     <div class="rowwrap">
       <button type="button" class="edge prev" aria-label="הקודם"><span class="knob">${EDGE_SVG}</span></button>
       <div class="row">${shelf.books.map(genreBookTile).join("")}</div>
       <button type="button" class="edge next" aria-label="הבא"><span class="knob">${EDGE_SVG}</span></button>
     </div>
     <div class="board"></div>
+    ${note}
   </section>`;
+}
+
+/**
+ * Hides one genre shelf for good: the call, then removal and a refresh request.
+ * @param {HTMLElement} button
+ * @param {HTMLElement} root
+ * @param {object} ctx
+ */
+async function onHideGenreShelf(button, root, ctx) {
+  const session = genreSession;
+  const key = button.dataset?.genreKey;
+  const genre = button.dataset?.genre;
+  if (!session?.shelves || !key || button.disabled) return;
+  button.disabled = true;
+  try {
+    await setGenrePreference(ctx.api.getClient(), key, genre, "hidden");
+  } catch (error) {
+    button.disabled = false;
+    ctx.showToast?.(error instanceof Error && error.message ? error.message : "לא הצלחנו להסתיר את המדף");
+    return;
+  }
+  if (genreSession === session) {
+    session.shelves = session.shelves.filter((s) => (s.genre_key ?? s.genre) !== key);
+    paint(root, ctx);
+  }
+  ctx.showToast?.(GENRE_HIDDEN_TOAST);
+  notifyRecsInputsChanged();
 }
 
 /**
@@ -438,7 +478,7 @@ function startGenreSession(root, ctx) {
       shelves = [];
     }
     if (genreSession !== session) return;
-    session.shelves = Array.isArray(shelves) ? shelves.filter((s) => s?.books?.length) : [];
+    session.shelves = Array.isArray(shelves) ? shelves.filter((s) => s?.books?.length || s?.pinned) : [];
     if (session.shelves.length) {
       paint(root, ctx);
       if (typeof ctx.api?.callFunction === "function") {
@@ -631,6 +671,11 @@ export async function mount(root, ctx) {
     if (plus) {
       const shelfId = plus.dataset.shelfId;
       if (shelfId) void addBook.open(shelfId, ctx);
+      return;
+    }
+    const hideBtn = e.target.closest(".genre-hide");
+    if (hideBtn) {
+      void onHideGenreShelf(hideBtn, root, ctx);
       return;
     }
     const genreBook = e.target.closest(".genre-shelf .book");

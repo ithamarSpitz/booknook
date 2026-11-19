@@ -133,6 +133,7 @@ describe("data.js helpers", () => {
   it("mapGenreRows orders shelves and books and maps edition and work fallbacks", () => {
     const rows = [
       {
+        genre_key: "fantasy",
         genre: "Fantasy",
         shelf_position: 1,
         position: 1,
@@ -148,6 +149,7 @@ describe("data.js helpers", () => {
         editions: null,
       },
       {
+        genre_key: "mystery",
         genre: "Mystery",
         shelf_position: 0,
         position: 1,
@@ -163,6 +165,7 @@ describe("data.js helpers", () => {
         editions: { title: "Edition title 2", author: "Edition author 2", cover_url: "edition-cover-2" },
       },
       {
+        genre_key: "fantasy",
         genre: "Fantasy",
         shelf_position: 1,
         position: 0,
@@ -180,9 +183,22 @@ describe("data.js helpers", () => {
     ];
 
     const titles = new Map([[11, "Seed one"], [22, "Seed two"], [31, "Seed three"]]);
+    const prefs = [
+      { genre_key: "fantasy", label: "Fantasy", state: "pinned", pin_order: 1 },
+      { genre_key: "poetry", label: "שירה", state: "pinned", pin_order: 0 },
+      { genre_key: "horror", label: "Horror", state: "hidden", pin_order: null },
+    ];
+    const withPrefs = mapGenreRows(rows, titles, prefs);
+    assert.deepEqual(
+      withPrefs.map((s) => [s.genre_key, s.genre, s.pinned, s.books.length]),
+      [["mystery", "Mystery", false, 1], ["fantasy", "Fantasy", true, 2], ["poetry", "שירה", true, 0]],
+      "empty pinned shelf is added after the stored ones",
+    );
     assert.deepEqual(mapGenreRows(rows, titles), [
       {
+        genre_key: "mystery",
         genre: "Mystery",
+        pinned: false,
         books: [{
           work_id: "work-2",
           hardcover_id: 102,
@@ -196,7 +212,9 @@ describe("data.js helpers", () => {
         }],
       },
       {
+        genre_key: "fantasy",
         genre: "Fantasy",
+        pinned: false,
         books: [
           {
             work_id: "work-1",
@@ -303,6 +321,7 @@ describe("data.js client", () => {
         if (column === "position") {
           return Promise.resolve({
             data: [{
+              genre_key: "fantasy",
               genre: "Fantasy",
               shelf_position: 0,
               position: 0,
@@ -328,24 +347,42 @@ describe("data.js client", () => {
         return Promise.resolve({ data: [{ simania_id: 7, title: "Seed title" }], error: null });
       },
     };
+    const prefsQuery = {
+      select(columns) {
+        calls.push(["select", columns]);
+        return Promise.resolve({
+          data: [
+            { genre_key: "fantasy", label: "Fantasy", state: "pinned", pin_order: 0 },
+            { genre_key: "poetry", label: "Poetry", state: "pinned", pin_order: 1 },
+          ],
+          error: null,
+        });
+      },
+    };
     const client = {
       from(table) {
         calls.push(["from", table]);
+        if (table === "genre_preferences") return prefsQuery;
         return table === "genre_recommendations" ? genreQuery : editionsQuery;
       },
     };
 
     const shelves = await loadGenreShelves(client);
     assert.equal(shelves[0].books[0].title, "Title");
+    assert.equal(shelves[0].genre_key, "fantasy");
+    assert.equal(shelves[0].pinned, true);
     assert.deepEqual(shelves[0].books[0].because, [7]);
     assert.deepEqual(shelves[0].books[0].because_titles, ["Seed title"]);
+    assert.deepEqual(shelves[1], { genre_key: "poetry", genre: "Poetry", pinned: true, books: [] });
     assert.deepEqual(calls, [
       ["from", "genre_recommendations"],
-      ["select", `work_id, simania_id, genre, shelf_position, position, because,
+      ["select", `work_id, simania_id, genre_key, genre, shelf_position, position, because,
       works (hardcover_id, original_title, original_authors, hardcover_cover_url),
       editions (title, author, cover_url)`],
       ["order", "shelf_position"],
       ["order", "position"],
+      ["from", "genre_preferences"],
+      ["select", "genre_key, label, state, pin_order"],
       ["from", "editions"],
       ["select", "simania_id, title"],
       ["in", "simania_id", [7]],
@@ -377,8 +414,11 @@ describe("data.js client", () => {
       select() { return this; },
       in: async () => ({ data: null, error: new Error("denied") }),
     };
+    const prefsQuery = { select: async () => ({ data: [], error: null }) };
     const client = {
-      from: (table) => table === "genre_recommendations" ? genreQuery : editionsQuery,
+      from: (table) => table === "genre_recommendations"
+        ? genreQuery
+        : table === "genre_preferences" ? prefsQuery : editionsQuery,
     };
 
     const shelves = await loadGenreShelves(client);
