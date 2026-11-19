@@ -1320,6 +1320,81 @@ describe("localizeRecommendations author path", () => {
   });
 });
 
+describe("localizeRecommendations author guard", () => {
+  const card = (extra = {}) => ({
+    work_id: "guarded-work",
+    title: "Blue Exorcist",
+    author: "Kazue Kato",
+    english_only: true,
+    can_add: false,
+    hebrew_hint: { source: "wikidata", title: "מגרש השדים", author: null },
+    hebrew_author: null,
+    ...extra,
+  });
+
+  async function localize(rec, simaniaAuthor) {
+    const calls = [];
+    const linked = [];
+    await localizeRecommendations([rec], {
+      match: async () => ({ id: 2970, title: "מגרש השדים", author: simaniaAuthor }),
+      fetchPayload: async () => ({
+        details: { title: "מגרש השדים", author: simaniaAuthor },
+        rating: null,
+      }),
+      callFunction: async (name, body) => {
+        calls.push([name, body]);
+        if (name === "match-by-author") {
+          return { simania_id: 2970, resolve_status: "wikidata" };
+        }
+        return {
+          simania_id: body.simania_id,
+          title: "מגרש השדים",
+          author: simaniaAuthor,
+          cover_url: null,
+        };
+      },
+      onLinked: (...args) => linked.push(args),
+      isCurrent: () => true,
+    });
+    return { calls, linked };
+  }
+
+  it("does not link a title-path match by a clearly different Hebrew author", async () => {
+    const rec = card();
+    const { calls, linked } = await localize(rec, "וויליאם פיטר בלאטי");
+
+    assert.equal(calls.some(([name]) => name === "link-edition"), false);
+    assert.deepEqual(linked, []);
+    assert.equal(rec.english_only, true);
+    assert.equal(rec.simania_id, undefined);
+  });
+
+  it("still links ג'ו היל for Joe Hill", async () => {
+    const { calls, linked } = await localize(card({ author: "Joe Hill" }), "ג'ו היל");
+
+    assert.equal(calls.at(-1)[0], "link-edition");
+    assert.equal(linked.length, 1);
+  });
+
+  it("links when hebrew_author agrees despite a low English-name sound score", async () => {
+    const { calls, linked } = await localize(
+      card({ hebrew_author: "וויליאם פיטר בלאטי" }),
+      "וויליאם פיטר בלאטי",
+    );
+
+    assert.equal(calls.at(-1)[0], "link-edition");
+    assert.equal(linked.length, 1);
+  });
+
+  it("still links Latin and empty Simania authors", async () => {
+    for (const simaniaAuthor of ["William Peter Blatty", ""]) {
+      const { calls, linked } = await localize(card(), simaniaAuthor);
+      assert.equal(calls.at(-1)[0], "link-edition");
+      assert.equal(linked.length, 1);
+    }
+  });
+});
+
 describe("catalog fallback localization", () => {
   const rec = (extra = {}) => ({
     work_id: "fallback-work",
