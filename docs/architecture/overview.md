@@ -17,7 +17,9 @@
 | `works`, `editions` | Edge Functions with the service role only (`link-edition` links a browser-matched edition) |
 | `shelves`, `shelf_books` | the signed-in user through supabase-js and the RPCs (`move_book`, `remove_book`, `set_rating`, ...); `add-book` inserts the first row |
 | `recommendations` | the `recommendations` function and `link-edition`; the user may only set `dismissed` |
-| `profiles` | sign-up trigger; the user updates own `display_name` and `locale` |
+| `genre_recommendations`, `reader_genres` | the `recommendations` function |
+| `genre_preferences` | the user, only through `set_genre_preference` |
+| `profiles` | sign-up trigger; the user updates own `display_name` and `locale`; `genre_shelf_count` changes only through `set_genre_shelf_count` |
 | `invitations` | the `invite-user` function; the sender may read own rows |
 | `book_events` | a trigger on `shelf_books` only; the user may read own rows |
 | `search_cache` | nothing (table remains, unused since `search-books` was removed) |

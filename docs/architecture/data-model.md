@@ -14,6 +14,7 @@ All tables live in `public`. Timestamps are `timestamptz default now()`. The con
 | id | uuid PK, references auth.users on delete cascade | |
 | display_name | text not null default '' | shown as "הספרייה של {name}" |
 | locale | text not null default 'he' | |
+| genre_shelf_count | smallint not null default 10 | number of genre shelves, 1-20 |
 | created_at | timestamptz | |
 
 RLS: select and update where `id = auth.uid()`; clients may update only `display_name` and `locale` (column-level grant). No insert or delete from clients.
@@ -101,6 +102,23 @@ RLS: all operations where `user_id = auth.uid()`.
 
 RLS: select where `user_id = auth.uid()`; clients have no write grant. Rows are written by the function with the service role, and `dismissed` is set only by `dismiss_work`.
 
+## genre_recommendations
+
+| column | type | note |
+|---|---|---|
+| user_id | uuid references auth.users on delete cascade | PK with work_id |
+| work_id | uuid references works | |
+| genre_key | text not null | normalized genre key |
+| genre | text not null | display name |
+| shelf_position | smallint not null | 0-19 |
+| position | smallint not null | 0-11 within the shelf |
+| simania_id | int references editions, nullable | null for English-only books |
+| score | real not null | |
+| because | int[] not null default '{}' | seed Simania IDs |
+| generated_at | timestamptz | |
+
+RLS: select where `user_id = auth.uid()`; clients have no write grant. Rows are replaced by `replace_genre_recommendations`, and a work is on at most one genre shelf.
+
 ## dismissed_works
 
 | column | type | note |
@@ -111,6 +129,33 @@ RLS: select where `user_id = auth.uid()`; clients have no write grant. Rows are 
 | dismissed_at | timestamptz | |
 
 RLS: select where `user_id = auth.uid()`; clients have no write grants. Writes go only through `dismiss_work` and `restore_work`.
+
+## genre_preferences
+
+| column | type | note |
+|---|---|---|
+| user_id | uuid references auth.users on delete cascade | PK with genre_key |
+| genre_key | text not null | |
+| label | text not null | display name saved with the choice |
+| state | text not null | `pinned` or `hidden` |
+| pin_order | int | set for pinned genres |
+| updated_at | timestamptz | |
+
+RLS: select where `user_id = auth.uid()`; clients have no write grant. A missing row means automatic display. Writes go only through `set_genre_preference`.
+
+## reader_genres
+
+| column | type | note |
+|---|---|---|
+| user_id | uuid references auth.users on delete cascade | PK with genre_key |
+| genre_key | text not null | |
+| label | text not null | display name |
+| seed_count | int not null | |
+| candidate_count | int not null | |
+| position | smallint not null | 0-99 |
+| generated_at | timestamptz | |
+
+RLS: select where `user_id = auth.uid()`; clients have no write grant. The recommendations function replaces these rows through `replace_reader_genres` for the settings page.
 
 ## search_cache
 
@@ -158,3 +203,7 @@ Filled only by a trigger on `shelf_books`, so every path is recorded the same wa
 - `set_rating(p_simania_id int, p_rating smallint)` RPC: sets the caller's 1-5 rating for a shelved book on any shelf; null clears it.
 - `dismiss_work(p_work_id uuid, p_kind text)` RPC: upserts the caller's dismissal and removes the work from current recommendation results.
 - `restore_work(p_work_id uuid)` RPC: removes the caller's dismissal so the work may be recommended again after regeneration.
+- `set_genre_preference(p_genre_key text, p_label text, p_state text)` RPC: sets a genre to automatic, pinned, or hidden; automatic removes the preference.
+- `set_genre_shelf_count(p_count integer)` RPC: sets the caller's genre shelf count between 1 and 20.
+- `replace_genre_recommendations(p_user_id uuid, p_rows jsonb)` RPC: service-role replacement of the caller's genre shelf rows.
+- `replace_reader_genres(p_user_id uuid, p_rows jsonb)` RPC: service-role replacement of the genres and counts shown in settings.
