@@ -29,10 +29,10 @@ select throws_ok(
 
 select throws_ok(
   $$insert into public.genre_recommendations
-      (user_id, work_id, genre, shelf_position, position, simania_id, score)
+      (user_id, work_id, genre, genre_key, shelf_position, position, simania_id, score)
     values ('00000000-0000-0000-0000-0000000000f1',
             '80000000-0000-0000-0000-000000000002',
-            'Fantasy', 0, 0, -880002, 1)$$,
+            'Fantasy', 'Fantasy', 0, 0, -880002, 1)$$,
   '23514',
   'new row for relation "genre_recommendations" violates check constraint "genre_recommendations_simania_id_positive_check"',
   'a genre recommendation cannot reference a negative English edition');
@@ -48,12 +48,12 @@ select lives_ok(
 
 select lives_ok(
   $$insert into public.genre_recommendations
-      (user_id, work_id, genre, shelf_position, position, simania_id, score)
+      (user_id, work_id, genre, genre_key, shelf_position, position, simania_id, score)
     values
       ('00000000-0000-0000-0000-0000000000f1',
-       '80000000-0000-0000-0000-000000000005', 'Fantasy', 0, 0, null, 1),
+       '80000000-0000-0000-0000-000000000005', 'Fantasy', 'Fantasy', 0, 0, null, 1),
       ('00000000-0000-0000-0000-0000000000f1',
-       '80000000-0000-0000-0000-000000000006', 'Fantasy', 0, 1, 880006, 1)$$,
+       '80000000-0000-0000-0000-000000000006', 'Fantasy', 'Fantasy', 0, 1, 880006, 1)$$,
   'genre recommendations still accept null and positive edition IDs');
 
 select lives_ok(

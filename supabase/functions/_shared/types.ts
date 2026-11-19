@@ -23,6 +23,7 @@ export interface ProfileRow {
   display_name: string;
   locale: string;
   created_at: string;
+  genre_shelf_count: number;
 }
 
 /** Validated provider cache entries; tag names are preserved verbatim. */
@@ -101,6 +102,30 @@ export interface DismissedWorkRow {
   kind: DismissKind;
   dismissed_at: string;
 }
+
+export interface GenrePreferenceRow {
+  user_id: string;
+  genre_key: string;
+  label: string;
+  state: "pinned" | "hidden";
+  pin_order: number | null;
+  updated_at: string;
+}
+
+export interface ReaderGenreRow {
+  user_id: string;
+  genre_key: string;
+  label: string;
+  seed_count: number;
+  candidate_count: number;
+  position: number;
+  generated_at: string;
+}
+
+export type ReaderGenreReplacement = Pick<
+  ReaderGenreRow,
+  "genre_key" | "label" | "seed_count" | "candidate_count" | "position"
+>;
 
 export interface SearchCacheRow {
   query_norm: string;
@@ -241,6 +266,7 @@ export interface SearchEnglishResponse {
 export interface GenreRecommendationRow {
   user_id: string;
   work_id: string;
+  genre_key: string;
   genre: string;
   shelf_position: number;
   position: number;
@@ -252,6 +278,7 @@ export interface GenreRecommendationRow {
 /** One item of the replace_genre_recommendations payload. */
 export interface GenreRecommendationReplacement {
   work_id: string;
+  genre_key: string;
   genre: string;
   shelf_position: number;
   position: number;
