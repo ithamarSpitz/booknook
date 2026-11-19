@@ -1,6 +1,25 @@
 import { nameSoundScore } from "./names.js";
 import { normalize, similarity } from "./simania.js";
 
+/**
+ * @param {string | null | undefined} simaniaAuthor
+ * @param {string[]} englishAuthors
+ * @param {string | null | undefined} hebrewAuthor
+ * @returns {boolean}
+ */
+export function authorGuardRejects(
+  simaniaAuthor,
+  englishAuthors,
+  hebrewAuthor,
+) {
+  const candidate = String(simaniaAuthor ?? "");
+  if (!/[א-ת]/u.test(candidate)) return false;
+  if (nameSoundScore(candidate, englishAuthors) >= 0.3) return false;
+
+  const bridge = String(hebrewAuthor ?? "").trim();
+  return bridge === "" || similarity(bridge, candidate) < 0.5;
+}
+
 /** @param {string} title @returns {string} */
 export function mainTitle(title) {
   const withoutTags = String(title ?? "").replace(/\[[^\]]*\]/g, " ");
