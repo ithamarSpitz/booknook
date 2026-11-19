@@ -977,3 +977,27 @@ sprints:
         - S21-T3
         - S21-T4
         - S21-T5
+  S22-guard-precision:
+    name: Author guard precision (no English author, Hebrew originals, initials, silent
+      gh) and audit of all links
+    tasks:
+      S22-T1:
+        file: tasks/sprint-22-guard-precision/01-contract.md
+        stage: 1
+        depends_on: []
+      S22-T2:
+        file: tasks/sprint-22-guard-precision/02-name-sound.md
+        stage: 2
+        depends_on:
+        - S22-T1
+      S22-T3:
+        file: tasks/sprint-22-guard-precision/03-guard-audit.md
+        stage: 2
+        depends_on:
+        - S22-T1
+      S22-T4:
+        file: tasks/sprint-22-guard-precision/04-docs.md
+        stage: 3
+        depends_on:
+        - S22-T2
+        - S22-T3
