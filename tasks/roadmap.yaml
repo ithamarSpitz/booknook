@@ -941,3 +941,39 @@ sprints:
       - npm run test:web
       '4':
       - npm run check:contract
+  S21-author-guard:
+    name: Author guard before linking, name-sound fixes for short names, author audit
+      and refresh failure details
+    tasks:
+      S21-T1:
+        file: tasks/sprint-21-author-guard/01-contract.md
+        stage: 1
+        depends_on: []
+      S21-T2:
+        file: tasks/sprint-21-author-guard/02-name-sound.md
+        stage: 2
+        depends_on:
+        - S21-T1
+      S21-T4:
+        file: tasks/sprint-21-author-guard/04-operator-scripts.md
+        stage: 2
+        depends_on:
+        - S21-T1
+      S21-T3:
+        file: tasks/sprint-21-author-guard/03-guard-and-audit.md
+        stage: 3
+        depends_on:
+        - S21-T2
+      S21-T5:
+        file: tasks/sprint-21-author-guard/05-browser-guard.md
+        stage: 4
+        depends_on:
+        - S21-T3
+      S21-T6:
+        file: tasks/sprint-21-author-guard/06-docs.md
+        stage: 5
+        depends_on:
+        - S21-T2
+        - S21-T3
+        - S21-T4
+        - S21-T5
