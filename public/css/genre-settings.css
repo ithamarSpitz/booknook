@@ -15,6 +15,14 @@
   font: 700 34px/1.15 "Assistant", sans-serif;
 }
 
+.genre-refresh-failed {
+  margin: -8px 0 16px;
+  color: var(--muted, #6b5a48);
+  font-size: 14px;
+  line-height: 1.45;
+  text-align: start;
+}
+
 .genre-count-label {
   display: flex;
   flex-wrap: wrap;

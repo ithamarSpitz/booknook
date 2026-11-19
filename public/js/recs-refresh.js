@@ -22,6 +22,7 @@ export function createRecsRefresher(deps) {
   let timer = null;
   let running = false;
   let again = false;
+  let lastRunFailed = false;
 
   const busy = () => running || timer !== null;
   const emit = () => {
@@ -45,7 +46,9 @@ export function createRecsRefresher(deps) {
           onLinked: () => {},
         });
       } while (again);
+      lastRunFailed = false;
     } catch (err) {
+      lastRunFailed = true;
       console.warn("Background recommendations refresh failed:", err);
     } finally {
       running = false;
@@ -65,6 +68,7 @@ export function createRecsRefresher(deps) {
       emit();
     },
     busy,
+    failed: () => lastRunFailed,
     /** @param {(busy: boolean) => void} fn @returns {() => void} unsubscribe */
     subscribe(fn) {
       listeners.add(fn);
