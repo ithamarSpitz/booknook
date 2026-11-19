@@ -22,6 +22,7 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   #filters: Filter[] = [];
   #order: { column: string; ascending: boolean } | null = null;
   #limit: number | null = null;
+  #failed = false;
   constructor(
     private db: FakeDb,
     private table: string,
@@ -37,6 +38,20 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
   }
   in(name: string, values: unknown[]): this {
     this.#filters.push(["__in__", name, values]);
+    this.db.inCalls.push({
+      table: this.table,
+      column: name,
+      values: [...values],
+    });
+    if (
+      this.table === "works" && name === "hardcover_id" &&
+      this.db.failWorksInOnCall !== null
+    ) {
+      this.db.worksInCalls += 1;
+      if (this.db.worksInCalls === this.db.failWorksInOnCall) {
+        this.#failed = true;
+      }
+    }
     return this;
   }
   gt(name: string, value: number): this {
@@ -147,6 +162,12 @@ class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
       | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
       | null,
   ): PromiseLike<TResult1 | TResult2> {
+    if (this.#failed) {
+      return Promise.resolve({
+        data: null,
+        error: { message: "works boom" },
+      } as never).then(onfulfilled ?? undefined);
+    }
     let data: unknown = [];
     if (this.table === "works" && this.operation === "upsert") {
       data = this.payload;
@@ -178,6 +199,9 @@ class FakeDb {
     pin_order: number | null;
   }> = [];
   ordinaryResultWorkIds: Set<string> | null = null;
+  inCalls: Array<{ table: string; column: string; values: unknown[] }> = [];
+  failWorksInOnCall: number | null = null;
+  worksInCalls = 0;
   constructor(
     public library: unknown[],
     public works: WorkRow[],
@@ -444,9 +468,7 @@ function twoGenreFixture() {
     withGenre(work("m2", 4, mysteryCandidates), "Mystery"),
   ];
   const candidates = [
-    ...fantasyCandidates.map((id) =>
-      withGenre(work(`c-${id}`, id), "Fantasy")
-    ),
+    ...fantasyCandidates.map((id) => withGenre(work(`c-${id}`, id), "Fantasy")),
     ...mysteryCandidates.map((id) => withGenre(work(`c-${id}`, id), "Mystery")),
   ];
   const db = new FakeDb(
@@ -543,7 +565,7 @@ Deno.test("no seeds also clears reader genres", async () => {
   );
 });
 
-Deno.test("reading shelf books seed genre shelves with weight 2.5",async () => {
+Deno.test("reading shelf books seed genre shelves with weight 2.5", async () => {
   const candidateIds = [301, 302, 303, 304];
   const rated = withGenre(work("rated", 1, candidateIds), "Fantasy");
   const reading = withGenre(work("reading", 2, candidateIds), "Fantasy");
@@ -1298,4 +1320,127 @@ Deno.test("same English author on two cards triggers one Hebrew author lookup", 
   assert(response.status === 200, "expected 200");
   assert(payload.recommendations.length === 2, "expected two cards");
   assert(lookupCount === 1, "author lookup should be cached per request");
+});
+
+// 63 seeds with 40 disjoint similar IDs each (the last with 20): 2,500 distinct
+// candidate IDs, far more than one chunk. The 126 best-scored candidates (ranks
+// 0 and 1 of every seed, all in the first two chunks) are already shelved, so
+// the stored recommendations can only come from a later chunk. 250 more works
+// are dismissed as "not my type" to exercise the negative-seed lookup.
+const SEED_COUNT = 63;
+const CANDIDATE_BASE = 10000;
+
+function similarCount(seedIndex: number): number {
+  return seedIndex === SEED_COUNT - 1 ? 20 : 40;
+}
+
+function candidateIdFor(seedIndex: number, rank: number): number {
+  return CANDIDATE_BASE + seedIndex * 40 + rank;
+}
+
+function largeLibraryFixture(): FakeDb {
+  const seeds: WorkRow[] = [];
+  const candidates: WorkRow[] = [];
+  const library: unknown[] = [];
+  for (let seedIndex = 0; seedIndex < SEED_COUNT; seedIndex++) {
+    const similar = Array.from(
+      { length: similarCount(seedIndex) },
+      (_, rank) => candidateIdFor(seedIndex, rank),
+    );
+    const seed = withGenre(
+      work(`s${seedIndex}`, seedIndex + 1, similar),
+      "Fantasy",
+    );
+    seeds.push(seed);
+    library.push(shelfBook(1000 + seedIndex, "read", seed, { rating: 5 }));
+    for (const [rank, id] of similar.entries()) {
+      const candidate = withGenre(work(`c-${id}`, id), "Fantasy");
+      candidates.push(candidate);
+      if (rank < 2) {
+        library.push(shelfBook(5000 + candidates.length, "want", candidate));
+      }
+    }
+  }
+  const dismissedWorks = Array.from(
+    { length: 250 },
+    (_, index) => work(`d${index}`, 90000 + index),
+  );
+  return new FakeDb(
+    library,
+    [...seeds, ...candidates, ...dismissedWorks],
+    dismissedWorks.map((value) => ({
+      work_id: value.id,
+      kind: "not_my_type" as const,
+    })),
+  );
+}
+
+Deno.test("a reader with 2,500 distinct similar IDs gets chunked lookups and the full-set result", async () => {
+  const db = largeLibraryFixture();
+  const response = await runRecommendations(db);
+  assert(response.status === 200, `expected 200, got ${response.status}`);
+
+  const maxLength = Math.max(...db.inCalls.map((call) => call.values.length));
+  assert(maxLength <= 100, `in list too long: ${maxLength}`);
+
+  const worksLookups = db.inCalls.filter((call) =>
+    call.table === "works" && call.column === "hardcover_id"
+  );
+  assert(worksLookups.length >= 25, `only ${worksLookups.length} chunks`);
+  const looked = new Set(worksLookups.flatMap((call) => call.values));
+  const expectedIds: number[] = [];
+  for (let seedIndex = 0; seedIndex < SEED_COUNT; seedIndex++) {
+    for (let rank = 0; rank < similarCount(seedIndex); rank++) {
+      expectedIds.push(candidateIdFor(seedIndex, rank));
+    }
+  }
+  assert(expectedIds.length === 2500, "fixture must have 2,500 IDs");
+  assert(
+    expectedIds.every((id) => looked.has(id)) && looked.size === 2500,
+    "the lookups must cover exactly the 2,500 expected IDs",
+  );
+
+  const negativeLookups = db.inCalls.filter((call) =>
+    call.table === "works" && call.column === "id"
+  );
+  assert(
+    negativeLookups.reduce((sum, call) => sum + call.values.length, 0) >= 250,
+    "expected the 250 negative-seed works to be looked up",
+  );
+
+  // Independent expectation: ranks 0 and 1 are shelved; rank 2 of every seed
+  // ties at the best remaining score, ordered by Hardcover ID, top 20 kept.
+  const expectedWorks = Array.from(
+    { length: 20 },
+    (_, seedIndex) => `c-${candidateIdFor(seedIndex, 2)}`,
+  );
+  const stored = db.replacement ?? [];
+  const storedIds = stored.map((row) => row.work_id);
+  assert(
+    JSON.stringify(storedIds) === JSON.stringify(expectedWorks),
+    `unexpected stored works ${JSON.stringify(storedIds)}`,
+  );
+  stored.forEach((row, seedIndex) => {
+    assert(
+      Math.abs(Number(row.score) - 5 * (1 - 2 / 40)) < 1e-9,
+      `unexpected score ${row.score}`,
+    );
+    assert(
+      JSON.stringify(row.because) === JSON.stringify([1000 + seedIndex]),
+      `unexpected because ${JSON.stringify(row.because)}`,
+    );
+  });
+});
+
+Deno.test("a failing works chunk gives the same error response as a failed single query", async () => {
+  const db = largeLibraryFixture();
+  db.failWorksInOnCall = 7;
+  const response = await runRecommendations(db);
+  assert(response.status === 500, `expected 500, got ${response.status}`);
+  const body = await response.json();
+  assert(
+    JSON.stringify(body).includes("works boom"),
+    `unexpected body ${JSON.stringify(body)}`,
+  );
+  assert(db.replacement === null, "nothing may be stored after a failed chunk");
 });
