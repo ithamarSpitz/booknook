@@ -321,3 +321,33 @@ Deno.test("link-edition returns 404 with neither recommendation row", async () =
   assertEquals(response.status, 404);
   assertEquals(db.tables.editions, []);
 });
+
+Deno.test("link-edition chunks a 250-sibling shelf lookup", async () => {
+  const siblings = Array.from({ length: 250 }, (_, i) => 1000 + i);
+  const { db, handler } = setup([
+    edition({ simania_id: 77, work_id: null }),
+    ...siblings.map((id) =>
+      edition({ simania_id: id, work_id: "work-1", resolve_status: "wikidata" })
+    ),
+  ]);
+  db.tables.shelf_books = [
+    { user_id: "user-1", simania_id: 1249, shelf_id: "s", position: 0 },
+    { user_id: "other", simania_id: 1000, shelf_id: "s", position: 0 },
+  ];
+  const sizes: number[] = [];
+  const original = db.from.bind(db);
+  db.from = (table: string) => {
+    const query: any = original(table);
+    if (table !== "shelf_books") return query;
+    const inFn = query.in.bind(query);
+    query.in = (column: string, values: unknown[]) => {
+      sizes.push(values.length);
+      return inFn(column, values);
+    };
+    return query;
+  };
+  const response = await handler(request(valid));
+  assertEquals(response.status, 409);
+  assertEquals(await response.json(), { error: "Already on your shelves." });
+  assertEquals(sizes, [100, 100, 50]);
+});
