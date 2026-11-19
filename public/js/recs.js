@@ -267,7 +267,7 @@ export async function localizeFallback(rec, deps) {
         const id = simaniaIdOf(book);
         if (id == null || !titleMatch(title, String(book?.title ?? ""))) continue;
         if (guardYear && originalYear != null && Number.isFinite(book?.year)
-          && book.year < originalYear - 1) continue;
+          && book.year > 0 && book.year < originalYear - 1) continue;
         const agrees = needSound
           ? soundAgrees(String(book?.author ?? ""), englishAuthor)
           : authorAgrees(author, String(book?.author ?? ""), englishAuthor);

@@ -1289,6 +1289,44 @@ describe("catalog fallback localization", () => {
     assert.equal(await decide(2009), 2009);
   });
 
+  it("links the Don Quixote rule-F result when Simania reports year zero", async () => {
+    const result = await localizeFallback(rec({
+      title: "Don Quixote",
+      author: "Miguel de Cervantes Saavedra",
+    }), {
+      callFunction: async () => candidateResponse([
+        { title: "דון קישוט", author: null, rule: "F" },
+      ], [], 1605),
+      searchBooks: async () => [{
+        id: 183461,
+        title: "דון קישוט",
+        author: "מיגל דה סרוונטס סאאודרה",
+        year: 0,
+      }],
+      isCurrent: () => true,
+    });
+
+    assert.equal(result, 183461);
+  });
+
+  it("does not guard unknown non-positive, null, or missing Simania years", async () => {
+    const candidate = { title: "ספר", author: null, rule: "F" };
+    const decide = (year) => localizeFallback(rec(), {
+      callFunction: async () => candidateResponse([candidate], [], 2023),
+      searchBooks: async () => [{
+        id: 701,
+        title: "ספר",
+        author: "קים סטנלי רובינסון",
+        ...(year === undefined ? {} : { year }),
+      }],
+      isCurrent: () => true,
+    });
+
+    for (const year of [-1, null, undefined]) {
+      assert.equal(await decide(year), 701, `year ${String(year)}`);
+    }
+  });
+
   it("keeps rules A-D independent of original_year", async () => {
     for (const rule of ["A", "B", "C", "D"]) {
       const result = await localizeFallback(rec(), {
