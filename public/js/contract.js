@@ -22,6 +22,7 @@ export const ROUTES = Object.freeze({
   LIBRARY: "#library",
   RECOMMENDATIONS: "#recs",
   REMOVED: "#removed",
+  GENRES: "#genres",
   SEARCH: "#search",
   SETTINGS: "#settings",
   INVITE: "#invite",
@@ -56,6 +57,14 @@ export const RPCS = Object.freeze({
   RESTORE_WORK: Object.freeze({
     name: "restore_work",
     params: Object.freeze(["p_work_id"]),
+  }),
+  SET_GENRE_PREFERENCE: Object.freeze({
+    name: "set_genre_preference",
+    params: Object.freeze(["p_genre_key", "p_label", "p_state"]),
+  }),
+  SET_GENRE_SHELF_COUNT: Object.freeze({
+    name: "set_genre_shelf_count",
+    params: Object.freeze(["p_count"]),
   }),
 });
 
