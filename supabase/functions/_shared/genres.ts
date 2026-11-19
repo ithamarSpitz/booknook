@@ -199,9 +199,23 @@ export type GenreNegativeSeed = {
 
 export type GenreWork = Pick<WorkRow, "id" | "tags">;
 
+export type GenrePreference = {
+  genreKey: string;
+  state: "auto" | "pinned" | "hidden";
+  pinOrder: number | null;
+};
+
+export type ReaderGenre = {
+  genreKey: string;
+  genre: string;
+  seedCount: number;
+  candidateCount: number;
+};
+
 export type GenreShelf = {
   genreKey: string;
   genre: string;
+  pinned: boolean;
   books: Array<{
     workId: string;
     hardcoverId: number;
@@ -396,67 +410,153 @@ export function genreCandidates(
     );
 }
 
+export const DEFAULT_GENRE_SHELF_COUNT = 5;
+
+function clampShelfCount(count: number): number {
+  if (!Number.isFinite(count)) return DEFAULT_GENRE_SHELF_COUNT;
+  return Math.min(20, Math.max(1, Math.floor(count)));
+}
+
+/** Pinned keys (by pin order, at most N - 1) and the keys that never shelve automatically. */
+function planPreferences(
+  shelfCount: number,
+  preferences: readonly GenrePreference[],
+): { pinned: string[]; skipped: Set<string> } {
+  const pins = preferences
+    .filter(({ state }) => state === "pinned")
+    .toSorted((left, right) =>
+      (left.pinOrder ?? Infinity) - (right.pinOrder ?? Infinity) ||
+      left.genreKey.localeCompare(right.genreKey)
+    )
+    .map(({ genreKey }) => genreKey)
+    .filter((key, index, keys) => keys.indexOf(key) === index);
+  return {
+    pinned: pins.slice(0, Math.max(0, clampShelfCount(shelfCount) - 1)),
+    skipped: new Set([
+      ...pins,
+      ...preferences
+        .filter(({ state }) => state === "hidden")
+        .map(({ genreKey }) => genreKey),
+    ]),
+  };
+}
+
+function shelfBooks(
+  genre: string,
+  genreSeeds: GenreSeed[],
+  negativeSeeds: readonly GenreNegativeSeed[],
+  worksByHardcoverId: ReadonlyMap<number, GenreWork>,
+  excludedWorkIds: ReadonlySet<string>,
+  placedWorkIds: ReadonlySet<string>,
+): GenreShelf["books"] {
+  const books: GenreShelf["books"] = [];
+  for (const candidate of genreCandidates(genre, genreSeeds, negativeSeeds)) {
+    const work = worksByHardcoverId.get(candidate.hardcoverId);
+    if (
+      !work || excludedWorkIds.has(work.id) ||
+      placedWorkIds.has(work.id) || !workGenres(work.tags).includes(genre)
+    ) continue;
+    books.push({
+      workId: work.id,
+      hardcoverId: candidate.hardcoverId,
+      score: candidate.score,
+      because: candidate.contributors
+        .toSorted((left, right) =>
+          right.contribution - left.contribution ||
+          left.simaniaId - right.simaniaId
+        )
+        .map(({ simaniaId }) => simaniaId)
+        .filter((simaniaId, index, values) =>
+          values.indexOf(simaniaId) === index
+        )
+        .slice(0, 10),
+    });
+    if (books.length === 12) break;
+  }
+  return books;
+}
+
+/** Step 3a: pinned genres first, hidden never, automatic genres fill up to N shelves. */
 export function buildGenreShelves({
   seeds,
   negativeSeeds = [],
   worksByHardcoverId,
   excludedWorkIds,
+  shelfCount = DEFAULT_GENRE_SHELF_COUNT,
+  preferences = [],
 }: {
   seeds: GenreSeed[];
   negativeSeeds?: readonly GenreNegativeSeed[];
   worksByHardcoverId: ReadonlyMap<number, GenreWork>;
   excludedWorkIds: ReadonlySet<string>;
+  shelfCount?: number;
+  preferences?: readonly GenrePreference[];
 }): GenreShelf[] {
+  const total = clampShelfCount(shelfCount);
+  const { pinned, skipped } = planPreferences(total, preferences);
   const shelves: GenreShelf[] = [];
   const placedWorkIds = new Set<string>();
 
-  for (const { genre, seeds: genreSeeds } of qualifyingGenres(seeds)) {
-    const books: GenreShelf["books"] = [];
-    for (const candidate of genreCandidates(genre, genreSeeds, negativeSeeds)) {
-      const work = worksByHardcoverId.get(candidate.hardcoverId);
-      if (
-        !work || excludedWorkIds.has(work.id) ||
-        placedWorkIds.has(work.id) || !workGenres(work.tags).includes(genre)
-      ) continue;
-      books.push({
-        workId: work.id,
-        hardcoverId: candidate.hardcoverId,
-        score: candidate.score,
-        because: candidate.contributors
-          .toSorted((left, right) =>
-            right.contribution - left.contribution ||
-            left.simaniaId - right.simaniaId
-          )
-          .map(({ simaniaId }) => simaniaId)
-          .filter((simaniaId, index, values) =>
-            values.indexOf(simaniaId) === index
-          )
-          .slice(0, 10),
-      });
-      if (books.length === 12) break;
-    }
-    if (books.length < 4) continue;
+  const place = (genre: string, books: GenreShelf["books"], pin: boolean) => {
     shelves.push({
       genreKey: genre,
       genre: genreDisplayName(genre, seeds, worksByHardcoverId),
+      pinned: pin,
       books,
     });
     for (const book of books) placedWorkIds.add(book.workId);
-    if (shelves.length === 5) break;
+  };
+
+  for (const genre of pinned) {
+    const books = shelfBooks(
+      genre,
+      seeds,
+      negativeSeeds,
+      worksByHardcoverId,
+      excludedWorkIds,
+      placedWorkIds,
+    );
+    if (books.length >= 1) place(genre, books, true);
+  }
+
+  for (const { genre, seeds: genreSeeds } of qualifyingGenres(seeds)) {
+    if (shelves.length >= total) break;
+    if (skipped.has(genre)) continue;
+    const books = shelfBooks(
+      genre,
+      genreSeeds,
+      negativeSeeds,
+      worksByHardcoverId,
+      excludedWorkIds,
+      placedWorkIds,
+    );
+    if (books.length >= 4) place(genre, books, false);
   }
   return shelves;
 }
 
-/** Highest-scored qualifying-genre candidates which have not been loaded yet. */
+/** Highest-scored planned-genre candidates (pinned included) not loaded yet. */
 export function missingCandidateIds(
   seeds: GenreSeed[],
   worksByHardcoverId: ReadonlyMap<number, GenreWork>,
-  limit = 100,
+  limit = 200,
   negativeSeeds: readonly GenreNegativeSeed[] = [],
+  plan: {
+    shelfCount?: number;
+    preferences?: readonly GenrePreference[];
+  } = {},
 ): number[] {
   if (limit <= 0) return [];
+  const { pinned, skipped } = planPreferences(
+    plan.shelfCount ?? DEFAULT_GENRE_SHELF_COUNT,
+    plan.preferences ?? [],
+  );
+  const groups = [
+    ...pinned.map((genre) => ({ genre, seeds })),
+    ...qualifyingGenres(seeds).filter(({ genre }) => !skipped.has(genre)),
+  ];
   const bestScore = new Map<number, number>();
-  for (const { genre, seeds: genreSeeds } of qualifyingGenres(seeds)) {
+  for (const { genre, seeds: genreSeeds } of groups) {
     for (const candidate of genreCandidates(genre, genreSeeds, negativeSeeds)) {
       if (worksByHardcoverId.has(candidate.hardcoverId)) continue;
       bestScore.set(
@@ -474,4 +574,68 @@ export function missingCandidateIds(
     )
     .slice(0, Math.floor(limit))
     .map(([hardcoverId]) => hardcoverId);
+}
+
+/** Step 7: every genre found for the reader, with seed and candidate counts. */
+export function readerGenres({
+  seeds,
+  worksByHardcoverId,
+  excludedWorkIds,
+}: {
+  seeds: GenreSeed[];
+  worksByHardcoverId: ReadonlyMap<number, GenreWork>;
+  excludedWorkIds: ReadonlySet<string>;
+}): ReaderGenre[] {
+  const stats = new Map<
+    string,
+    { evidence: number; seedCount: number; candidates: Set<string> }
+  >();
+  const entry = (key: string) => {
+    let value = stats.get(key);
+    if (!value) {
+      value = { evidence: 0, seedCount: 0, candidates: new Set() };
+      stats.set(key, value);
+    }
+    return value;
+  };
+  const candidateWorks = new Map<number, GenreWork>();
+  for (const seed of seeds) {
+    for (const key of workGenres(seed.tags)) {
+      const value = entry(key);
+      value.evidence += seed.weight;
+      value.seedCount += 1;
+    }
+    for (const hardcoverId of seed.similarIds.slice(0, 40)) {
+      const work = worksByHardcoverId.get(hardcoverId);
+      if (work) candidateWorks.set(hardcoverId, work);
+    }
+  }
+  for (const work of candidateWorks.values()) {
+    const excluded = excludedWorkIds.has(work.id);
+    for (const key of workGenres(work.tags)) {
+      const value = entry(key);
+      if (!excluded) value.candidates.add(work.id);
+    }
+  }
+  return [...stats.entries()]
+    .filter(([, v]) => v.seedCount >= 1 || v.candidates.size >= 3)
+    .map(([genreKey, v]) => ({
+      genreKey,
+      genre: genreDisplayName(genreKey, seeds, candidateWorks),
+      seedCount: v.seedCount,
+      candidateCount: v.candidates.size,
+      evidence: v.evidence,
+    }))
+    .sort((left, right) =>
+      right.evidence - left.evidence ||
+      right.candidateCount - left.candidateCount ||
+      left.genre.localeCompare(right.genre, "he")
+    )
+    .slice(0, 100)
+    .map(({ genreKey, genre, seedCount, candidateCount }) => ({
+      genreKey,
+      genre,
+      seedCount,
+      candidateCount,
+    }));
 }
