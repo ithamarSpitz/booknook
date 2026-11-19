@@ -239,11 +239,12 @@ export async function localizeFallback(rec, deps) {
   const search = deps.searchBooks ?? searchBooks;
   const fetchPayload = deps.fetchPayload ?? deps.fetchSimaniaPayload ?? fetchSimaniaPayload;
   const englishAuthor = String(rec.author ?? "");
+  const originalYear = Number.isFinite(response.original_year) ? response.original_year : null;
   let searchCount = 0;
   let detailCount = 0;
   let searchExhausted = false;
 
-  async function findEdition(candidate, needSound = false) {
+  async function findEdition(candidate, needSound = false, guardYear = false) {
     const title = String(candidate.title ?? "");
     const author = String(candidate.author ?? "");
     const shortTitle = mainTitle(title);
@@ -265,6 +266,8 @@ export async function localizeFallback(rec, deps) {
       for (const book of Array.isArray(books) ? books : []) {
         const id = simaniaIdOf(book);
         if (id == null || !titleMatch(title, String(book?.title ?? ""))) continue;
+        if (guardYear && originalYear != null && Number.isFinite(book?.year)
+          && book.year < originalYear - 1) continue;
         const agrees = needSound
           ? soundAgrees(String(book?.author ?? ""), englishAuthor)
           : authorAgrees(author, String(book?.author ?? ""), englishAuthor);
@@ -291,7 +294,7 @@ export async function localizeFallback(rec, deps) {
     if (!deps.isCurrent()) return null;
     const ids = new Set();
     for (const candidate of candidates.filter((item) => item.rule === rule)) {
-      const found = await findEdition(candidate, true);
+      const found = await findEdition(candidate, true, true);
       if (!deps.isCurrent()) return null;
       if (found) ids.add(found.id);
     }
@@ -306,7 +309,7 @@ export async function localizeFallback(rec, deps) {
     : [];
   const hitsById = new Map();
   for (const candidate of candidates.filter((item) => item.rule === "G").slice(0, 6)) {
-    const found = await findEdition(candidate);
+    const found = await findEdition(candidate, false, true);
     if (!deps.isCurrent()) return null;
     if (searchExhausted) return null;
     if (!found || hitsById.has(found.id) || detailCount >= 6) continue;
