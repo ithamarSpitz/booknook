@@ -17,6 +17,7 @@ import {
   wikidataHebrewAuthor,
 } from "../_shared/bridges.ts";
 import { ensureResolved } from "../_shared/catalog.ts";
+import { selectInChunks } from "../_shared/chunked.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import {
   buildGenreShelves,
@@ -123,23 +124,32 @@ export async function hebrewAuthorFor(
         .map((work) => work.id);
 
       if (matchedWorkIds.length) {
-        const editionsQuery = db.from("editions")
-          .select("simania_id, author, resolved_at")
-          .in("work_id", matchedWorkIds);
-        const positiveEditionsQuery = "gt" in editionsQuery
-          ? editionsQuery.gt("simania_id", 0)
-          : editionsQuery;
-        const editionsResult = await positiveEditionsQuery
-          .not("work_id", "is", null)
-          .order("resolved_at", { ascending: false });
+        const editionsResult = await selectInChunks(
+          matchedWorkIds,
+          (chunk) => {
+            const editionsQuery = db.from("editions")
+              .select("simania_id, author, resolved_at")
+              .in("work_id", chunk);
+            const positiveEditionsQuery = "gt" in editionsQuery
+              ? editionsQuery.gt("simania_id", 0)
+              : editionsQuery;
+            return positiveEditionsQuery
+              .not("work_id", "is", null)
+              .order("resolved_at", { ascending: false });
+          },
+        );
         if (editionsResult.error) throw editionsResult.error;
 
-        for (
-          const row of (editionsResult.data ?? []) as {
+        const editionRows = [
+          ...((editionsResult.data ?? []) as {
             simania_id: number;
             author: string | null;
-          }[]
-        ) {
+            resolved_at?: string | null;
+          }[]),
+        ].sort((left, right) =>
+          (right.resolved_at ?? "").localeCompare(left.resolved_at ?? "")
+        );
+        for (const row of editionRows) {
           if (row.simania_id <= 0) continue;
           const author = row.author?.trim();
           if (author) {
@@ -315,9 +325,9 @@ async function loadDismissed(
   );
   let negativeSeeds: NegativeSeed[] = [];
   if (negativeWorkIds.length) {
-    const works = await db.from("works").select("similar_ids").in(
-      "id",
+    const works = await selectInChunks(
       negativeWorkIds,
+      (chunk) => db.from("works").select("similar_ids").in("id", chunk),
     );
     if (works.error) fail(works.error);
     negativeSeeds = (works.data ?? []) as NegativeSeed[];
@@ -333,9 +343,9 @@ async function loadWorks(
   hardcoverIds: number[],
 ): Promise<WorkRow[]> {
   if (!hardcoverIds.length) return [];
-  const { data, error } = await db.from("works").select("*").in(
-    "hardcover_id",
+  const { data, error } = await selectInChunks(
     hardcoverIds,
+    (chunk) => db.from("works").select("*").in("hardcover_id", chunk),
   );
   if (error) fail(error);
   return (data ?? []) as WorkRow[];
@@ -491,10 +501,14 @@ export async function storeGenreRecommendations({
   );
   const catalogEditionByWork = new Map<string, number>();
   if (shelfWorkIds.length) {
-    const editions = await db.from("editions")
-      .select("simania_id,work_id,resolved_at")
-      .in("work_id", shelfWorkIds)
-      .gt("simania_id", 0);
+    const editions = await selectInChunks(
+      shelfWorkIds,
+      (chunk) =>
+        db.from("editions")
+          .select("simania_id,work_id,resolved_at")
+          .in("work_id", chunk)
+          .gt("simania_id", 0),
+    );
     if (editions.error) fail(editions.error);
     const rows = (editions.data ?? []) as Pick<
       EditionRow,
