@@ -798,3 +798,61 @@ sprints:
       - npm run test:web
       '5':
       - npm run check:contract
+  S18-fallback-precision:
+    name: Catalog fallback precision - NLI paging for prolific authors, original-year
+      guard, no short G names, and no-regression replay/compare tools
+    tasks:
+      S18-T1:
+        file: tasks/sprint-18-fallback-precision/01-contract.md
+        stage: 1
+        depends_on: []
+      S18-T2:
+        file: tasks/sprint-18-fallback-precision/02-regression-tools.md
+        stage: 1
+        depends_on: []
+      S18-T3:
+        file: tasks/sprint-18-fallback-precision/03-nli-paging.md
+        stage: 2
+        depends_on:
+        - S18-T1
+      S18-T4:
+        file: tasks/sprint-18-fallback-precision/04-original-year.md
+        stage: 2
+        depends_on:
+        - S18-T1
+      S18-T5:
+        file: tasks/sprint-18-fallback-precision/05-english-names.md
+        stage: 3
+        depends_on:
+        - S18-T3
+      S18-T6:
+        file: tasks/sprint-18-fallback-precision/06-year-guard.md
+        stage: 3
+        depends_on:
+        - S18-T4
+      S18-T7:
+        file: tasks/sprint-18-fallback-precision/07-architecture-docs.md
+        stage: 4
+        depends_on:
+        - S18-T2
+        - S18-T3
+        - S18-T4
+        - S18-T5
+        - S18-T6
+    stage_verification:
+      '1':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      '2':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '3':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '4':
+      - npm run check:contract
