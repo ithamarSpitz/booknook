@@ -3,6 +3,8 @@ import { createHandler } from "../../supabase/functions/hebrew-candidates/index.
 import { FakeDb } from "./helpers/fake-db.ts";
 
 const WORK_ID = "78e9c71d-d6f2-4ea4-bcbb-42e4ec9300cf";
+type HandlerOverrides = NonNullable<Parameters<typeof createHandler>[0]>;
+type HardcoverBooks = NonNullable<HandlerOverrides["hardcoverBooks"]>;
 
 function request(payload: unknown): Request {
   return new Request("http://local/hebrew-candidates", {
@@ -35,17 +37,21 @@ function databases(kind: "none" | "genre" | "recommendation") {
   return { caller, service };
 }
 
-function handler(kind: "none" | "genre" | "recommendation") {
+function handler(
+  kind: "none" | "genre" | "recommendation",
+  hardcoverBooks: HardcoverBooks = async () => [{
+    id: 42,
+    title: "Never Lie",
+    description: "Inside, Tricia meets Ethan.",
+    release_year: 2023,
+  }],
+) {
   const { caller, service } = databases(kind);
   return createHandler({
     requireUser: async () => "user-1",
     userClient: () => caller as never,
     serviceClient: () => service as never,
-    hardcoverBooks: async () => [{
-      id: 42,
-      title: "Never Lie",
-      description: "Inside, Tricia meets Ethan.",
-    }],
+    hardcoverBooks,
     candidates: async (work) => ({
       candidates: [{
         title: "לעולם אל תשקר",
@@ -76,7 +82,52 @@ for (const kind of ["genre", "recommendation"] as const) {
         rule: "G",
       }],
       english_names: ["Tricia", "Ethan"],
+      original_year: 2023,
     });
+  });
+}
+
+Deno.test("hebrew-candidates reads the original year in one Hardcover request", async () => {
+  let calls = 0;
+  const response = await handler("recommendation", async () => {
+    calls += 1;
+    return [{
+      id: 42,
+      title: "Never Lie",
+      description: "Inside, Tricia meets Ethan.",
+      release_year: 2023,
+    }];
+  })(request({ work_id: WORK_ID }));
+
+  assertEquals(response.status, 200);
+  assertEquals((await response.json()).original_year, 2023);
+  assertEquals(calls, 1);
+});
+
+for (
+  const [name, hardcoverBooks] of [
+    ["missing", async () => [{
+      id: 42,
+      title: "Never Lie",
+      description: "Inside, Tricia meets Ethan.",
+    }]],
+    ["non-numeric", async () => [{
+      id: 42,
+      title: "Never Lie",
+      description: "Inside, Tricia meets Ethan.",
+      release_year: "2023" as never,
+    }]],
+    ["failed", async () => {
+      throw new Error("Hardcover unavailable");
+    }],
+  ] satisfies Array<[string, HardcoverBooks]>
+) {
+  Deno.test(`hebrew-candidates returns null for a ${name} release year`, async () => {
+    const response = await handler("genre", hardcoverBooks)(
+      request({ work_id: WORK_ID }),
+    );
+    assertEquals(response.status, 200);
+    assertEquals((await response.json()).original_year, null);
   });
 }
 
