@@ -33,6 +33,35 @@ function providers(
   return { fetcher, urls };
 }
 
+function nliPage(
+  count: number,
+  special?: { index: number; title: string; original: string },
+): string {
+  const records = Array.from({ length: count }, (_, index) => {
+    const title = special?.index === index
+      ? special.title
+      : `כותרת לא קשורה ${index}`;
+    const original = special?.index === index
+      ? special.original
+      : `Unrelated Work ${index}`;
+    return `<record><recordData><record xmlns="http://www.loc.gov/MARC21/slim">
+      <datafield tag="100"><subfield code="a">סופר, אחד</subfield></datafield>
+      <datafield tag="240"><subfield code="a">${original}. Hebrew</subfield></datafield>
+      <datafield tag="245"><subfield code="a">${title} /</subfield></datafield>
+    </record></recordData></record>`;
+  }).join("");
+  return `<searchRetrieveResponse><records>${records}</records></searchRetrieveResponse>`;
+}
+
+function nliRequest(url: string): boolean {
+  return url.includes("nli.alma");
+}
+
+function isCreatorRequest(url: string): boolean {
+  if (!nliRequest(url)) return false;
+  return !new URL(url).searchParams.get("query")?.includes("uniform_title");
+}
+
 Deno.test("rule A parses MARC 240, Hebrew title and reordered author", async () => {
   const p = providers(await fixture("to-hate-adam-connor.xml"));
   const result = await hebrewCandidates({
@@ -50,6 +79,102 @@ Deno.test("rule A parses MARC 240, Hebrew title and reordered author", async () 
     rule: "A",
   });
   assertEquals(p.urls.filter((url) => url.includes("nli.alma")).length, 2);
+});
+
+Deno.test("creator query reads three pages and includes a rule A record from page 3", async () => {
+  const urls: string[] = [];
+  const fetcher: typeof fetch = (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (!nliRequest(url)) return Promise.resolve(Response.json({ search: [] }));
+    if (!isCreatorRequest(url)) return Promise.resolve(new Response(nliPage(0)));
+    const start = new URL(url).searchParams.get("startRecord");
+    if (start === "1" || start === "101") {
+      return Promise.resolve(new Response(nliPage(100)));
+    }
+    return Promise.resolve(new Response(nliPage(30, {
+      index: 29,
+      title: "הספר מעמוד שלוש",
+      original: "Target Book",
+    })));
+  };
+  const result = await hebrewCandidates({
+    title: "Target Book",
+    author: "Prolific Author",
+    description: null,
+  }, {
+    fetch: fetcher,
+    wikidataHebrew: bridge(null),
+    nliHebrew: bridge(null),
+  });
+  const creatorUrls = urls.filter(isCreatorRequest);
+  assertEquals(
+    creatorUrls.map((url) => new URL(url).searchParams.get("startRecord")),
+    ["1", "101", "201"],
+  );
+  assert(result.candidates.some((candidate) =>
+    candidate.rule === "A" && candidate.title === "הספר מעמוד שלוש"
+  ));
+  assertEquals(urls.filter(nliRequest).length, 4);
+});
+
+Deno.test("a short first creator page stops pagination", async () => {
+  const urls: string[] = [];
+  const fetcher: typeof fetch = (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (nliRequest(url)) {
+      return Promise.resolve(new Response(nliPage(isCreatorRequest(url) ? 40 : 0)));
+    }
+    return Promise.resolve(Response.json({ search: [] }));
+  };
+  await hebrewCandidates({
+    title: "Target Book",
+    author: "Prolific Author",
+    description: null,
+  }, {
+    fetch: fetcher,
+    wikidataHebrew: bridge(null),
+    nliHebrew: bridge(null),
+  });
+  assertEquals(urls.filter(isCreatorRequest).length, 1);
+  assertEquals(urls.filter(nliRequest).length, 2);
+});
+
+Deno.test("a failed second creator page keeps candidates from page 1", async () => {
+  const urls: string[] = [];
+  const fetcher: typeof fetch = (input) => {
+    const url = String(input);
+    urls.push(url);
+    if (!nliRequest(url)) return Promise.resolve(Response.json({ search: [] }));
+    if (!isCreatorRequest(url)) return Promise.resolve(new Response(nliPage(0)));
+    const start = new URL(url).searchParams.get("startRecord");
+    if (start === "101") return Promise.reject(new Error("NLI page failed"));
+    return Promise.resolve(new Response(nliPage(100, start === "1" ? {
+      index: 0,
+      title: "הספר מהעמוד הראשון",
+      original: "Target Book",
+    } : undefined)));
+  };
+  const result = await hebrewCandidates({
+    title: "Target Book",
+    author: "Prolific Author",
+    description: null,
+  }, {
+    fetch: fetcher,
+    wikidataHebrew: bridge(null),
+    nliHebrew: bridge(null),
+  });
+  assert(result.candidates.some((candidate) =>
+    candidate.rule === "A" && candidate.title === "הספר מהעמוד הראשון"
+  ));
+  assertEquals(
+    urls.filter(isCreatorRequest).map((url) =>
+      new URL(url).searchParams.get("startRecord")
+    ),
+    ["1", "101"],
+  );
+  assertEquals(urls.filter(nliRequest).length, 3);
 });
 
 Deno.test("Snow Crash without 240 is a rule B transliteration", async () => {
