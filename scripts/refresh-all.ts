@@ -30,6 +30,11 @@ export interface GenreRow {
   because_titles: string[];
 }
 
+export interface BareEdition {
+  simania_id: number;
+  title: string;
+}
+
 export interface ReaderSummary {
   reader: string;
   englishBefore: number;
@@ -131,9 +136,9 @@ export async function listEnglishGenreRows(
 export async function listBareEditionIds(
   sql: Sql,
   readerId: string,
-): Promise<number[]> {
-  const rows = await sql<{ simania_id: number }[]>`
-    select e.simania_id
+): Promise<BareEdition[]> {
+  const rows = await sql<BareEdition[]>`
+    select e.simania_id, e.title
     from public.editions as e
     where e.simania_id > 0
       and e.details_at is null
@@ -152,7 +157,10 @@ export async function listBareEditionIds(
       )
     order by e.simania_id
   `;
-  return rows.map((row) => Number(row.simania_id));
+  return rows.map((row) => ({
+    simania_id: Number(row.simania_id),
+    title: row.title,
+  }));
 }
 
 interface RefreshDeps {
@@ -182,6 +190,24 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function errorStatus(error: unknown): number | null {
+  const status = record(error)?.status;
+  return typeof status === "number" && Number.isInteger(status) ? status : null;
+}
+
+function safeErrorMessage(error: unknown, secrets: string[]): string {
+  let message = error instanceof Error ? error.message : String(error);
+  message = message.replace(/eyJ[A-Za-z0-9._~-]*/g, "[redacted]");
+  for (const secret of secrets) {
+    if (secret) message = message.replaceAll(secret, "[redacted]");
+  }
+  message = message.replace(
+    /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi,
+    "[redacted]",
+  );
+  return message.slice(0, 200);
+}
+
 /** Refresh one reader in contract order. All network and database I/O is injected. */
 export async function refreshReader(
   deps: RefreshDeps,
@@ -207,8 +233,22 @@ export async function refreshReader(
     recommendations = response.recommendations.filter((item) =>
       record(item)
     ) as Record<string, unknown>[];
-  } catch {
+  } catch (error) {
     failed++;
+    deps.log(JSON.stringify({
+      failed: {
+        title: "recommendations",
+        step: "recommendations",
+        function: FUNCTIONS.RECOMMENDATIONS,
+        status: errorStatus(error),
+        message: safeErrorMessage(error, [
+          token,
+          deps.keys.anonKey,
+          deps.keys.serviceKey,
+          reader.email,
+        ]),
+      },
+    }));
   }
 
   const linkedWorks = new Set<string>();
@@ -223,45 +263,78 @@ export async function refreshReader(
     deps.callAs(deps.keys, token, name, body);
   const onLinked = (workId: string) => linkedWorks.add(workId);
 
+  const reportFailure = (
+    title: string,
+    step: "localize" | "genre-hint" | "details",
+    functionName: string,
+    error: unknown,
+  ) => {
+    deps.log(JSON.stringify({
+      failed: {
+        title,
+        step,
+        function: functionName,
+        status: errorStatus(error),
+        message: safeErrorMessage(error, [
+          token,
+          deps.keys.anonKey,
+          deps.keys.serviceKey,
+          reader.email,
+        ]),
+      },
+    }));
+  };
+
   const localize = async (items: Record<string, unknown>[]) => {
-    let observedFailures = 0;
-    const guardedCall = async (name: string, body: Record<string, unknown>) => {
-      try {
-        const response = await callFunction(name, body);
-        if (
-          name === FUNCTIONS.LINK_EDITION &&
-          body.source === "nli_author" &&
-          typeof body.work_id === "string" &&
-          Number(record(response)?.simania_id) === Number(body.simania_id)
-        ) {
-          fallbackLinkedWorks.add(body.work_id);
+    for (const item of items) {
+      const title = typeof item.title === "string" ? item.title : "";
+      let observedFailures = 0;
+      const guardedCall = async (
+        name: string,
+        body: Record<string, unknown>,
+      ) => {
+        try {
+          const response = await callFunction(name, body);
+          if (
+            name === FUNCTIONS.LINK_EDITION &&
+            body.source === "nli_author" &&
+            typeof body.work_id === "string" &&
+            Number(record(response)?.simania_id) === Number(body.simania_id)
+          ) {
+            fallbackLinkedWorks.add(body.work_id);
+          }
+          return response;
+        } catch (error) {
+          observedFailures++;
+          reportFailure(title, "localize", name, error);
+          throw error;
         }
-        return response;
-      } catch {
-        observedFailures++;
-        throw new Error("Reader function call failed.");
-      }
-    };
-    const guardedFetch: FetchPayload = async (simaniaId, fetchImpl) => {
+      };
+      const guardedFetch: FetchPayload = async (simaniaId, fetchImpl) => {
+        try {
+          return await throttledFetch(simaniaId, fetchImpl);
+        } catch (error) {
+          observedFailures++;
+          reportFailure(title, "localize", "simania", error);
+          throw error;
+        }
+      };
       try {
-        return await throttledFetch(simaniaId, fetchImpl);
-      } catch {
-        observedFailures++;
-        throw new Error("Simania fetch failed.");
+        await deps.localizeRecommendations([item] as never, {
+          callFunction: guardedCall,
+          onLinked,
+          isCurrent: () => true,
+          fetchPayload: guardedFetch,
+          concurrency: 1,
+        });
+      } catch (error) {
+        if (observedFailures === 0) {
+          observedFailures++;
+          reportFailure(title, "localize", "localizeRecommendations", error);
+        }
       }
-    };
-    try {
-      await deps.localizeRecommendations(items as never, {
-        callFunction: guardedCall,
-        onLinked,
-        isCurrent: () => true,
-        fetchPayload: guardedFetch,
-        concurrency: 1,
-      });
-    } catch {
-      if (observedFailures === 0) observedFailures++;
+      failed += observedFailures;
     }
-    failed += observedFailures;
   };
 
   const localizableCards = recommendations.filter((item) =>
@@ -286,28 +359,38 @@ export async function refreshReader(
         hebrew_hint: hint?.hebrew_hint ?? null,
         hebrew_author: hint?.hebrew_author ?? null,
       }]);
-    } catch {
+    } catch (error) {
       failed++;
+      reportFailure(row.title, "genre-hint", FUNCTIONS.GENRE_HINT, error);
     }
   }
 
   let editionsFilled = 0;
-  let bareEditionIds: number[] = [];
+  let bareEditions: BareEdition[] = [];
   try {
-    bareEditionIds = await deps.listBareEditionIds(deps.sql, reader.id);
+    bareEditions = await deps.listBareEditionIds(deps.sql, reader.id);
   } catch {
     failed++;
   }
-  for (const simaniaId of bareEditionIds) {
+  for (const edition of bareEditions) {
+    const simaniaId = edition.simania_id;
+    let functionName = "simania";
     try {
       const simania = await throttledFetch(simaniaId);
+      functionName = FUNCTIONS.BOOK_DETAILS;
       await callFunction(FUNCTIONS.BOOK_DETAILS, {
         simania_id: simaniaId,
         simania,
       });
       editionsFilled++;
-    } catch {
+    } catch (error) {
       failed++;
+      reportFailure(
+        edition.title,
+        "details",
+        functionName,
+        error,
+      );
     }
   }
 

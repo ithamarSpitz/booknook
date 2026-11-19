@@ -186,7 +186,63 @@ Deno.test("a step 3 book failure is counted and later genre books continue", asy
   assertEquals(localized, ["bad", "good"]);
   assertEquals(summary.failed, 1);
   assertEquals(summary.booksLinked, 1);
-  assertEquals(JSON.parse(logs[0]), summary);
+  assertEquals(JSON.parse(logs.at(-1)!), summary);
+});
+
+Deno.test("a failed link-edition prints sanitized book failure details", async () => {
+  const db = fakeSql();
+  const logs: string[] = [];
+  const summary = await refreshReader({
+    keys,
+    sql: db.sql,
+    readerToken: async () => "reader-token",
+    callAs: async (_keys, _token, name) => {
+      if (name === "recommendations") {
+        return {
+          recommendations: [{
+            work_id: "work-1",
+            title: "The Book",
+            english_only: true,
+            simania_id: null,
+          }],
+        };
+      }
+      if (name === "link-edition") {
+        throw Object.assign(
+          new Error(`conflict eyJabc.def.ghi ${"x".repeat(250)}`),
+          { status: 409 },
+        );
+      }
+      return {};
+    },
+    fetchSimaniaPayload: async () => ({ details: {}, rating: null }),
+    localizeRecommendations: async (items, deps) => {
+      await deps.callFunction("link-edition", {
+        work_id: items[0]?.work_id,
+        simania_id: 2970,
+        source: "wikidata",
+      });
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    listBareEditionIds: async () => [],
+    sleep: async () => {},
+    log: (line) => logs.push(line),
+  }, { id: "reader", email: "reader@example.test" });
+
+  const failures = logs.map((line) => JSON.parse(line)).filter((line) =>
+    typeof line.failed === "object"
+  );
+  assertEquals(failures.length, 1);
+  assertEquals(failures[0].failed, {
+    title: "The Book",
+    step: "localize",
+    function: "link-edition",
+    status: 409,
+    message: `conflict [redacted] ${"x".repeat(180)}`,
+  });
+  assertEquals(failures[0].failed.message.length, 200);
+  assertEquals(summary.failed, 1);
 });
 
 Deno.test("an English-only card without a hint or Hebrew author is localized", async () => {
@@ -255,14 +311,15 @@ Deno.test("fallbackLinked counts only successful nli_author links", async () => 
     },
     fetchSimaniaPayload: async () => ({ details: {}, rating: null }),
     localizeRecommendations: async (items, deps) => {
-      for (const [index, item] of items.entries()) {
+      for (const item of items) {
+        const fallback = item.work_id === "fallback";
         await deps.callFunction("link-edition", {
           work_id: item.work_id,
-          simania_id: index + 1,
-          source: index === 0 ? "nli_author" : "wikidata",
+          simania_id: fallback ? 1 : 2,
+          source: fallback ? "nli_author" : "wikidata",
         });
         deps.onLinked(String(item.work_id), {
-          simania_id: index + 1,
+          simania_id: fallback ? 1 : 2,
           title: "linked",
           author: null,
           cover_url: null,
@@ -340,7 +397,10 @@ Deno.test("summary reports before/after, links, fills, and failures from fakes",
         : { englishRecommendations: 1, englishGenres: 1, bareEditions: 1 };
     },
     listEnglishGenreRows: async () => [],
-    listBareEditionIds: async () => [11, 22],
+    listBareEditionIds: async () => [
+      { simania_id: 11, title: "first" },
+      { simania_id: 22, title: "second" },
+    ],
     sleep: async () => {},
     log: (line) => logs.push(line),
   }, { id: "reader", email: "reader@example.test" });
@@ -356,5 +416,5 @@ Deno.test("summary reports before/after, links, fills, and failures from fakes",
     editionsFilled: 1,
     failed: 1,
   });
-  assertEquals(JSON.parse(logs[0]), summary);
+  assertEquals(JSON.parse(logs.at(-1)!), summary);
 });

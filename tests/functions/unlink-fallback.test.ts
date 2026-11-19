@@ -117,7 +117,7 @@ Deno.test("named apply touches only a named nli_author edition", async () => {
 
   assertMatch(fake.statements[1], /resolve_status::text = 'nli_author'/i);
   assertMatch(fake.statements[1], /simania_id = \?/i);
-  assertEquals(fake.values[0], [5, 5]);
+  assertEquals(fake.values[0], [false, 5, 5]);
   assertEquals(fake.values[1][0], [5]);
   assertEquals(fake.values[2][0], [5]);
 
@@ -130,6 +130,73 @@ Deno.test("named apply touches only a named nli_author edition", async () => {
   });
   assertEquals(wrongStatus.values[1][0], []);
   assertEquals(wrongStatus.values[2][0], []);
+});
+
+Deno.test("any-status named apply unlinks a wikidata edition", async () => {
+  const fake = transactionalSql([{ simania_id: 2970 }], [], []);
+  const counts = await unlinkFallback(fake.sql, 2970, true);
+
+  assertEquals(counts.editions, 1);
+  assertMatch(
+    fake.statements[1],
+    /\?::boolean or resolve_status::text = 'nli_author'/i,
+  );
+  assertEquals(fake.values[0], [true, 2970, 2970]);
+  assertEquals(fake.values[1][0], [2970]);
+  assertEquals(fake.values[2][0], [2970]);
+});
+
+Deno.test("CLI passes any-status only for a named apply", async () => {
+  const fake = fakeSqlForRun();
+  const calls: unknown[][] = [];
+  const code = await runUnlinkFallback(
+    ["--apply", "--simania", "2970", "--any-status"],
+    {
+      loadOperatorEnv: () => ({ dbPassword: "unused" }),
+      openProdDb: () => Promise.resolve(fake.sql),
+      unlinkFallback: (_sql, simaniaId, anyStatus) => {
+        calls.push([simaniaId, anyStatus]);
+        return Promise.resolve({
+          editions: 1,
+          recommendations: 0,
+          genre_recommendations: 0,
+        });
+      },
+      log: () => {},
+    },
+  );
+
+  assertEquals(code, 0);
+  assertEquals(calls, [[2970, true]]);
+  assertEquals(fake.ended(), 1);
+});
+
+Deno.test("any-status without simania exits 2 and writes nothing", async () => {
+  let loaded = 0;
+  let opened = 0;
+  let writes = 0;
+  const code = await runUnlinkFallback(["--apply", "--any-status"], {
+    loadOperatorEnv: () => {
+      loaded++;
+      return { dbPassword: "unused" };
+    },
+    openProdDb: () => {
+      opened++;
+      return Promise.resolve(fakeSqlForRun().sql);
+    },
+    unlinkFallback: () => {
+      writes++;
+      return Promise.resolve({
+        editions: 0,
+        recommendations: 0,
+        genre_recommendations: 0,
+      });
+    },
+    error: () => {},
+  });
+
+  assertEquals(code, 2);
+  assertEquals([loaded, opened, writes], [0, 0, 0]);
 });
 
 Deno.test("bad argument exits 2 before loading credentials or opening the DB", async () => {
