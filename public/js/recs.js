@@ -10,6 +10,7 @@ import {
 } from "./simania.js";
 import {
   authorAgrees,
+  authorGuardRejects,
   mainTitle,
   nameHits,
   soundAgrees,
@@ -408,6 +409,7 @@ export async function localizeRecommendations(items, deps) {
     const payloadById = new Map();
     const hint = rec.hebrew_hint;
     let simaniaId = null;
+    let chosenSimaniaAuthor = "";
     /** @type {"wikidata"|"nli"|"nli_author"|null} */
     let source = null;
     if (hint?.title) {
@@ -417,6 +419,7 @@ export async function localizeRecommendations(items, deps) {
         if (verified) {
           simaniaId = verified.simania_id;
           source = verified.resolve_status;
+          chosenSimaniaAuthor = String(book.author ?? "");
         }
       }
     }
@@ -436,6 +439,9 @@ export async function localizeRecommendations(items, deps) {
         if (Number.isSafeInteger(resolvedId) && resolvedId > 0 && linkSource) {
           simaniaId = resolvedId;
           source = linkSource;
+          chosenSimaniaAuthor = String(
+            candidates.find((candidate) => candidate.simania_id === resolvedId)?.author ?? "",
+          );
         }
       }
     }
@@ -455,6 +461,12 @@ export async function localizeRecommendations(items, deps) {
       ? payloadById.get(simaniaId)
       : await fetchPayload(simaniaId);
     if (!deps.isCurrent()) return;
+    const simaniaAuthor = simania?.details?.author ?? chosenSimaniaAuthor;
+    const englishAuthors = String(rec.author ?? "")
+      .split(",")
+      .map((author) => author.trim())
+      .filter(Boolean);
+    if (authorGuardRejects(simaniaAuthor, englishAuthors, rec.hebrew_author ?? "")) return;
     const res = await deps.callFunction(FUNCTIONS.LINK_EDITION, {
       work_id: rec.work_id,
       simania_id: simaniaId,
