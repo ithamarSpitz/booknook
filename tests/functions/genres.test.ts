@@ -1,10 +1,11 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   buildGenreShelves,
-  GENRE_MAP,
   genreCandidates,
+  genreDisplayName,
   type GenreSeed,
   missingCandidateIds,
+  normalizeGenreTag,
   qualifyingGenres,
   workGenres,
 } from "../../supabase/functions/_shared/genres.ts";
@@ -23,22 +24,127 @@ function seed(
   return { workId, simaniaId, weight, tags: tags(...genres), similarIds };
 }
 
-Deno.test("genre map is complete and workGenres reads only eight tags", () => {
-  assertEquals(GENRE_MAP.length, 22);
+Deno.test("genre tags normalize and use the contracted aliases", () => {
+  assertEquals(
+    normalizeGenreTag(' ["Historical-Fiction"]\\ '),
+    "historical fiction",
+  );
+  assertEquals(
+    workGenres(tags("Thriller", '["Thriller', "Historical-Fiction", "Humour")),
+    ["מותחנים", "רומן היסטורי", "הומור"],
+  );
+});
+
+Deno.test("noise genre tags are discarded", () => {
+  const exactNoise = [
+    "general",
+    "fiction",
+    "genre fiction",
+    "novel",
+    "novels",
+    "adult",
+    "adult fiction",
+    "literary collections",
+    "authors",
+    "audiobook",
+    "audiobooks",
+    "ebook",
+    "ebooks",
+    "english fiction",
+    "american fiction",
+    "british fiction",
+    "english",
+    "spanish",
+    "hebrew",
+    "french",
+    "german",
+    "book club",
+    "did not finish",
+    "dnf",
+    "owned",
+    "kindle",
+  ];
+  for (
+    const value of [
+      ...exactNoise,
+      "physical-tbr",
+      "want to read next",
+      "favorites",
+      "favourite books",
+      "Read in 2024",
+      "2023",
+    ]
+  ) {
+    assertEquals(workGenres(tags(value)), [], value);
+  }
+});
+
+Deno.test("compound tags split only when every part is an alias", () => {
+  assertEquals(workGenres(tags("Science Fiction & Fantasy")), [
+    "מדע בדיוני",
+    "פנטזיה",
+  ]);
+  assertEquals(workGenres(tags("Family & Relationships")), ["משפחה"]);
+  assertEquals(workGenres(tags("Action & Adventure")), ["הרפתקאות"]);
+  assertEquals(workGenres(tags("Foo & Fantasy")), ["en:foo & fantasy"]);
+});
+
+Deno.test("unknown genres use normalized keys and contracted display spelling", () => {
+  const seeds = [
+    seed("first", 1, ["Fantasy", "Cli-Fi"]),
+    seed("second", 1, ["CLI FI"]),
+  ];
+  assertEquals(workGenres(seeds[0].tags), ["פנטזיה", "en:cli fi"]);
+  assertEquals(genreDisplayName("en:cli fi", seeds, new Map()), "Cli-Fi");
+  assertEquals(
+    genreDisplayName(
+      "en:cli fi",
+      [],
+      new Map([
+        [20, { id: "later", tags: tags("CLI FI") }],
+        [10, { id: "first", tags: tags("[Cli-Fi]") }],
+      ]),
+    ),
+    "Cli-Fi",
+  );
+});
+
+Deno.test("work genres collapse duplicates, preserve order, and read twelve tags", () => {
   assertEquals(
     workGenres(tags(
-      " General ",
-      "SCI-FI",
-      " space ",
-      "did-not-finish",
+      "Fantasy",
+      "Epic Fantasy",
+      "History",
+      "General",
       "Fiction",
       "Audiobooks",
-      "Unknown",
+      "Unknown One",
+      "Unknown Two",
+      "War",
+      "Science",
+      "Humor",
       "Classics",
-      "Fantasy",
+      "Romance",
     )),
-    ["מדע בדיוני", "קלאסיקות"],
+    [
+      "פנטזיה",
+      "היסטוריה",
+      "en:unknown one",
+      "en:unknown two",
+      "מלחמה",
+      "מדע",
+      "הומור",
+      "קלאסיקות",
+    ],
   );
+});
+
+Deno.test("legacy Hebrew shelf names remain the keys for aliased genres", () => {
+  assertEquals(workGenres(tags("Fantasy", "Mystery", "Non-Fiction")), [
+    "פנטזיה",
+    "מתח ובלש",
+    "עיון",
+  ]);
 });
 
 Deno.test("qualifying genres require two seeds and order by evidence, count, then name", () => {
@@ -110,6 +216,8 @@ Deno.test("not-my-type seeds lower and reorder genre books without changing qual
   });
 
   assertEquals(qualifyingGenres(seeds).map(({ genre }) => genre), ["פנטזיה"]);
+  assertEquals(withoutNegative[0].genreKey, "פנטזיה");
+  assertEquals(withoutNegative[0].genre, "פנטזיה");
   assertEquals(withoutNegative[0].books[0].hardcoverId, 100);
   assertEquals(withNegative[0].books[0].hardcoverId, 101);
   assertEquals(withNegative[0].books[4].hardcoverId, 100);
