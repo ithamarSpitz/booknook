@@ -32,7 +32,11 @@ export function fallbackLinks(sql: Sql): Promise<FallbackLink[]> {
 export async function unlinkFallback(
   sql: Sql,
   simaniaId: number | null = null,
+  anyStatus = false,
 ): Promise<UnlinkFallbackCounts> {
+  if (anyStatus && simaniaId === null) {
+    throw new Error("--any-status requires --simania <id>.");
+  }
   return await sql.begin(async (tx) => {
     const editions = await tx<{ simania_id: number }[]>`
       update public.editions
@@ -40,7 +44,7 @@ export async function unlinkFallback(
         work_id = null,
         resolve_status = 'pending',
         resolved_at = null
-      where resolve_status::text = 'nli_author'
+      where (${anyStatus}::boolean or resolve_status::text = 'nli_author')
         and (${simaniaId}::integer is null or simania_id = ${simaniaId})
       returning simania_id
     `;
@@ -70,19 +74,34 @@ export async function unlinkFallback(
 interface CliOptions {
   apply: boolean;
   simaniaId: number | null;
+  anyStatus: boolean;
 }
 
 function parseArgs(args: string[]): CliOptions | null {
-  if (args.length === 0) return { apply: false, simaniaId: null };
+  if (args.length === 0) {
+    return { apply: false, simaniaId: null, anyStatus: false };
+  }
   if (args.length === 1 && args[0] === "--apply") {
-    return { apply: true, simaniaId: null };
+    return { apply: true, simaniaId: null, anyStatus: false };
   }
   if (
     args.length === 3 && args[0] === "--apply" &&
     args[1] === "--simania" && /^[1-9]\d*$/.test(args[2])
   ) {
     const simaniaId = Number(args[2]);
-    if (Number.isSafeInteger(simaniaId)) return { apply: true, simaniaId };
+    if (Number.isSafeInteger(simaniaId)) {
+      return { apply: true, simaniaId, anyStatus: false };
+    }
+  }
+  if (
+    args.length === 4 && args[0] === "--apply" &&
+    args[1] === "--simania" && /^[1-9]\d*$/.test(args[2]) &&
+    args[3] === "--any-status"
+  ) {
+    const simaniaId = Number(args[2]);
+    if (Number.isSafeInteger(simaniaId)) {
+      return { apply: true, simaniaId, anyStatus: true };
+    }
   }
   return null;
 }
@@ -113,7 +132,9 @@ export async function runUnlinkFallback(
   const options = parseArgs(args);
   const deps = { ...runDefaults, ...overrides };
   if (!options) {
-    deps.error("Usage: unlink:fallback [--apply [--simania <id>]]");
+    deps.error(
+      "Usage: unlink:fallback [--apply [--simania <id> [--any-status]]]",
+    );
     return 2;
   }
 
@@ -121,7 +142,11 @@ export async function runUnlinkFallback(
   const sql = await deps.openProdDb({ readOnly: !options.apply });
   try {
     if (options.apply) {
-      const counts = await deps.unlinkFallback(sql, options.simaniaId);
+      const counts = await deps.unlinkFallback(
+        sql,
+        options.simaniaId,
+        options.anyStatus,
+      );
       deps.log(JSON.stringify(counts));
       return 0;
     }
