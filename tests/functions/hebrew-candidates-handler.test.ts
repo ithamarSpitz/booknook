@@ -106,6 +106,12 @@ Deno.test("hebrew-candidates reads the original year in one Hardcover request", 
 
 for (
   const [name, hardcoverBooks] of [
+    ["zero", async () => [{
+      id: 42,
+      title: "Never Lie",
+      description: "Inside, Tricia meets Ethan.",
+      release_year: 0,
+    }]],
     ["missing", async () => [{
       id: 42,
       title: "Never Lie",

@@ -1,9 +1,31 @@
+import {
+  type HebrewCandidate,
+  originalYearOf,
+} from "../../supabase/functions/_shared/hebrew-candidates.ts";
+
 export type FallbackDecision = {
   simania_id: number | null;
   rule: string | null;
 };
 
 type JsonLine = Record<string, unknown>;
+
+type CandidateResult = {
+  candidates: HebrewCandidate[];
+  english_names: string[];
+};
+
+export function buildFallbackCandidatesResponse(
+  workId: string,
+  result: CandidateResult,
+  book: { release_year?: unknown } | null | undefined,
+) {
+  return {
+    work_id: workId,
+    ...result,
+    original_year: originalYearOf(book),
+  };
+}
 
 export type FallbackChange = {
   key: string;
@@ -45,16 +67,16 @@ function lineKey(line: JsonLine): string {
 
 function parseRun(text: string): Map<string, JsonLine> {
   const rows = new Map<string, JsonLine>();
-  for (const [index, raw] of text.split(/\r?\n/).entries()) {
+  for (const raw of text.split(/\r?\n/)) {
     if (!raw.trim()) continue;
     let value: unknown;
     try {
       value = JSON.parse(raw);
     } catch {
-      throw new Error(`Invalid JSON on line ${index + 1}.`);
+      continue;
     }
     if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error(`Fallback line ${index + 1} is not a JSON object.`);
+      continue;
     }
     const line = value as JsonLine;
     if ("totals" in line) continue;

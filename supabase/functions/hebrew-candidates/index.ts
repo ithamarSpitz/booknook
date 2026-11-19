@@ -1,4 +1,7 @@
-import { hebrewCandidates } from "../_shared/hebrew-candidates.ts";
+import {
+  hebrewCandidates,
+  originalYearOf,
+} from "../_shared/hebrew-candidates.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import { hardcoverEnglishBooks as hardcoverBooks } from "../_shared/hardcover.ts";
 import type {
@@ -100,11 +103,7 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
           description = typeof book?.description === "string"
             ? book.description
             : null;
-          originalYear = typeof book?.release_year === "number" &&
-              Number.isFinite(book.release_year) &&
-              Number.isInteger(book.release_year)
-            ? book.release_year
-            : null;
+          originalYear = originalYearOf(book);
         } catch {
           // Hardcover metadata is optional; a failure does not fail fallback.
         }

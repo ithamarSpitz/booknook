@@ -20,6 +20,7 @@ import {
   openProdDb,
 } from "./lib/prod-db.ts";
 import {
+  buildFallbackCandidatesResponse,
   compareFallbackRuns,
   retryWikidata429,
 } from "./lib/fallback-compare.ts";
@@ -135,6 +136,11 @@ const EXPECTED_CASES: ExpectedCase[] = [
   { title: "Girl in Landscape", author: "Jonathan Lethem", expected: [34027] },
   { title: "Small Island", author: "Andrea Levy", expected: [97143] },
   { title: "Never Lie", author: "Freida McFadden", expected: [1029088] },
+  {
+    title: "Don Quixote",
+    author: "Miguel de Cervantes Saavedra",
+    expected: [183461],
+  },
 ];
 
 const GUARD_CASES: GuardCase[] = [
@@ -318,7 +324,7 @@ async function probe(spec: BookSpec): Promise<ProbeResult> {
         if (name !== "hebrew-candidates") {
           throw new Error(`Unexpected function call: ${name}`);
         }
-        return { work_id: workId, ...response };
+        return buildFallbackCandidatesResponse(workId, response, detailed);
       },
       searchBooks: async (query: string, limit?: number) => {
         try {
@@ -455,7 +461,8 @@ async function populationDecision(spec: PopulationBook) {
     };
     const decision = await localizeFallback(rec, {
       isCurrent: () => true,
-      callFunction: async () => ({ work_id: spec.workId, ...response }),
+      callFunction: async () =>
+        buildFallbackCandidatesResponse(spec.workId, response, detailed),
       searchBooks: async (query: string, limit?: number) => {
         try {
           const books = await searchBooks(query, limit, trackedFetch);
@@ -941,13 +948,13 @@ for (const spec of OPTIONAL_CASES) {
   );
 }
 
-if (exactExpectedLinks < 19) {
+if (exactExpectedLinks < 20) {
   failed = true;
   console.log(
-    `FAIL expected-link total ${exactExpectedLinks}/21; at least 19 exact links are required`,
+    `FAIL expected-link total ${exactExpectedLinks}/22; at least 20 exact links are required`,
   );
 } else {
-  console.log(`PASS expected-link total ${exactExpectedLinks}/21`);
+  console.log(`PASS expected-link total ${exactExpectedLinks}/22`);
 }
 
 Deno.exit(failed ? 1 : 0);
