@@ -15,6 +15,7 @@ create function pg_temp.genre_because_row(p_work integer)
 returns jsonb language sql as $$
   select jsonb_build_object(
     'work_id', '90000000-0000-0000-0000-' || lpad(p_work::text, 12, '0'),
+    'genre_key', 'fantasy',
     'genre', 'Fantasy',
     'shelf_position', 0,
     'position', p_work - 1,

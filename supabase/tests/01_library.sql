@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(46);
+select plan(48);
 
 insert into auth.users (id, aud, role, email, encrypted_password, raw_user_meta_data)
 values
@@ -13,6 +13,9 @@ select is((select display_name from public.profiles where id = '00000000-0000-00
           'Alice', 'sign-up uses a non-empty metadata display name');
 select is((select display_name from public.profiles where id = '00000000-0000-0000-0000-000000000002'),
           'bob', 'sign-up falls back to the email local part');
+select is((select genre_shelf_count from public.profiles
+            where id = '00000000-0000-0000-0000-000000000001'),
+          10::smallint, 'profiles default to ten genre shelves');
 select results_eq(
   $$select position, name, kind::text from public.shelves
     where user_id = '00000000-0000-0000-0000-000000000001' order by position$$,
@@ -93,6 +96,9 @@ select throws_ok($$insert into public.search_cache (query_norm, results) values 
 select throws_ok($$update public.profiles set created_at = now() where id = auth.uid()$$,
                  '42501', 'permission denied for table profiles',
                  'profile clients can update only display name and locale');
+select throws_ok($$update public.profiles set genre_shelf_count = 12 where id = auth.uid()$$,
+                 '42501', 'permission denied for table profiles',
+                 'profile clients cannot directly update genre shelf count');
 
 select throws_ok(
   $$insert into public.shelves (user_id, name, kind, position)

@@ -493,6 +493,7 @@ export async function storeGenreRecommendations({
       shelf.books.map((book, position) => ({
         work_id: book.workId,
         genre: shelf.genre,
+        genre_key: shelf.genre,
         shelf_position: shelfPosition,
         position,
         simania_id: recommendationEditionByWork.has(book.workId)

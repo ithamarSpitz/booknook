@@ -20,12 +20,12 @@ values
   ('00000000-0000-0000-0000-0000000000b2',
    '90000000-0000-0000-0000-000000000002', 3, '{}', false, now());
 insert into public.genre_recommendations
-  (user_id, work_id, genre, shelf_position, position, score)
+  (user_id, work_id, genre, genre_key, shelf_position, position, score)
 values
   ('00000000-0000-0000-0000-0000000000a1',
-   '90000000-0000-0000-0000-000000000002', 'Fantasy', 0, 0, 2),
+   '90000000-0000-0000-0000-000000000002', 'Fantasy', 'Fantasy', 0, 0, 2),
   ('00000000-0000-0000-0000-0000000000b2',
-   '90000000-0000-0000-0000-000000000002', 'Fantasy', 0, 0, 3);
+   '90000000-0000-0000-0000-000000000002', 'Fantasy', 'Fantasy', 0, 0, 3);
 
 -- Exercise the migration backfill against a recommendation created after the
 -- migration has already been applied by the test database setup.

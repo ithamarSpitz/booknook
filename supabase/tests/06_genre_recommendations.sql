@@ -8,7 +8,7 @@ insert into auth.users (id, email) values
 insert into public.works (id, hardcover_id, original_title)
 select ('20000000-0000-0000-0000-' || lpad(n::text, 12, '0'))::uuid,
        n, 'Genre work ' || n
-  from generate_series(1, 70) n;
+  from generate_series(1, 260) n;
 insert into public.editions (simania_id, work_id, title)
 select hardcover_id, id, original_title from public.works;
 
@@ -21,6 +21,7 @@ create function pg_temp.genre_row(
 ) returns jsonb language sql as $$
   select jsonb_build_object(
     'work_id', '20000000-0000-0000-0000-' || lpad(p_work::text, 12, '0'),
+    'genre_key', lower(p_genre),
     'genre', p_genre,
     'shelf_position', p_shelf_position,
     'position', p_position,
@@ -123,9 +124,9 @@ select is((select count(*) from public.genre_recommendations
 select throws_ok(format(
   'select public.replace_genre_recommendations(%L, %L::jsonb)',
   '00000000-0000-0000-0000-000000000001',
-  (select jsonb_agg(pg_temp.genre_row(n, 'Genre ' || n, (n - 1) % 5, 0, n))
-     from generate_series(6, 11) n)
-), '22023', 'invalid genre recommendation payload', 'a sixth genre is rejected');
+  (select jsonb_agg(pg_temp.genre_row(n, 'Genre ' || n, (n - 1) % 20, 0, n))
+     from generate_series(6, 246) n)
+), '22023', 'invalid genre recommendation payload', 'a 241-row payload is rejected');
 select throws_ok(format(
   'select public.replace_genre_recommendations(%L, %L::jsonb)',
   '00000000-0000-0000-0000-000000000001',
