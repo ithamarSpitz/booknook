@@ -890,3 +890,54 @@ sprints:
       - npm run test:web
       '3':
       - npm run check:contract
+  S20-large-id-lists:
+    name: Chunk PostgREST in-lists (fixes 500 for large libraries) and show a failed
+      background recommendations update
+    tasks:
+      S20-T1:
+        file: tasks/sprint-20-large-id-lists/01-contract.md
+        stage: 1
+        depends_on: []
+      S20-T2:
+        file: tasks/sprint-20-large-id-lists/02-chunk-helper.md
+        stage: 2
+        depends_on:
+        - S20-T1
+      S20-T5:
+        file: tasks/sprint-20-large-id-lists/05-failed-refresh-note.md
+        stage: 2
+        depends_on:
+        - S20-T1
+      S20-T3:
+        file: tasks/sprint-20-large-id-lists/03-recommendations-chunks.md
+        stage: 3
+        depends_on:
+        - S20-T2
+      S20-T4:
+        file: tasks/sprint-20-large-id-lists/04-other-chunks.md
+        stage: 3
+        depends_on:
+        - S20-T2
+      S20-T6:
+        file: tasks/sprint-20-large-id-lists/06-docs.md
+        stage: 4
+        depends_on:
+        - S20-T2
+        - S20-T3
+        - S20-T4
+        - S20-T5
+    stage_verification:
+      '1':
+      - npm run check:contract
+      '2':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '3':
+      - npm run check:contract
+      - npm run check:functions
+      - npm run test:functions
+      - npm run test:web
+      '4':
+      - npm run check:contract
