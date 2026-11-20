@@ -5,6 +5,7 @@ import {
 } from "./bridges.ts";
 import { authors, findHardcoverBook, type HardcoverBook } from "./hardcover.ts";
 import { type ChunkQueryResult, selectInChunks } from "./chunked.ts";
+import { authorGuardRejects } from "./fallback-match.ts";
 import {
   bookDetails,
   bookRating,
@@ -359,6 +360,10 @@ async function englishAuthorHint(
   return null;
 }
 
+function guardRejects(edition: EditionRow, match: HardcoverBook): boolean {
+  return authorGuardRejects(edition.author, authors(match), "");
+}
+
 export async function ensureResolved(
   db: CatalogDb,
   edition: EditionRow,
@@ -390,6 +395,7 @@ export async function ensureResolved(
         failures,
       );
     }
+    if (match && guardRejects(edition, match)) match = null;
     if (match) status = "wikidata";
   } catch {
     failures.count += 1;
@@ -414,6 +420,7 @@ export async function ensureResolved(
           () => api.findHardcoverBook(bridge.title, hint ?? bridge.author),
           failures,
         );
+        if (match && guardRejects(edition, match)) match = null;
         if (match) status = "nli";
       }
     } catch {
@@ -426,6 +433,7 @@ export async function ensureResolved(
       () => api.findHardcoverBook(titleForMatch, edition.author ?? "", { requireAuthor: true }),
       failures,
     );
+    if (match && guardRejects(edition, match)) match = null;
     if (match) status = "fuzzy";
   }
 

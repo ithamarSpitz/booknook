@@ -1,4 +1,25 @@
+import { nameSoundScore } from "./names.ts";
 import { normalize, similarity } from "./utils.ts";
+
+/** True when a Hebrew edition author clearly differs from the English authors. */
+export function authorGuardRejects(
+  simaniaAuthor: string | null | undefined,
+  englishAuthors: string[],
+  hebrewAuthor: string | null | undefined,
+): boolean {
+  const nonEmpty = englishAuthors.filter((author) =>
+    String(author ?? "").trim() !== ""
+  );
+  if (nonEmpty.length === 0) return false;
+  if (nonEmpty.every((author) => /[א-ת]/u.test(author))) return false;
+
+  const candidate = String(simaniaAuthor ?? "");
+  if (!/[א-ת]/u.test(candidate)) return false;
+  if (nameSoundScore(candidate, nonEmpty) >= 0.3) return false;
+
+  const bridge = String(hebrewAuthor ?? "").trim();
+  return bridge === "" || similarity(bridge, candidate) < 0.5;
+}
 
 /** Remove catalog edition labels and subtitles from a title. */
 export function mainTitle(title: string): string {
