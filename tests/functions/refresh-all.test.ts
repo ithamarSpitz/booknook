@@ -1,6 +1,6 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import type { Sql } from "npm:postgres@3.4.5";
-import { main, refreshReader } from "../../scripts/refresh-all.ts";
+import { codeHash, main, refreshReader } from "../../scripts/refresh-all.ts";
 
 const keys = {
   url: "https://example.test",
@@ -415,6 +415,7 @@ Deno.test("summary reports before/after, links, fills, and failures from fakes",
     fallbackLinked: 0,
     editionsFilled: 1,
     failed: 1,
+    skipped: 0,
   });
   assertEquals(JSON.parse(logs.at(-1)!), summary);
 });
@@ -602,4 +603,291 @@ Deno.test("bad concurrency exits before any network or database call", async () 
     assertEquals(calls, 0);
     assertStringIncludes(errors[0], "--concurrency");
   }
+});
+
+const fakeNow = new Date("2026-11-20T12:00:00.000Z");
+
+function recommendation(workId: string) {
+  return { work_id: workId, title: workId, english_only: true };
+}
+
+Deno.test("skip cache avoids cached cards and genre rows", async () => {
+  const db = fakeSql();
+  const calls: string[] = [];
+  const logs: string[] = [];
+  const writes: string[] = [];
+  const checked = new Date(fakeNow.getTime() - 24 * 60 * 60 * 1_000)
+    .toISOString();
+  const result = await main(["--apply", "--skip-cache", "cache.json"], {
+    readCache: async () =>
+      JSON.stringify({
+        code: "same-code",
+        entries: { card: checked, genre: checked },
+      }),
+    writeCache: async (_path, contents) => {
+      writes.push(contents);
+    },
+    codeHash: async () => "same-code",
+    now: () => fakeNow,
+    projectKeys: async () => keys,
+    listReaders: async () => [{ id: "reader", email: "reader@example.test" }],
+    openProdDb: async () => db.sql,
+    readerToken: async () => "token",
+    callAs: async (_keys, _token, name) => {
+      calls.push(name);
+      return name === "recommendations"
+        ? { recommendations: [recommendation("card")] }
+        : {};
+    },
+    localizeRecommendations: async () => {
+      calls.push("localize");
+    },
+    fetchSimaniaPayload: async () => {
+      calls.push("simania");
+      return { details: {}, rating: null };
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [genreRow("genre")],
+    listBareEditionIds: async () => [],
+    log: (line) => logs.push(line),
+  });
+
+  assertEquals(result, 0);
+  assertEquals(calls, ["recommendations"]);
+  assertEquals(JSON.parse(logs.at(-1)!).skipped, 2);
+  assertEquals(writes.length, 1);
+});
+
+Deno.test("stale entries and entries under another code hash are checked", async () => {
+  const run = async (cacheCode: string, checked: string) => {
+    const db = fakeSql();
+    let localized = 0;
+    await main(["--apply", "--skip-cache", "cache.json"], {
+      readCache: async () =>
+        JSON.stringify({
+          code: cacheCode,
+          entries: { work: checked },
+        }),
+      writeCache: async () => {},
+      codeHash: async () => "current-code",
+      now: () => fakeNow,
+      projectKeys: async () => keys,
+      listReaders: async () => [{ id: "reader", email: "reader@example.test" }],
+      openProdDb: async () => db.sql,
+      readerToken: async () => "token",
+      callAs: async (_keys, _token, name) =>
+        name === "recommendations"
+          ? { recommendations: [recommendation("work")] }
+          : {},
+      localizeRecommendations: async () => {
+        localized++;
+      },
+      countReaderRows: async () => zeroCounts,
+      listEnglishGenreRows: async () => [],
+      listBareEditionIds: async () => [],
+      log: () => {},
+    });
+    return localized;
+  };
+
+  const eightDaysOld = new Date(
+    fakeNow.getTime() - 8 * 24 * 60 * 60 * 1_000,
+  ).toISOString();
+  assertEquals(await run("current-code", eightDaysOld), 1);
+  assertEquals(await run("old-code", fakeNow.toISOString()), 1);
+});
+
+Deno.test("cache adds only clean no-result books", async () => {
+  const db = fakeSql();
+  let written = "";
+  await main(["--apply", "--skip-cache", "cache.json"], {
+    readCache: async () => null,
+    writeCache: async (_path, contents) => {
+      written = contents;
+    },
+    codeHash: async () => "code",
+    now: () => fakeNow,
+    projectKeys: async () => keys,
+    listReaders: async () => [{ id: "reader", email: "reader@example.test" }],
+    openProdDb: async () => db.sql,
+    readerToken: async () => "token",
+    callAs: async (_keys, _token, name) =>
+      name === "recommendations"
+        ? {
+          recommendations: [
+            recommendation("no-result"),
+            recommendation("linked"),
+            recommendation("failed"),
+          ],
+        }
+        : {},
+    localizeRecommendations: async (items, deps) => {
+      const workId = String(items[0]?.work_id);
+      if (workId === "linked") {
+        deps.onLinked(workId, {
+          simania_id: 1,
+          title: "linked",
+          author: null,
+          cover_url: null,
+        });
+      }
+      if (workId === "failed") throw new Error("failed");
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    listBareEditionIds: async () => [],
+    log: () => {},
+  });
+
+  assertEquals(JSON.parse(written), {
+    code: "code",
+    entries: { "no-result": fakeNow.toISOString() },
+  });
+});
+
+Deno.test("a no-result check is reused by later readers in the same run", async () => {
+  const db = fakeSql();
+  let localized = 0;
+  const summaries: Record<string, unknown>[] = [];
+  await main(["--apply", "--skip-cache", "cache.json"], {
+    readCache: async () => null,
+    writeCache: async () => {},
+    codeHash: async () => "code",
+    now: () => fakeNow,
+    projectKeys: async () => keys,
+    listReaders: async () => [
+      { id: "reader-a", email: "a@example.test" },
+      { id: "reader-b", email: "b@example.test" },
+    ],
+    openProdDb: async () => db.sql,
+    readerToken: async (_keys, email) => `token:${email}`,
+    callAs: async (_keys, _token, name) =>
+      name === "recommendations"
+        ? { recommendations: [recommendation("shared-work")] }
+        : {},
+    localizeRecommendations: async () => {
+      localized++;
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    listBareEditionIds: async () => [],
+    log: (line) => summaries.push(JSON.parse(line)),
+  });
+
+  assertEquals(localized, 1);
+  assertEquals(summaries.map((summary) => summary.skipped), [0, 1]);
+});
+
+Deno.test("invalid cache JSON exits before network calls", async () => {
+  let networkCalls = 0;
+  let writes = 0;
+  const result = await main(["--apply", "--skip-cache", "cache.json"], {
+    readCache: async () => "{bad",
+    writeCache: async () => {
+      writes++;
+    },
+    codeHash: async () => "code",
+    projectKeys: async () => {
+      networkCalls++;
+      return keys;
+    },
+    error: () => {},
+  });
+
+  assertEquals(result, 2);
+  assertEquals(networkCalls, 0);
+  assertEquals(writes, 0);
+});
+
+Deno.test("cache is written once when a later reader session stops the run", async () => {
+  const db = fakeSql();
+  const writes: string[] = [];
+  const result = await main(["--apply", "--skip-cache", "cache.json"], {
+    readCache: async () => null,
+    writeCache: async (_path, contents) => {
+      writes.push(contents);
+    },
+    codeHash: async () => "code",
+    now: () => fakeNow,
+    projectKeys: async () => keys,
+    listReaders: async () => [
+      { id: "reader-a", email: "a@example.test" },
+      { id: "reader-b", email: "b@example.test" },
+    ],
+    openProdDb: async () => db.sql,
+    readerToken: async (_keys, email) => {
+      if (email === "b@example.test") throw new Error("session failed");
+      return "token-a";
+    },
+    callAs: async (_keys, _token, name) =>
+      name === "recommendations"
+        ? { recommendations: [recommendation("checked")] }
+        : {},
+    localizeRecommendations: async () => {},
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    listBareEditionIds: async () => [],
+    log: () => {},
+    error: () => {},
+  });
+
+  assertEquals(result, 2);
+  assertEquals(writes.length, 1);
+  assertEquals(JSON.parse(writes[0]).entries, {
+    checked: fakeNow.toISOString(),
+  });
+});
+
+Deno.test("codeHash includes file paths and contents but not input order", async () => {
+  const files = [
+    { path: "public/js/a.js", contents: "one" },
+    { path: "supabase/functions/b.ts", contents: "two" },
+  ];
+  const original = await codeHash(files);
+  assertEquals(await codeHash([...files].reverse()), original);
+  assertEquals(
+    await codeHash([{ ...files[0], contents: "changed" }, files[1]]) ===
+      original,
+    false,
+  );
+  assertEquals(
+    await codeHash([
+      { ...files[0], path: "public/js/renamed.js" },
+      files[1],
+    ]) ===
+      original,
+    false,
+  );
+});
+
+Deno.test("without skip-cache every English-only book is checked", async () => {
+  const db = fakeSql();
+  let localized = 0;
+  let cacheReads = 0;
+  const logs: string[] = [];
+  await main(["--apply"], {
+    readCache: async () => {
+      cacheReads++;
+      return null;
+    },
+    projectKeys: async () => keys,
+    listReaders: async () => [{ id: "reader", email: "reader@example.test" }],
+    openProdDb: async () => db.sql,
+    readerToken: async () => "token",
+    callAs: async (_keys, _token, name) =>
+      name === "recommendations"
+        ? { recommendations: [recommendation("card")] }
+        : {},
+    localizeRecommendations: async () => {
+      localized++;
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [genreRow("genre")],
+    listBareEditionIds: async () => [],
+    log: (line) => logs.push(line),
+  });
+
+  assertEquals(cacheReads, 0);
+  assertEquals(localized, 2);
+  assertEquals(JSON.parse(logs.at(-1)!).skipped, 0);
 });

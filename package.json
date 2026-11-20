@@ -22,7 +22,7 @@
     "repair:links": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/repair-links.ts",
     "unlink:fallback": "deno run --allow-net --allow-env --allow-read --allow-sys scripts/unlink-fallback.ts",
     "verify:repair": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/verify-repair.ts",
-    "refresh:all": "deno run --allow-net --allow-env --allow-read --allow-run --allow-sys scripts/refresh-all.ts"
+    "refresh:all": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run --allow-sys scripts/refresh-all.ts"
   },
   "devDependencies": {
     "deno": "^2.9.6",

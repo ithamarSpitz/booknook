@@ -45,7 +45,25 @@ export interface ReaderSummary {
   fallbackLinked: number;
   editionsFilled: number;
   failed: number;
+  skipped: number;
 }
+
+export interface SkipCache {
+  code: string;
+  entries: Record<string, string>;
+}
+
+export interface CodeFile {
+  path: string;
+  contents: string;
+}
+
+interface ActiveSkipCache {
+  entries: Record<string, string>;
+  now: () => Date;
+}
+
+const SKIP_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 
 type CallAs = typeof callAs;
 type FetchPayload = typeof fetchSimaniaPayload;
@@ -175,8 +193,76 @@ interface RefreshDeps {
   listBareEditionIds: typeof listBareEditionIds;
   concurrency?: number;
   simaniaThrottle?: () => Promise<void>;
+  skipCache?: ActiveSkipCache;
   sleep: (milliseconds: number) => Promise<void>;
   log: (message: string) => void;
+}
+
+async function collectCodeFiles(
+  directory: string,
+  extension: string,
+): Promise<CodeFile[]> {
+  const files: CodeFile[] = [];
+  const visit = async (relativeDirectory: string): Promise<void> => {
+    const entries = [];
+    for await (const entry of Deno.readDir(relativeDirectory)) {
+      entries.push(entry);
+    }
+    entries.sort((left, right) =>
+      left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+    );
+    for (const entry of entries) {
+      const path = `${relativeDirectory}/${entry.name}`;
+      if (entry.isDirectory) await visit(path);
+      else if (entry.isFile && entry.name.endsWith(extension)) {
+        files.push({
+          path: path.replaceAll("\\", "/"),
+          contents: await Deno.readTextFile(path),
+        });
+      }
+    }
+  };
+  await visit(directory);
+  return files;
+}
+
+/** Hash the refresh implementation inputs, or an injected in-memory file set. */
+export async function codeHash(files?: readonly CodeFile[]): Promise<string> {
+  const inputs = files ?? [
+    ...await collectCodeFiles("public/js", ".js"),
+    ...await collectCodeFiles("supabase/functions", ".ts"),
+  ];
+  const sorted = [...inputs].sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0
+  );
+  const encoder = new TextEncoder();
+  const parts = sorted.flatMap((file) => [file.path, file.contents]);
+  const bytes = encoder.encode(parts.join(""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function shouldSkip(
+  cache: ActiveSkipCache | undefined,
+  workId: unknown,
+): boolean {
+  if (!cache || typeof workId !== "string") return false;
+  const checkedAt = Date.parse(cache.entries[workId] ?? "");
+  if (!Number.isFinite(checkedAt)) return false;
+  const age = cache.now().getTime() - checkedAt;
+  return age >= 0 && age < SKIP_CACHE_MAX_AGE_MS;
+}
+
+function cacheNoResult(cache: ActiveSkipCache | undefined, workId: unknown) {
+  if (cache && typeof workId === "string") {
+    cache.entries[workId] = cache.now().toISOString();
+  }
+}
+
+function startCacheCheck(cache: ActiveSkipCache | undefined, workId: unknown) {
+  if (cache && typeof workId === "string") delete cache.entries[workId];
 }
 
 export function createSimaniaThrottle(
@@ -259,6 +345,7 @@ export async function refreshReader(
   }
 
   let failed = 0;
+  let skipped = 0;
   let recommendations: Record<string, unknown>[] = [];
   try {
     const response = record(
@@ -323,9 +410,12 @@ export async function refreshReader(
     }));
   };
 
-  const localize = async (item: Record<string, unknown>) => {
+  const localize = async (
+    item: Record<string, unknown>,
+  ): Promise<{ failed: boolean; linked: boolean }> => {
     const title = typeof item.title === "string" ? item.title : "";
     let observedFailures = 0;
+    let linked = false;
     const guardedCall = async (
       name: string,
       body: Record<string, unknown>,
@@ -359,7 +449,10 @@ export async function refreshReader(
     try {
       await deps.localizeRecommendations([item] as never, {
         callFunction: guardedCall,
-        onLinked,
+        onLinked: (workId) => {
+          linked = true;
+          onLinked(workId);
+        },
         isCurrent: () => true,
         fetchPayload: guardedFetch,
         concurrency: 1,
@@ -371,12 +464,23 @@ export async function refreshReader(
       }
     }
     failed += observedFailures;
+    return { failed: observedFailures > 0, linked };
   };
 
   const localizableCards = recommendations.filter((item) =>
     item.english_only === true
   );
-  await runPool(localizableCards, concurrency, localize);
+  await runPool(localizableCards, concurrency, async (item) => {
+    if (shouldSkip(deps.skipCache, item.work_id)) {
+      skipped++;
+      return;
+    }
+    startCacheCheck(deps.skipCache, item.work_id);
+    const outcome = await localize(item);
+    if (!outcome.failed && !outcome.linked) {
+      cacheNoResult(deps.skipCache, item.work_id);
+    }
+  });
 
   let genreRows: GenreRow[] = [];
   try {
@@ -385,16 +489,24 @@ export async function refreshReader(
     failed++;
   }
   await runPool(genreRows, concurrency, async (row) => {
+    if (shouldSkip(deps.skipCache, row.work_id)) {
+      skipped++;
+      return;
+    }
+    startCacheCheck(deps.skipCache, row.work_id);
     try {
       const hint = record(
         await callFunction(FUNCTIONS.GENRE_HINT, { work_id: row.work_id }),
       );
-      await localize({
+      const outcome = await localize({
         ...row,
         can_add: true,
         hebrew_hint: hint?.hebrew_hint ?? null,
         hebrew_author: hint?.hebrew_author ?? null,
       });
+      if (!outcome.failed && !outcome.linked) {
+        cacheNoResult(deps.skipCache, row.work_id);
+      }
     } catch (error) {
       failed++;
       reportFailure(row.title, "genre-hint", FUNCTIONS.GENRE_HINT, error);
@@ -441,6 +553,7 @@ export async function refreshReader(
     fallbackLinked: fallbackLinkedWorks.size,
     editionsFilled,
     failed,
+    skipped,
   };
   deps.log(JSON.stringify(summary));
   return summary;
@@ -457,6 +570,10 @@ interface MainDeps {
   countReaderRows: typeof countReaderRows;
   listEnglishGenreRows: typeof listEnglishGenreRows;
   listBareEditionIds: typeof listBareEditionIds;
+  readCache: (path: string) => Promise<string | null>;
+  writeCache: (path: string, contents: string) => Promise<void>;
+  codeHash: () => Promise<string>;
+  now: () => Date;
   sleep: (milliseconds: number) => Promise<void>;
   log: (message: string) => void;
   error: (message: string) => void;
@@ -473,6 +590,17 @@ const defaults: MainDeps = {
   countReaderRows,
   listEnglishGenreRows,
   listBareEditionIds,
+  readCache: async (path) => {
+    try {
+      return await Deno.readTextFile(path);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return null;
+      throw error;
+    }
+  },
+  writeCache: (path, contents) => Deno.writeTextFile(path, contents),
+  codeHash,
+  now: () => new Date(),
   sleep: (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds)),
   log: console.log,
@@ -504,64 +632,136 @@ export async function main(
     }
     concurrency = Number(value);
   }
+  const cacheIndexes = args.flatMap((arg, index) =>
+    arg === "--skip-cache" ? [index] : []
+  );
+  let cachePath: string | undefined;
+  if (cacheIndexes.length > 0) {
+    const index = cacheIndexes[0];
+    const value = args[index + 1];
+    if (
+      cacheIndexes.length !== 1 ||
+      value === undefined ||
+      value.startsWith("--")
+    ) {
+      deps.error("Invalid --skip-cache value; expected a file path.");
+      return 2;
+    }
+    cachePath = value;
+  }
+
+  let skipCache: SkipCache | undefined;
+  if (cachePath) {
+    let parsed: unknown;
+    try {
+      const contents = await deps.readCache(cachePath);
+      parsed = contents === null
+        ? { code: "", entries: {} }
+        : JSON.parse(contents);
+      const value = record(parsed);
+      if (
+        typeof value?.code !== "string" ||
+        record(value.entries) === null ||
+        Array.isArray(value.entries) ||
+        Object.values(value.entries as Record<string, unknown>).some((entry) =>
+          typeof entry !== "string"
+        )
+      ) {
+        throw new Error("Invalid cache shape.");
+      }
+      const currentCode = await deps.codeHash();
+      skipCache = {
+        code: currentCode,
+        entries: value.code === currentCode
+          ? { ...(value.entries as Record<string, string>) }
+          : {},
+      };
+    } catch {
+      deps.error("Skip cache file is not valid JSON.");
+      return 2;
+    }
+  }
+
   const simaniaThrottle = createSimaniaThrottle(deps.sleep);
-  let keys: ProjectKeys;
-  try {
-    keys = await deps.projectKeys();
-  } catch {
-    deps.error("Project keys step failed.");
-    return 2;
-  }
+  const run = async (): Promise<number> => {
+    let keys: ProjectKeys;
+    try {
+      keys = await deps.projectKeys();
+    } catch {
+      deps.error("Project keys step failed.");
+      return 2;
+    }
 
-  let readers: Reader[];
-  try {
-    readers = await deps.listReaders(keys);
-  } catch {
-    deps.error("Reader list step failed.");
-    return 2;
-  }
+    let readers: Reader[];
+    try {
+      readers = await deps.listReaders(keys);
+    } catch {
+      deps.error("Reader list step failed.");
+      return 2;
+    }
 
-  let sql: Sql;
-  try {
-    sql = await deps.openProdDb({ readOnly: true });
-  } catch {
-    deps.error("Read-only database step failed.");
-    return 2;
-  }
+    let sql: Sql;
+    try {
+      sql = await deps.openProdDb({ readOnly: true });
+    } catch {
+      deps.error("Read-only database step failed.");
+      return 2;
+    }
 
-  try {
-    if (!args.includes("--apply")) {
+    try {
+      if (!args.includes("--apply")) {
+        for (const reader of readers) {
+          const counts = await deps.countReaderRows(sql, reader.id);
+          deps.log(JSON.stringify({ reader: reader.email, before: counts }));
+        }
+        return 0;
+      }
+
       for (const reader of readers) {
-        const counts = await deps.countReaderRows(sql, reader.id);
-        deps.log(JSON.stringify({ reader: reader.email, before: counts }));
+        try {
+          await refreshReader({
+            ...deps,
+            keys,
+            sql,
+            concurrency,
+            simaniaThrottle,
+            skipCache: skipCache
+              ? { entries: skipCache.entries, now: deps.now }
+              : undefined,
+          }, reader);
+        } catch (error) {
+          if (error instanceof ReaderSessionError) {
+            deps.error(error.message);
+            return 2;
+          }
+          deps.error(`Refresh step failed for ${reader.email}.`);
+        }
       }
       return 0;
+    } catch {
+      deps.error("Read-only count step failed.");
+      return 2;
+    } finally {
+      await sql.end();
     }
+  };
 
-    for (const reader of readers) {
-      try {
-        await refreshReader({
-          ...deps,
-          keys,
-          sql,
-          concurrency,
-          simaniaThrottle,
-        }, reader);
-      } catch (error) {
-        if (error instanceof ReaderSessionError) {
-          deps.error(error.message);
-          return 2;
-        }
-        deps.error(`Refresh step failed for ${reader.email}.`);
-      }
-    }
-    return 0;
+  let result: number;
+  try {
+    result = await run();
   } catch {
-    deps.error("Read-only count step failed.");
-    return 2;
-  } finally {
-    await sql.end();
+    deps.error("Refresh step failed.");
+    result = 2;
   }
+  if (cachePath && skipCache) {
+    try {
+      await deps.writeCache(cachePath, JSON.stringify(skipCache));
+    } catch {
+      deps.error("Skip cache write step failed.");
+      return 2;
+    }
+  }
+  return result;
 }
 
 if (import.meta.main) {
