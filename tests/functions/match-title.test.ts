@@ -73,3 +73,21 @@ Deno.test("ensureResolved sends match title to providers and keeps stored title"
   assertEquals(fuzzyTitles, [matchTitleClean]);
   assertEquals(db.tables.editions[0].title, displayTitle);
 });
+
+Deno.test("matchTitle strips trailing dash edition labels", () => {
+  const cases: [string, string][] = [
+    ["בורות - מהדורת 2003", "בורות"],
+    ["כמה טוב להיות פרח קיר - עטיפת הסרט", "כמה טוב להיות פרח קיר"],
+    ["טירת הזכוכית - מהדורה מחודשת", "טירת הזכוכית"],
+    ["התלקחות - משחקי הרעב 2 - כריכה קשה", "התלקחות - משחקי הרעב 2"],
+    ["אידיוט - כרכים א'-ב' [מהדורת 1993]", "אידיוט"],
+    ["1984 [מהדורת 2003]", "1984"],
+    ["יומני רובורצח - כרך 1", "יומני רובורצח - כרך 1"],
+    ["ספר – מהדורה שנייה", "ספר"],
+    ["מהדורה מחודשת", "מהדורה מחודשת"],
+    ["בית-ספר", "בית-ספר"],
+  ];
+  for (const [input, expected] of cases) {
+    assertEquals(matchTitle(input), expected);
+  }
+});
