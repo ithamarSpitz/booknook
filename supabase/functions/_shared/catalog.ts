@@ -49,6 +49,8 @@ const providers: CatalogProviders = {
 
 const DAY = 86_400_000;
 
+const EDITION_LABEL = /מהדורה|מהדורת|עטיפת|כריכה|הדפסה|כרכים/;
+
 /** Simania display title with trailing edition labels removed for provider matching. */
 export function matchTitle(title: string): string {
   const trimmed = title.trim();
@@ -62,6 +64,13 @@ export function matchTitle(title: string): string {
     next = result.replace(/\s*\([^)]*\)$/, "");
     if (next !== result) {
       result = next.trim();
+      continue;
+    }
+    const labelled = result.match(
+      /^(.*\S)\s+[-–]\s+(?!.*\s[-–]\s)(.*)$/,
+    );
+    if (labelled && EDITION_LABEL.test(labelled[2])) {
+      result = labelled[1].trim();
       continue;
     }
     break;
