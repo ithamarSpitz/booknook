@@ -114,6 +114,10 @@ export function latinSkeleton(name: string): string {
     .replace(/[^a-z]/g, "");
 }
 
+function silentGhLatinSkeleton(name: string): string {
+  return latinSkeleton((name ?? "").replace(/gh/gi, ""));
+}
+
 function soundKey(skeleton: string): string {
   skeleton = skeleton.replace(/ch/g, "k");
   let out = "";
@@ -149,6 +153,73 @@ function bigramDice(a: string, b: string): number {
   return (2 * shared) / (left.length + right.length);
 }
 
+function latinParts(name: string): string[] {
+  return (name ?? "")
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .match(/[a-z]+/g) ?? [];
+}
+
+function initialScore(
+  hebrewName: string,
+  latinName: string,
+  vowelAwareVav: boolean,
+  latinX: boolean,
+): number {
+  const hebrewParts = (hebrewName ?? "").trim().split(/\s+/u).filter(Boolean);
+  const latinWords = latinParts(latinName);
+  if (
+    hebrewParts.length !== latinWords.length ||
+    !latinWords.some((part) => part.length === 1)
+  ) return 0;
+  const hebrewKeys = hebrewParts.map((part) =>
+    soundKey(buildHebrewSkeleton(part, vowelAwareVav, latinX))
+  );
+  if (hebrewKeys.some((key) => key === "")) return 0;
+  const latinKeys = latinWords.map((part, index) => {
+    if (part.length !== 1) return soundKey(latinSkeleton(part));
+    const initial = soundKey(latinSkeleton(part));
+    return initial === "" || hebrewKeys[index].startsWith(initial)
+      ? hebrewKeys[index]
+      : initial;
+  });
+  const hebrew = hebrewKeys.join("");
+  let latin = latinKeys.join("");
+  if (!hebrew.includes("h")) latin = latin.replace(/h/g, "");
+  return bigramDice(hebrew, latin);
+}
+
+function firstNameMatches(hebrewName: string, latinWords: string[]): boolean {
+  const firstHebrew = (hebrewName ?? "").trim().split(/\s+/u).find(Boolean) ??
+    "";
+  const hebrewKeys = [
+    soundKey(buildHebrewSkeleton(firstHebrew, false, false)),
+    soundKey(buildHebrewSkeleton(firstHebrew, true, false)),
+    soundKey(buildHebrewSkeleton(firstHebrew, false, true)),
+    soundKey(buildHebrewSkeleton(firstHebrew, true, true)),
+  ].filter(Boolean);
+  return latinWords.some((word) => {
+    if (word.length === 1) {
+      const initial = soundKey(latinSkeleton(word));
+      return initial !== "" &&
+        hebrewKeys.some((key) => key.startsWith(initial));
+    }
+    const latinKeys = [
+      soundKey(latinSkeleton(word)),
+      soundKey(silentGhLatinSkeleton(word)),
+    ];
+    return hebrewKeys.some((hebrew) =>
+      latinKeys.some((latin) => {
+        const comparableLatin = hebrew.includes("h")
+          ? latin
+          : latin.replace(/h/g, "");
+        return bigramDice(hebrew, comparableLatin) >= 0.5;
+      })
+    );
+  });
+}
+
 /**
  * Deterministic 0..1 score that a Hebrew-script name and a Latin-script name
  * are the same person; the maximum over `latinNames`. Empty input gives 0.
@@ -173,14 +244,43 @@ export function nameSoundScore(
   const allowOmittedH = fullName;
   let best = 0;
   for (const latin of latinNames) {
-    const latinKey = soundKey(latinSkeleton(latin));
+    let latinBest = 0;
+    const latinKeys = [
+      soundKey(latinSkeleton(latin)),
+      soundKey(silentGhLatinSkeleton(latin)),
+    ];
     for (const hebrew of hebrewKeys) {
-      const comparableLatin = hebrew.includes("h") || !allowOmittedH
-        ? latinKey
-        : latinKey.replace(/h/g, "");
-      const score = bigramDice(hebrew, comparableLatin);
-      if (score > best) best = score;
+      for (const latinKey of latinKeys) {
+        const comparableLatin = hebrew.includes("h") || !allowOmittedH
+          ? latinKey
+          : latinKey.replace(/h/g, "");
+        const score = bigramDice(hebrew, comparableLatin);
+        if (score > latinBest) latinBest = score;
+      }
     }
+    if (fullName) {
+      for (
+        const [vowelAwareVav, latinX] of [
+          [false, false],
+          [true, false],
+          [false, true],
+          [true, true],
+        ]
+      ) {
+        const score = initialScore(hebrewName, latin, vowelAwareVav, latinX);
+        if (score > latinBest) latinBest = score;
+      }
+    }
+    const hebrewPartCount =
+      (hebrewName ?? "").trim().split(/\s+/u).filter(Boolean).length;
+    const latinWords = latinParts(latin);
+    if (
+      hebrewPartCount >= 2 && latinWords.length > hebrewPartCount &&
+      !firstNameMatches(hebrewName, latinWords)
+    ) {
+      latinBest *= hebrewPartCount / latinWords.length;
+    }
+    if (latinBest > best) best = latinBest;
   }
   return best;
 }
