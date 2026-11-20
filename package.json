@@ -20,6 +20,7 @@
     "audit:authors": "deno run --allow-net --allow-env --allow-read --allow-sys scripts/audit-authors.ts",
     "audit:catalog": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/audit-catalog.ts",
     "repair:links": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/repair-links.ts",
+    "requeue:not-found": "deno run --allow-net --allow-env --allow-read --allow-sys scripts/requeue-not-found.ts",
     "unlink:fallback": "deno run --allow-net --allow-env --allow-read --allow-sys scripts/unlink-fallback.ts",
     "verify:repair": "deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/verify-repair.ts",
     "refresh:all": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run --allow-sys scripts/refresh-all.ts"
