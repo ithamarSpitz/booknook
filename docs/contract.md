@@ -552,10 +552,23 @@ Relinks: it also plans a relink for each `author_mismatches` entry whose proposa
 - **Acting as a reader.** For each reader (`auth.admin.listUsers`, joined to `profiles`), get a session the way an emailed magic link would: `auth.admin.generateLink({ type: "magiclink", email })`, which sends no email, then `auth.verifyOtp({ type: "magiclink", token_hash })` with the anon key. Use that access token for the function calls below. It is never printed. Readers are processed sequentially.
 - **Steps per reader, in order:**
   1. `POST recommendations` (the normal full run, including genre shelves).
-  2. `localizeRecommendations` (from `public/js/recs.js`) over that response's English-only cards, concurrency 1.
-  3. For each English-only `genre_recommendations` row: `genre-hint`, then `localizeRecommendations` on that book. There is no 12-book cap and no device memory.
+  2. `localizeRecommendations` (from `public/js/recs.js`) over that response's English-only cards, concurrency `--concurrency N`.
+  3. Process the English-only `genre_recommendations` rows `--concurrency N` at a time, each still running `genre-hint` and then `localizeRecommendations` on that book. There is no 12-book cap and no device memory.
   4. For each positive edition on that reader's recommendation, genre or shelf rows with `details_at` null: `fetchSimaniaPayload` from this machine, then `book-details { simania_id, simania }`.
   5. Print per reader: English-only cards before and after, genre English-only before and after, books linked, and editions filled.
+- **Speed (S24).**
+  - **Concurrency.** `--concurrency N` is an integer from 1 to 8; the default is 4. Any other value exits `2` before any network call. Results never depend on N. The per-reader totals and the set of `link-edition` calls are the same as with N = 1, except where two books of one reader link the same Simania edition (then which one gets the `409` can depend on timing).
+  - **Simania.** The run has one Simania throttle, shared by every reader and every concurrent book: at least 1,000 ms between the starts of any two Simania requests. This replaces the per-reader throttle. Step 4 (editions without details) goes through the same throttle.
+  - **Skip cache.** `--skip-cache <file>` is optional. Without it nothing is cached and the run behaves as before.
+    - The file is JSON: `{ "code": "<hash>", "entries": { "<work_id>": "<ISO time checked>" } }`.
+    - `code` is the SHA-256 hex digest of the contents of every `.js` file under `public/js` and every `.ts` file under `supabase/functions`, sorted by path, each path followed by its contents.
+    - Before step 2, an English-only card or genre row is skipped if its `work_id` is in `entries`, the file's `code` equals the current hash, and the time is less than 7 days old. A skipped genre row makes no `genre-hint` call.
+    - A book is added with the current time only when it was checked, made no failure, and was not linked. Linked books and failed books are never added.
+    - If `code` differs from the current hash, all entries are dropped.
+    - A missing file is an empty cache. A file that is not valid JSON exits `2` before any network call.
+    - The file is written once at the end of the run, also after a failure that stops the run.
+    - Each reader summary adds `skipped`: the number of skipped cards and genre rows.
+  - **Dry run.** These flags do not change the dry run.
 - **Errors.** A failure on one book is counted and skipped. A failure to get credentials or a session stops with exit `2`, naming the step but no secret.
 - **Dry run.** The default is a dry run: it gets the keys, lists the readers and prints the "before" counts, read-only, with no sessions and no function calls. `--apply` runs the steps.
 - **Failure details (S21).** Every failed book is printed as one JSON line `{ "failed": { "title", "step", "function", "status", "message" } }`: `step` is recommendations, localize, genre-hint or details; `status` is the HTTP status or null; `message` is cut to 200 characters with any token-like string (`eyJ…`) replaced by `[redacted]`. Per-reader totals are as before.
