@@ -1049,3 +1049,33 @@ sprints:
         depends_on:
         - S24-T2
         - S24-T3
+  S25-niqqud-hint:
+    name: Matching ignores Hebrew points; a title hint is verified when the Simania
+      author sounds like the English author
+    tasks:
+      S25-T1:
+        file: tasks/sprint-25-niqqud-hint/01-contract.md
+        stage: 1
+        depends_on: []
+      S25-T2:
+        file: tasks/sprint-25-niqqud-hint/02-points-browser.md
+        stage: 2
+        depends_on:
+        - S25-T1
+      S25-T3:
+        file: tasks/sprint-25-niqqud-hint/03-points-server.md
+        stage: 2
+        depends_on:
+        - S25-T1
+      S25-T4:
+        file: tasks/sprint-25-niqqud-hint/04-hint-author-sound.md
+        stage: 2
+        depends_on:
+        - S25-T1
+      S25-T5:
+        file: tasks/sprint-25-niqqud-hint/05-docs.md
+        stage: 3
+        depends_on:
+        - S25-T2
+        - S25-T3
+        - S25-T4
