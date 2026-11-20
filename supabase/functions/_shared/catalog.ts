@@ -418,6 +418,7 @@ export async function ensureResolved(
       );
       if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
         let hint = await englishAuthorHint(db, edition);
+        if (hint === null) hint = bridge.versoAuthor?.trim() || null;
         if (hint === null && edition.author?.trim()) {
           try {
             hint = await api.wikidataEnglishAuthor(edition.author);
