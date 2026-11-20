@@ -29,7 +29,7 @@ const NLI_SRU = "https://nli.alma.exlibrisgroup.com/view/sru/972NNL_INST";
 const WORK_TYPES = new Set(["Q571", "Q8261", "Q7725634", "Q47461344", "Q49084", "Q25379"]);
 const REJECT_TYPES = new Set(["Q11424", "Q24856", "Q5398426", "Q277759", "Q7058673", "Q7889"]);
 
-type Bridge = { title: string; author?: string; source: "Wikidata" | "NLI" };
+type Bridge = { title: string; author?: string; versoAuthor?: string; source: "Wikidata" | "NLI" };
 type Entity = {
   labels?: Record<string, { value?: string }>;
   descriptions?: Record<string, { value?: string }>;
@@ -212,7 +212,8 @@ async function wikidataEnglishAuthorLookup(hebrewName: string): Promise<string |
   return null;
 }
 
-type NliRecord = { title: string; creators: string[]; originals: string[] };
+type NliOriginal = { title: string; versoAuthor?: string };
+type NliRecord = { title: string; creators: string[]; originals: NliOriginal[] };
 
 function decodeXml(value: string): string {
   return value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
@@ -230,14 +231,53 @@ function marcFields(record: string, tag: string, codes: string[]): string[] {
   }).filter(Boolean);
 }
 
+function marcSubfields(record: string, tag: string): Array<Array<{ code: string; value: string }>> {
+  const fields = [...record.matchAll(new RegExp(`<(?:(?:\\w+):)?datafield\\b[^>]*tag=["']${tag}["'][^>]*>([\\s\\S]*?)<\\/(?:(?:\\w+):)?datafield>`, "gi"))];
+  return fields.map((field) =>
+    [...field[1].matchAll(/<(?:(?:\w+):)?subfield\b[^>]*code=["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:(?:\w+):)?subfield>/gi)]
+      .map((part) => ({ code: part[1], value: stripXml(part[2]) }))
+  );
+}
+
+function hasLatinWithoutHebrew(value: string): boolean {
+  return /[A-Za-z]/.test(value) && !/[\u0590-\u05ff]/.test(value);
+}
+
+function cleanVersoPart(value: string): string {
+  return value.replace(/[\s:\/;,.]+$/g, "").trim();
+}
+
 function parseNliRecords(xml: string): NliRecord[] {
   const records = [...xml.matchAll(/<(?:(?:\w+):)?record(?:\s[^>]*)?>([\s\S]*?)<\/(?:(?:\w+):)?record>/gi)];
   return records.map((match) => {
     const record = match[1];
+    const translationLanguages = marcSubfields(record, "041")
+      .flat()
+      .filter((subfield) => subfield.code === "h")
+      .map((subfield) => subfield.value.trim().toLowerCase());
+    const versoOriginals: NliOriginal[] = translationLanguages.some((value) => value !== "heb")
+      ? marcSubfields(record, "246").flatMap((subfields) => {
+        const indication = subfields.find((subfield) => subfield.code === "i")?.value ?? "";
+        const rawTitle = subfields.find((subfield) => subfield.code === "a")?.value ?? "";
+        if (!indication.startsWith("Title page verso") || !hasLatinWithoutHebrew(rawTitle)) return [];
+        const title = cleanVersoPart(rawTitle);
+        if (!title) return [];
+        const rawAuthor = subfields.find((subfield) => subfield.code === "b")?.value ?? "";
+        const versoAuthor = hasLatinWithoutHebrew(rawAuthor)
+          ? cleanVersoPart(rawAuthor.split(";", 1)[0])
+          : "";
+        return [{ title, ...(versoAuthor ? { versoAuthor } : {}) }];
+      })
+      : [];
     return {
       title: marcFields(record, "245", ["a", "b", "n", "p"])[0] ?? "",
       creators: [...marcFields(record, "100", ["a", "d"]), ...marcFields(record, "700", ["a", "d"])],
-      originals: [...marcFields(record, "240", ["a", "n", "p"]), ...marcFields(record, "130", ["a", "n", "p"]), ...marcFields(record, "765", ["t"])],
+      originals: [
+        ...marcFields(record, "240", ["a", "n", "p"]).map((title) => ({ title })),
+        ...marcFields(record, "130", ["a", "n", "p"]).map((title) => ({ title })),
+        ...marcFields(record, "765", ["t"]).map((title) => ({ title })),
+        ...versoOriginals,
+      ],
     };
   }).filter((record) => record.title);
 }
@@ -281,11 +321,20 @@ function nliOriginalFromRecords(hebrewTitle: string, hebrewAuthor: string, recor
   const ranked = records.map((record) => {
     const titleScore = similarity(hebrewTitle, record.title);
     const authorScore = hebrewAuthor ? Math.max(0, ...record.creators.map((creator) => similarity(hebrewAuthor, creator))) : 0;
-    const original = record.originals.map(cleanOriginal).find((value) => value && normalize(value) !== normalize(record.title));
+    const original = record.originals
+      .map((candidate) => ({ ...candidate, title: cleanOriginal(candidate.title) }))
+      .find((candidate) => candidate.title && normalize(candidate.title) !== normalize(record.title));
     return { record, original, titleScore, score: titleScore * 3 + authorScore * 2 };
   }).filter((item) => item.original && item.titleScore >= 0.78).sort((a, b) => b.score - a.score);
   const best = ranked[0];
-  return best ? { title: best.original!, author: best.record.creators[0] ?? "", source: "NLI" } : null;
+  return best
+    ? {
+      title: best.original!.title,
+      author: best.record.creators[0] ?? "",
+      ...(best.original!.versoAuthor ? { versoAuthor: best.original!.versoAuthor } : {}),
+      source: "NLI",
+    }
+    : null;
 }
 
 export async function nliOriginal(hebrewTitle: string, hebrewAuthor = ""): Promise<Bridge | null> {
@@ -320,7 +369,7 @@ async function nliHebrewLookup(originalTitle: string, originalAuthor: string): P
     }
   }
   const ranked = [...seen.values()].filter((record) => /[\u0590-\u05ff]/.test(record.title)).map((record) => {
-    const originalScore = Math.max(0, ...record.originals.map((value) => similarity(originalTitle, cleanOriginal(value))));
+    const originalScore = Math.max(0, ...record.originals.map((candidate) => similarity(originalTitle, cleanOriginal(candidate.title))));
     const authorScore = originalAuthor ? Math.max(0, ...record.creators.map((creator) => similarity(originalAuthor, creator))) : 0;
     return { record, originalScore, score: originalScore * 4 + authorScore * 2 };
   }).filter((item) => item.originalScore >= 0.72).sort((a, b) => b.score - a.score);

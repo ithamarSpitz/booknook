@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { nliOriginal, ProviderError } from "../../supabase/functions/_shared/bridges.ts";
+import { nliHebrew, nliOriginal, ProviderError } from "../../supabase/functions/_shared/bridges.ts";
 
 function sruResponse(recordsXml: string): string {
   return `<?xml version="1.0"?><searchRetrieveResponse><records>${recordsXml}</records></searchRetrieveResponse>`;
@@ -18,6 +18,20 @@ function otherAcceptedRecord(): string {
     <datafield tag="245"><subfield code="a">ספר בדיקה</subfield></datafield>
     <datafield tag="100"><subfield code="a">מחבר</subfield></datafield>
     <datafield tag="240"><subfield code="a">Test book</subfield></datafield>
+  </record>`;
+}
+
+function versoRecord(
+  hebrewTitle: string,
+  versoTitle: string,
+  versoAuthor: string,
+  language = '<datafield tag="041"><subfield code="a">heb</subfield><subfield code="h">eng</subfield></datafield>',
+  indication = "Title page verso:",
+): string {
+  return `<record>
+    <datafield tag="245"><subfield code="a">${hebrewTitle} /</subfield></datafield>
+    ${language}
+    <datafield tag="246"><subfield code="i">${indication}</subfield><subfield code="a">${versoTitle} :</subfield><subfield code="b">${versoAuthor}</subfield></datafield>
   </record>`;
 }
 
@@ -111,6 +125,114 @@ Deno.test("nliOriginal throws ProviderError on non-2xx response", async () => {
       () => nliOriginal("הדירה בפריז", "לוסי פולי"),
       ProviderError,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal uses a title page verso candidate and returns its author", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(
+    sruResponse(versoRecord("סודות", "Secrets", "Jacqueline Wilson")),
+    { status: 200 },
+  ));
+  try {
+    assertEquals(await nliOriginal("סודות"), {
+      title: "Secrets",
+      author: "",
+      versoAuthor: "Jacqueline Wilson",
+      source: "NLI",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal trims a title page verso author before credits", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(
+    sruResponse(versoRecord("מסיבת פיג'מות", "Sleepovers", "Jacqueline Wilson ; illustrations, Nick Sharratt.")),
+    { status: 200 },
+  ));
+  try {
+    const result = await nliOriginal("מסיבת פיג'מות");
+    assertEquals(result?.title, "Sleepovers");
+    assertEquals(result?.versoAuthor, "Jacqueline Wilson");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal ignores title page verso without a translation language", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(
+    sruResponse(versoRecord("תנו לגדול בשקט", "Leave them kids alone", "Liat Rotner", "")),
+    { status: 200 },
+  ));
+  try {
+    assertEquals(await nliOriginal("תנו לגדול בשקט"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal ignores title page verso when 041 h is heb", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(
+    sruResponse(versoRecord(
+      "סודות",
+      "Secrets",
+      "Jacqueline Wilson",
+      '<datafield tag="041"><subfield code="h">heb</subfield></datafield>',
+    )),
+    { status: 200 },
+  ));
+  try {
+    assertEquals(await nliOriginal("סודות"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal prefers 240 over a title page verso candidate", async () => {
+  const record = versoRecord("ילדות רעות", "Verso title", "Verso Author").replace(
+    '<datafield tag="245">',
+    '<datafield tag="240"><subfield code="a">Bad girls.</subfield></datafield><datafield tag="245">',
+  );
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(sruResponse(record), { status: 200 }));
+  try {
+    assertEquals(await nliOriginal("ילדות רעות"), { title: "Bad girls", author: "", source: "NLI" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal ignores a parallel-title 246 field", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(
+    sruResponse(versoRecord("סודות", "Secrets", "Jacqueline Wilson", undefined, "Parallel title:")),
+    { status: 200 },
+  ));
+  try {
+    assertEquals(await nliOriginal("סודות"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliHebrew finds a Hebrew record through its title page verso", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(
+    sruResponse(versoRecord("סודות", "Secrets", "Jacqueline Wilson")),
+    { status: 200 },
+  ));
+  try {
+    assertEquals(await nliHebrew("Secrets", "Jacqueline Wilson"), {
+      title: "סודות",
+      author: "",
+      source: "NLI",
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
