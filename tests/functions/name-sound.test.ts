@@ -47,6 +47,13 @@ Deno.test("measured same-person scores", () => {
   assertEquals(nameSoundScore("אבי חימנז", ["Abby Jimenez"]), 0.5);
 });
 
+Deno.test("Hebrew points do not change a name sound score", () => {
+  assertEquals(
+    nameSoundScore("סָאלִי רוּנִי", ["Sally Rooney"]),
+    nameSoundScore("סאלי רוני", ["Sally Rooney"]),
+  );
+});
+
 const OTHER_AUTHORS = [
   "Karin N. Mango",
   "Laura Van Wormer",

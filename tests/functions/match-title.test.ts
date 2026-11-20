@@ -3,10 +3,21 @@ import {
   ensureResolved,
   matchTitle,
 } from "../../supabase/functions/_shared/catalog.ts";
+import { titleMatch } from "../../supabase/functions/_shared/fallback-match.ts";
 import type { EditionRow } from "../../supabase/functions/_shared/types.ts";
+import {
+  normalize,
+  similarity,
+} from "../../supabase/functions/_shared/utils.ts";
 import { edition, FakeDb } from "./helpers/fake-db.ts";
 
 const NOW = new Date("2026-10-25T10:00:00.000Z");
+
+Deno.test("matching ignores Hebrew points and turns maqaf into a space", () => {
+  assertEquals(similarity("אינטרמצו", "אִינְטֶרְמֶצּוֹ"), 1);
+  assertEquals(normalize("בית־ספר"), "בית ספר");
+  assertEquals(titleMatch("אינטרמצו", "אִינְטֶרְמֶצּוֹ"), true);
+});
 
 Deno.test("matchTitle strips trailing edition labels on live titles", () => {
   assertEquals(matchTitle("חפצים חדים (2015)"), "חפצים חדים");
