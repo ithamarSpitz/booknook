@@ -28,6 +28,22 @@ const DIFFERENT_PERSON = [
   ["ג'קלין ווילסטון", "Pedro Mañas"],
 ];
 
+const S22_SAME_PERSON = [
+  ["אלוין ברוקס וייט", "E.B. White"],
+  ["יו האווי", "Hugh Howey"],
+  ["ג'יי. קיי. רולינג", "J.K. Rowling"],
+];
+
+const S22_DIFFERENT_PERSON = [
+  ["ג'קלין ווילסטון", "David Sierra Listón"],
+];
+
+const OMITTED_MIDDLE_NAME = [
+  ["אורסולה גווין", "Ursula K. Le Guin"],
+  ["ג'ורג' מרטין", "George R. R. Martin"],
+  ["פיליפ דיק", "Philip K. Dick"],
+];
+
 for (const [hebrew, latin] of SAME_PERSON) {
   test(`S21 same person scores at least 0.6: ${latin}`, () => {
     const score = nameSoundScore(hebrew, [latin]);
@@ -39,5 +55,26 @@ for (const [hebrew, latin] of DIFFERENT_PERSON) {
   test(`S21 different person scores at most 0.3: ${latin}`, () => {
     const score = nameSoundScore(hebrew, [latin]);
     assert.ok(score <= 0.3, `${hebrew} / ${latin} scored ${score}`);
+  });
+}
+
+for (const [hebrew, latin] of S22_SAME_PERSON) {
+  test(`S22 same person scores at least 0.6: ${latin}`, () => {
+    const score = nameSoundScore(hebrew, [latin]);
+    assert.ok(score >= 0.6, `${hebrew} / ${latin} scored ${score}`);
+  });
+}
+
+for (const [hebrew, latin] of S22_DIFFERENT_PERSON) {
+  test(`S22 different person scores at most 0.3: ${latin}`, () => {
+    const score = nameSoundScore(hebrew, [latin]);
+    assert.ok(score <= 0.3, `${hebrew} / ${latin} scored ${score}`);
+  });
+}
+
+for (const [hebrew, latin] of OMITTED_MIDDLE_NAME) {
+  test(`omitted middle name stays at least 0.5: ${latin}`, () => {
+    const score = nameSoundScore(hebrew, [latin]);
+    assert.ok(score >= 0.5, `${hebrew} / ${latin} scored ${score}`);
   });
 }

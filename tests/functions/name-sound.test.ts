@@ -81,6 +81,22 @@ const CONTRACT_DIFFERENT_PERSON: Array<[string, string]> = [
   ["ג'קלין ווילסטון", "Pedro Mañas"],
 ];
 
+const S22_SAME_PERSON: Array<[string, string]> = [
+  ["אלוין ברוקס וייט", "E.B. White"],
+  ["יו האווי", "Hugh Howey"],
+  ["ג'יי. קיי. רולינג", "J.K. Rowling"],
+];
+
+const S22_DIFFERENT_PERSON: Array<[string, string]> = [
+  ["ג'קלין ווילסטון", "David Sierra Listón"],
+];
+
+const OMITTED_MIDDLE_NAME: Array<[string, string]> = [
+  ["אורסולה גווין", "Ursula K. Le Guin"],
+  ["ג'ורג' מרטין", "George R. R. Martin"],
+  ["פיליפ דיק", "Philip K. Dick"],
+];
+
 for (const [hebrew, latin] of CONTRACT_SAME_PERSON) {
   Deno.test(`S21 same person scores at least 0.6: ${latin}`, () => {
     const score = nameSoundScore(hebrew, [latin]);
@@ -93,6 +109,30 @@ for (const [hebrew, latin] of CONTRACT_DIFFERENT_PERSON) {
   Deno.test(`S21 different person scores at most 0.3: ${latin}`, () => {
     const score = nameSoundScore(hebrew, [latin]);
     assert(score <= 0.3, `${hebrew} / ${latin} scored ${score}`);
+    assertEquals(browserNameSoundScore(hebrew, [latin]), score);
+  });
+}
+
+for (const [hebrew, latin] of S22_SAME_PERSON) {
+  Deno.test(`S22 same person scores at least 0.6: ${latin}`, () => {
+    const score = nameSoundScore(hebrew, [latin]);
+    assert(score >= 0.6, `${hebrew} / ${latin} scored ${score}`);
+    assertEquals(browserNameSoundScore(hebrew, [latin]), score);
+  });
+}
+
+for (const [hebrew, latin] of S22_DIFFERENT_PERSON) {
+  Deno.test(`S22 different person scores at most 0.3: ${latin}`, () => {
+    const score = nameSoundScore(hebrew, [latin]);
+    assert(score <= 0.3, `${hebrew} / ${latin} scored ${score}`);
+    assertEquals(browserNameSoundScore(hebrew, [latin]), score);
+  });
+}
+
+for (const [hebrew, latin] of OMITTED_MIDDLE_NAME) {
+  Deno.test(`omitted middle name stays at least 0.5: ${latin}`, () => {
+    const score = nameSoundScore(hebrew, [latin]);
+    assert(score >= 0.5, `${hebrew} / ${latin} scored ${score}`);
     assertEquals(browserNameSoundScore(hebrew, [latin]), score);
   });
 }
