@@ -1,6 +1,20 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import type { Sql } from "npm:postgres@3.4.5";
-import { codeHash, main, refreshReader } from "../../scripts/refresh-all.ts";
+import {
+  codeHash,
+  main as refreshMain,
+  refreshReader,
+} from "../../scripts/refresh-all.ts";
+
+function main(
+  args: string[],
+  overrides: Parameters<typeof refreshMain>[1] = {},
+) {
+  return refreshMain(args, {
+    checkHardcoverBudget: async () => true,
+    ...overrides,
+  });
+}
 
 const keys = {
   url: "https://example.test",
@@ -21,6 +35,49 @@ const zeroCounts = {
   englishGenres: 0,
   bareEditions: 0,
 };
+
+Deno.test("refresh-all stops before opening the database when the Hardcover budget is low", async () => {
+  let opened = false;
+  const code = await main([], {
+    checkHardcoverBudget: async () => false,
+    openProdDb: async () => {
+      opened = true;
+      return fakeSql().sql;
+    },
+  });
+
+  assertEquals(code, 4);
+  assertEquals(opened, false);
+});
+
+Deno.test("refresh-all rejects a bad Hardcover minimum with usage", async () => {
+  const errors: string[] = [];
+  let checked = false;
+  const code = await main(["--min-hardcover", "x"], {
+    checkHardcoverBudget: async () => {
+      checked = true;
+      return true;
+    },
+    error: (line) => errors.push(line),
+  });
+
+  assertEquals(code, 2);
+  assertEquals(checked, false);
+  assertStringIncludes(errors[0], "Usage:");
+});
+
+Deno.test("refresh-all passes the default minimum and force flag to the budget check", async () => {
+  let received: { min: number; force: boolean } | undefined;
+  const code = await main(["--force-hardcover"], {
+    checkHardcoverBudget: async ({ min, force }) => {
+      received = { min, force };
+      return false;
+    },
+  });
+
+  assertEquals(code, 4);
+  assertEquals(received, { min: 1500, force: true });
+});
 
 Deno.test("refresh-all dry run only gets keys, readers, and before counts", async () => {
   const db = fakeSql();
