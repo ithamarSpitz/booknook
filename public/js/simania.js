@@ -125,23 +125,66 @@ export async function fetchSimaniaPayload(simaniaId, fetchImpl = fetch) {
   };
 }
 
-/**
- * Contract step 2 of recommendation localization: search "<title> <author>",
- * then the title alone only when that found nothing; accept the best result
- * when its title Dice is at least 0.45.
- */
+function titleWords(value) {
+  return stripHebrewPoints(value).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function stripTrailingLabels(value) {
+  const original = String(value ?? "").trim();
+  let stripped = original;
+  while (stripped) {
+    const next = stripped.replace(/\s*(?:\[[^\[\]]*\]|\([^()]*\))\s*$/, "").trim();
+    if (!next || next === stripped) break;
+    stripped = next;
+  }
+  return stripped || original;
+}
+
+/** Contract step 2 of recommendation localization. */
 export async function matchHebrewBook(title, author = "", fetchImpl = fetch) {
+  const hintWords = titleWords(title);
   let results = await searchBooks(`${title} ${author ?? ""}`.trim(), 6, fetchImpl);
-  if (!results.length) results = await searchBooks(title, 6, fetchImpl);
+  if (hintWords.length === 1) {
+    const titleResults = await searchBooks(title, 6, fetchImpl);
+    const seen = new Set();
+    results = results.concat(titleResults).filter((book) => {
+      const id = simaniaIdOf(book);
+      if (id == null || !seen.has(id)) {
+        if (id != null) seen.add(id);
+        return true;
+      }
+      return false;
+    });
+  } else if (!results.length) {
+    results = await searchBooks(title, 6, fetchImpl);
+  }
+
+  const authorSupplied = Boolean(String(author ?? "").trim());
   const ranked = results
-    .map((book, index) => ({
-      book,
-      index,
-      score: similarity(title, book.title) * 3 + (author ? similarity(author, book.author) * 2 : 0),
-    }))
-    .sort((a, b) => b.score - a.score || a.index - b.index);
+    .map((book, index) => {
+      const titleDice = similarity(title, book.title);
+      const authorDice = authorSupplied ? similarity(author, book.author) : 0;
+      const resultWords = new Set(titleWords(book.title));
+      const subsetBoost = hintWords.length >= 2
+        && authorSupplied
+        && authorDice >= 0.6
+        && hintWords.every((word) => resultWords.has(word));
+      const titleScore = subsetBoost ? Math.max(titleDice, 0.85) : titleDice;
+      return {
+        book,
+        index,
+        titleScore,
+        score: titleScore * 3 + authorDice * 2,
+        oldScore: titleDice * 3 + authorDice * 2,
+        labelScore: similarity(title, stripTrailingLabels(book.title)),
+      };
+    })
+    .sort((a, b) => b.score - a.score
+      || b.oldScore - a.oldScore
+      || b.labelScore - a.labelScore
+      || a.index - b.index);
   const best = ranked[0];
-  return best && similarity(title, best.book.title) >= 0.45 ? best.book : null;
+  return best && best.titleScore >= 0.45 ? best.book : null;
 }
 
 /** Numeric Simania ID of a search result, or null. */

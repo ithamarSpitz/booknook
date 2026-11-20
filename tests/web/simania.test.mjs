@@ -67,6 +67,52 @@ describe("browser Simania client", () => {
     assert.equal(await matchHebrewBook("הנסיך הקטן", "", fakeFetch({ books_search: [{ id: 1, title: "ספר אחר לגמרי" }] })), null);
   });
 
+  it("searches both queries for a one-word hint and can match the title search", async () => {
+    const calls = [];
+    const otherBooks = Array.from({ length: 6 }, (_, index) => ({
+      id: index + 1,
+      title: `ספר אחר ${index}`,
+      author: "מחבר אחר",
+    }));
+    const match = await matchHebrewBook("זר", "סטיבן קינג", fakeFetch({
+      books_search: ({ query }) => query === "זר סטיבן קינג"
+        ? otherBooks
+        : [{ id: 994441, title: "זר", author: "סטיבן קינג" }],
+    }, calls));
+    assert.equal(match.id, 994441);
+    assert.deepEqual(calls.map((call) => call.args.query), ["זר סטיבן קינג", "זר"]);
+  });
+
+  it("does not search a two-word title alone when the first search has results", async () => {
+    const calls = [];
+    const match = await matchHebrewBook("הנסיך הקטן", "סנט אכזופרי", fakeFetch({
+      books_search: [{ id: 2, title: "הנסיך הקטן", author: "סנט אכזופרי" }],
+    }, calls));
+    assert.equal(match.id, 2);
+    assert.deepEqual(calls.map((call) => call.args.query), ["הנסיך הקטן סנט אכזופרי"]);
+  });
+
+  it("requires author Dice 0.6 before applying the word-subset boost", async () => {
+    assert.ok(similarity("ג'יין אוסטן", "ג'יין מרי שלי") < 0.6);
+    const match = await matchHebrewBook("גאווה ודעה קדומה", "ג'יין אוסטן", fakeFetch({
+      books_search: [
+        { id: 1, title: "כסף אהבה גאווה ודעה קדומה", author: "ג'יין מרי שלי" },
+        { id: 2, title: "גאווה ודעה מהדורת 2009 חדשה", author: "ג'יין אוסטן" },
+      ],
+    }));
+    assert.equal(match.id, 2);
+  });
+
+  it("breaks an old-score tie with the label-stripped title score", async () => {
+    const match = await matchHebrewBook("ספר טוב", "מחבר", fakeFetch({
+      books_search: [
+        { id: 1, title: "ספר טוב מאוד חדש", author: "מחבר" },
+        { id: 2, title: "ספר טוב [מהדורה מיוחדת]", author: "מחבר" },
+      ],
+    }));
+    assert.equal(match.id, 2);
+  });
+
   it("reads numeric IDs only", () => {
     assert.equal(simaniaIdOf({ bookId: "12" }), 12);
     assert.equal(simaniaIdOf({ id: "x" }), null);
