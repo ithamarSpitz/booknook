@@ -5,6 +5,7 @@ import {
   originalYearOf,
   parseNliMarc,
 } from "../../supabase/functions/_shared/hebrew-candidates.ts";
+import { nameSoundScore } from "../../supabase/functions/_shared/names.ts";
 
 const FIXTURES = new URL("./fixtures/nli-author/", import.meta.url);
 const fixture = (name: string) => Deno.readTextFile(new URL(name, FIXTURES));
@@ -442,4 +443,48 @@ Deno.test("a second Wikidata 429 drops D but keeps other rules", async () => {
   assertEquals(wikidataCalls, 2);
   assert(!result.candidates.some((candidate) => candidate.rule === "D"));
   assert(result.candidates.some((candidate) => candidate.rule === "E"));
+});
+
+function lehaneXml(titles: string[]): string {
+  const records = titles.map((title) =>
+    `<record><recordData><record xmlns="http://www.loc.gov/MARC21/slim">
+      <datafield tag="100"><subfield code="a">Lehane, Dennis</subfield></datafield>
+      <datafield tag="245"><subfield code="a">${title} /</subfield></datafield>
+    </record></recordData></record>`
+  ).join("");
+  return `<searchRetrieveResponse><records>${records}</records></searchRetrieveResponse>`;
+}
+
+Deno.test("rule B accepts a transliteration scoring from 0.7 (Shutter Island)", async () => {
+  const p = providers(lehaneXml(["שאטר איילנד", "מיסטיק ריבר"]));
+  const result = await hebrewCandidates({
+    title: "Shutter Island",
+    author: "Dennis Lehane",
+    description: null,
+  }, {
+    fetch: p.fetcher,
+    wikidataHebrew: bridge(null),
+    nliHebrew: bridge(null),
+  });
+  const rule = (title: string) =>
+    result.candidates.find((c) => c.title === title)?.rule;
+  assertEquals(rule("שאטר איילנד"), "B");
+  assert(rule("מיסטיק ריבר") !== "B");
+});
+
+Deno.test("rule B leaves a record scoring below 0.7 as G", async () => {
+  const unrelated = "מיסטיק ריבר";
+  assert(nameSoundScore(unrelated, ["Shutter Island"]) < 0.7);
+  const p = providers(lehaneXml([unrelated]));
+  const result = await hebrewCandidates({
+    title: "Shutter Island",
+    author: "Dennis Lehane",
+    description: "Teddy Daniels investigates on the island.",
+  }, {
+    fetch: p.fetcher,
+    wikidataHebrew: bridge(null),
+    nliHebrew: bridge(null),
+  });
+  const found = result.candidates.find((c) => c.title === unrelated);
+  assert(found === undefined || found.rule === "G");
 });

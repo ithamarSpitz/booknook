@@ -408,7 +408,7 @@ export async function hebrewCandidates(
     }
   }
   for (const record of records) {
-    if (!record.original && nameSoundScore(record.title, [title]) >= 0.85) {
+    if (!record.original && nameSoundScore(record.title, [title]) >= 0.7) {
       add({ title: record.title, author: record.author || null, rule: "B" });
     }
   }
