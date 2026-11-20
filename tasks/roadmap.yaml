@@ -1144,3 +1144,20 @@ sprints:
         - S27-T2
         - S27-T3
         - S27-T5
+  S28-nli-main-title:
+    name: NLI Hebrew-title match also against the 245 main title and Hebrew 246 titles
+    tasks:
+      S28-T1:
+        file: tasks/sprint-28-nli-main-title/01-contract.md
+        stage: 1
+        depends_on: []
+      S28-T2:
+        file: tasks/sprint-28-nli-main-title/02-nli-main-title.md
+        stage: 2
+        depends_on:
+        - S28-T1
+      S28-T3:
+        file: tasks/sprint-28-nli-main-title/03-docs.md
+        stage: 3
+        depends_on:
+        - S28-T2
