@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fetchSimaniaPayload, matchHebrewBook, searchBooks, searchByAuthor, simaniaIdOf } from "../../public/js/simania.js";
+import { fetchSimaniaPayload, matchHebrewBook, normalize, searchBooks, searchByAuthor, similarity, simaniaIdOf, stripHebrewPoints } from "../../public/js/simania.js";
 import { applyLocalizedRecommendation, localizeRecommendations } from "../../public/js/recs.js";
 
 /** Fake Simania MCP endpoint answering each tool from a table, in SSE framing. */
@@ -17,6 +17,14 @@ function fakeFetch(answers, calls = []) {
 }
 
 describe("browser Simania client", () => {
+  it("normalizes Hebrew points and maqaf without changing Latin accent handling", () => {
+    assert.equal(similarity("אינטרמצו", "אִינְטֶרְמֶצּוֹ"), 1);
+    assert.equal(normalize("אִינְטֶרְמֶצּוֹ"), normalize("אינטרמצו"));
+    assert.equal(normalize("בית־ספר"), "בית ספר");
+    assert.equal(stripHebrewPoints("שָׁלוֹם"), "שלום");
+    assert.equal(normalize("Café"), "cafe");
+  });
+
   it("searches books_search with limit 8 and unwraps the books envelope", async () => {
     const calls = [];
     const books = await searchBooks(" הנסיך ", 8, fakeFetch({ books_search: { books: [{ id: 5, title: "הנסיך הקטן" }] } }, calls));

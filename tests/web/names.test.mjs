@@ -44,6 +44,16 @@ const OMITTED_MIDDLE_NAME = [
   ["פיליפ דיק", "Philip K. Dick"],
 ];
 
+test("Hebrew points do not change the Sally Rooney sound score", () => {
+  const unpointed = nameSoundScore("סאלי רוני", ["Sally Rooney"]);
+  assert.equal(nameSoundScore("סָאלִי רוּנִי", ["Sally Rooney"]), unpointed);
+  assert.ok(unpointed >= 0.8, `סאלי רוני / Sally Rooney scored ${unpointed}`);
+});
+
+test("an existing unpointed score is unchanged", () => {
+  assert.equal(nameSoundScore("ג'ו היל", ["Joe Hill"]), 1);
+});
+
 for (const [hebrew, latin] of SAME_PERSON) {
   test(`S21 same person scores at least 0.6: ${latin}`, () => {
     const score = nameSoundScore(hebrew, [latin]);
