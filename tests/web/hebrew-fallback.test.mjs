@@ -41,6 +41,22 @@ test("author guard checks every English author", () => {
   );
 });
 
+test("author guard never rejects without a non-empty English author", () => {
+  assert.equal(authorGuardRejects("רוברט מ. פירסיג", [], ""), false);
+  assert.equal(authorGuardRejects("רוברט מ. פירסיג", [""], ""), false);
+});
+
+test("author guard never rejects a Hebrew-original book", () => {
+  assert.equal(
+    authorGuardRejects(
+      "גלית דיסטל אטבריאן",
+      ["גלית דיסטל אטבריאן"],
+      "",
+    ),
+    false,
+  );
+});
+
 test("mainTitle removes edition labels and subtitles", () => {
   assert.equal(mainTitle("הימנון ללייבוביץ [מהדורת 2003]"), "הימנון ללייבוביץ");
   assert.equal(mainTitle("לקסיקון : כשמילים יכולות להרוג"), "לקסיקון");

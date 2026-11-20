@@ -12,9 +12,17 @@ export function authorGuardRejects(
   englishAuthors,
   hebrewAuthor,
 ) {
+  const nonEmptyEnglishAuthors = englishAuthors.filter((author) =>
+    String(author ?? "").trim() !== ""
+  );
+  if (nonEmptyEnglishAuthors.length === 0) return false;
+  if (nonEmptyEnglishAuthors.every((author) => /[א-ת]/u.test(author))) {
+    return false;
+  }
+
   const candidate = String(simaniaAuthor ?? "");
   if (!/[א-ת]/u.test(candidate)) return false;
-  if (nameSoundScore(candidate, englishAuthors) >= 0.3) return false;
+  if (nameSoundScore(candidate, nonEmptyEnglishAuthors) >= 0.3) return false;
 
   const bridge = String(hebrewAuthor ?? "").trim();
   return bridge === "" || similarity(bridge, candidate) < 0.5;

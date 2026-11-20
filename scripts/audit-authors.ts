@@ -21,8 +21,11 @@ export interface AuthorAuditOutput {
   totals: {
     checked: number;
     rejected: number;
+    scope: AuthorAuditScope;
   };
 }
+
+export type AuthorAuditScope = "all" | "used";
 
 type SoundScore = (hebrewName: string, latinNames: string[]) => number;
 
@@ -32,8 +35,15 @@ export function authorRowIsRejected(
   soundScore: SoundScore = nameSoundScore,
 ): boolean {
   const author = row.author ?? "";
+  const nonEmptyEnglishAuthors = row.original_authors.filter((name) =>
+    String(name ?? "").trim() !== ""
+  );
+  if (nonEmptyEnglishAuthors.length === 0) return false;
+  if (nonEmptyEnglishAuthors.every((name) => /[א-ת]/u.test(name))) {
+    return false;
+  }
   return /[א-ת]/u.test(author) &&
-    soundScore(author, row.original_authors) < 0.3;
+    soundScore(author, nonEmptyEnglishAuthors) < 0.3;
 }
 
 /** Filter fixture or database rows using the exact guard applied by the audit. */
@@ -48,6 +58,7 @@ export function filterRejectedAuthorRows(
 export function buildAuditOutput(
   rows: AuthorAuditRow[],
   soundScore: SoundScore = nameSoundScore,
+  scope: AuthorAuditScope = "used",
 ): AuthorAuditOutput {
   const rejected = filterRejectedAuthorRows(rows, soundScore);
   return {
@@ -58,23 +69,15 @@ export function buildAuditOutput(
     totals: {
       checked: rows.length,
       rejected: rejected.length,
+      scope,
     },
   };
 }
 
-export function authorAuditRows(sql: Sql): Promise<AuthorAuditRow[]> {
-  return sql<AuthorAuditRow[]>`
-    select
-      e.simania_id,
-      e.title,
-      e.author,
-      e.resolve_status::text as resolve_status,
-      w.hardcover_id,
-      w.original_title,
-      w.original_authors
-    from public.editions as e
-    inner join public.works as w on w.id = e.work_id
-    where e.simania_id > 0
+/** Build the read-only audit query for the requested catalog scope. */
+export function authorAuditQuery(scope: AuthorAuditScope = "used"): string {
+  const readerUseCondition = scope === "used"
+    ? `
       and (
         exists (
           select 1
@@ -93,16 +96,43 @@ export function authorAuditRows(sql: Sql): Promise<AuthorAuditRow[]> {
           from public.genre_recommendations as g
           where g.work_id = w.id
         )
-      )
+      )`
+    : "";
+
+  return `
+    select
+      e.simania_id,
+      e.title,
+      e.author,
+      e.resolve_status::text as resolve_status,
+      w.hardcover_id,
+      w.original_title,
+      w.original_authors
+    from public.editions as e
+    inner join public.works as w on w.id = e.work_id
+    where e.simania_id > 0
+      ${readerUseCondition}
     order by e.simania_id
   `;
+}
+
+export function authorAuditRows(
+  sql: Sql,
+  scope: AuthorAuditScope = "used",
+): Promise<AuthorAuditRow[]> {
+  return sql.unsafe<AuthorAuditRow[]>(authorAuditQuery(scope));
 }
 
 async function main(): Promise<void> {
   let sql: Sql | undefined;
   try {
+    const scope: AuthorAuditScope = Deno.args.includes("--all") ? "all" : "used";
     sql = await openProdDb({ readOnly: true });
-    const output = buildAuditOutput(await authorAuditRows(sql));
+    const output = buildAuditOutput(
+      await authorAuditRows(sql, scope),
+      nameSoundScore,
+      scope,
+    );
     for (const line of output.lines) console.log(JSON.stringify(line));
     console.log(JSON.stringify({ totals: output.totals }));
   } finally {
