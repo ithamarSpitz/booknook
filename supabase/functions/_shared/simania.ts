@@ -1,4 +1,4 @@
-import { fetchTimeout, HttpError, normalize, similarity } from "./utils.ts";
+import { fetchTimeout, HttpError, normalize } from "./utils.ts";
 
 const SIMANIA = "https://simania.co.il/api/mcp";
 let requestId = 0;
@@ -163,22 +163,6 @@ export async function fetchEditionDetails(
     ),
     details_at: new Date().toISOString(),
   };
-}
-
-export async function matchHebrewBook(
-  title: string,
-  author = "",
-): Promise<SimaniaBook | null> {
-  let results = await searchBooks(`${title} ${author}`.trim(), 6);
-  if (!results.length) results = await searchBooks(title, 6);
-  const ranked = results.map((book) => ({
-    book,
-    score: similarity(title, book.title) * 3 +
-      (author ? similarity(author, book.author) * 2 : 0),
-  })).sort((a, b) => b.score - a.score);
-  return ranked[0] && similarity(title, ranked[0].book.title) >= 0.45
-    ? ranked[0].book
-    : null;
 }
 
 export function simaniaKey(book: SimaniaBook): string {
