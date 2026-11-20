@@ -1842,6 +1842,124 @@ describe("verifyTitleMatch", () => {
     assert.equal(calls, 0);
     assert.deepEqual(result, { simania_id: 7, resolve_status: "nli" });
   });
+
+  const donQuixoteRec = (source = "wikidata") => ({
+    work_id: "w",
+    author: "Miguel de Cervantes Saavedra, Roberto González Echevarría",
+    hebrew_author: null,
+    hebrew_hint: { source, title: "דון קישוט", author: "מיגל דה סרוואנטס" },
+  });
+  const donQuixoteBook = {
+    simania_id: 64376,
+    title: "דון קישוט איש למנשא",
+    author: "מיגל דה סרוואנטס",
+  };
+
+  it("accepts Don Quixote by author sound without a server call", async () => {
+    const calls = [];
+    const result = await verifyTitleMatch(donQuixoteRec(), donQuixoteBook, {
+      callFunction: async (...args) => calls.push(args),
+    });
+
+    assert.deepEqual(result, { simania_id: 64376, resolve_status: "wikidata" });
+    assert.deepEqual(calls, []);
+  });
+
+  it("keeps the NLI source for a sound-verified title match", async () => {
+    const calls = [];
+    const result = await verifyTitleMatch(donQuixoteRec("nli"), donQuixoteBook, {
+      callFunction: async (...args) => calls.push(args),
+    });
+
+    assert.deepEqual(result, { simania_id: 64376, resolve_status: "nli" });
+    assert.deepEqual(calls, []);
+  });
+
+  for (const [title, author, simaniaId] of [
+    ["Aurora", "דייוויד קופ", 1013521],
+    ["Shades of Grey", "אי. אל. ג'יימס", 1013522],
+  ]) {
+    it(`leaves ${title} unverified when the authors do not sound alike`, async () => {
+      const calls = [];
+      const result = await verifyTitleMatch(
+        {
+          work_id: "w",
+          author: title === "Aurora" ? "Kim Stanley Robinson" : "Jasper Fforde",
+          hebrew_author: null,
+          hebrew_hint: { source: "wikidata", title: "hint", author: null },
+        },
+        { simania_id: simaniaId, title: "matched title", author },
+        {
+          callFunction: async (...args) => {
+            calls.push(args);
+            return { simania_id: null };
+          },
+        },
+      );
+
+      assert.equal(result, null);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0][0], "match-by-author");
+    });
+  }
+
+  for (const author of [null, ""]) {
+    it(`uses match-by-author when the card author is ${author === null ? "null" : "empty"}`, async () => {
+      const calls = [];
+      const result = await verifyTitleMatch(
+        {
+          work_id: "w",
+          author,
+          hebrew_author: null,
+          hebrew_hint: { source: "wikidata", title: "hint", author: null },
+        },
+        donQuixoteBook,
+        {
+          callFunction: async (...args) => {
+            calls.push(args);
+            return { simania_id: null };
+          },
+        },
+      );
+
+      assert.equal(result, null);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0][0], "match-by-author");
+    });
+  }
+
+  it("links a sound-verified title match during recommendation localization", async () => {
+    const calls = [];
+    await localizeRecommendations([
+      {
+        ...donQuixoteRec(),
+        english_only: true,
+        simania_id: null,
+        title: "Don Quixote",
+      },
+    ], {
+      match: async () => donQuixoteBook,
+      fetchPayload: async () => ({
+        details: { title: donQuixoteBook.title, author: donQuixoteBook.author },
+        rating: null,
+      }),
+      callFunction: async (name, body) => {
+        calls.push([name, body]);
+        return {
+          simania_id: body.simania_id,
+          title: donQuixoteBook.title,
+          author: donQuixoteBook.author,
+          cover_url: null,
+        };
+      },
+      onLinked: () => {},
+      isCurrent: () => true,
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], "link-edition");
+    assert.equal(calls[0][1].simania_id, 64376);
+  });
 });
 
 function wilsonAuthor() {
