@@ -213,7 +213,13 @@ async function wikidataEnglishAuthorLookup(hebrewName: string): Promise<string |
 }
 
 type NliOriginal = { title: string; versoAuthor?: string };
-type NliRecord = { title: string; creators: string[]; originals: NliOriginal[] };
+type NliRecord = {
+  title: string;
+  mainTitle: string;
+  hebrewAlternateTitles: string[];
+  creators: string[];
+  originals: NliOriginal[];
+};
 
 function decodeXml(value: string): string {
   return value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
@@ -271,6 +277,11 @@ function parseNliRecords(xml: string): NliRecord[] {
       : [];
     return {
       title: marcFields(record, "245", ["a", "b", "n", "p"])[0] ?? "",
+      mainTitle: cleanVersoPart(marcFields(record, "245", ["a"])[0] ?? ""),
+      hebrewAlternateTitles: marcFields(record, "246", ["a"])
+        .filter((title) => /[\u0590-\u05ff]/.test(title))
+        .map(cleanVersoPart)
+        .filter(Boolean),
       creators: [...marcFields(record, "100", ["a", "d"]), ...marcFields(record, "700", ["a", "d"])],
       originals: [
         ...marcFields(record, "240", ["a", "n", "p"]).map((title) => ({ title })),
@@ -319,7 +330,11 @@ function cleanOriginal(value: string): string {
 
 function nliOriginalFromRecords(hebrewTitle: string, hebrewAuthor: string, records: NliRecord[]): Bridge | null {
   const ranked = records.map((record) => {
-    const titleScore = similarity(hebrewTitle, record.title);
+    const titleScore = Math.max(
+      similarity(hebrewTitle, record.title),
+      similarity(hebrewTitle, record.mainTitle),
+      ...record.hebrewAlternateTitles.map((title) => similarity(hebrewTitle, title)),
+    );
     const authorScore = hebrewAuthor ? Math.max(0, ...record.creators.map((creator) => similarity(hebrewAuthor, creator))) : 0;
     const original = record.originals
       .map((candidate) => ({ ...candidate, title: cleanOriginal(candidate.title) }))

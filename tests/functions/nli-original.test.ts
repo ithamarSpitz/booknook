@@ -221,6 +221,76 @@ Deno.test("nliOriginal ignores a parallel-title 246 field", async () => {
   }
 });
 
+Deno.test("nliOriginal scores the 245 main title without its subtitle", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(sruResponse(`<record>
+    <datafield tag="245"><subfield code="a">טואיצ'י שלי :</subfield><subfield code="b">הסיפור שטרם סופר /</subfield></datafield>
+    <datafield tag="041"><subfield code="a">heb</subfield><subfield code="h">eng</subfield></datafield>
+    <datafield tag="100"><subfield code="a">גייל, קווין פ'</subfield></datafield>
+    <datafield tag="240"><subfield code="a">Jungle - to the edge.</subfield><subfield code="l">Hebrew</subfield></datafield>
+  </record>`), { status: 200 }));
+  try {
+    assertEquals((await nliOriginal("טואיצ'י שלי", "קווין פ' גייל"))?.title, "Jungle - to the edge");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal scores a short 245 main title", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(sruResponse(`<record>
+    <datafield tag="245"><subfield code="a">מדהימות :</subfield><subfield code="b">[היופי הוא חיצוני בלבד] /</subfield></datafield>
+    <datafield tag="240"><subfield code="a">Flawless.</subfield></datafield>
+  </record>`), { status: 200 }));
+  try {
+    assertEquals((await nliOriginal("מדהימות"))?.title, "Flawless");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal scores a Hebrew 246 title", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(sruResponse(`<record>
+    <datafield tag="245"><subfield code="a">WILD :</subfield><subfield code="b">מסע רגלי לגילוי עצמי /</subfield></datafield>
+    <datafield tag="246"><subfield code="i">על המעטפת:</subfield><subfield code="a">הולכת רחוק</subfield></datafield>
+    <datafield tag="240"><subfield code="a">Wild.</subfield></datafield>
+  </record>`), { status: 200 }));
+  try {
+    assertEquals((await nliOriginal("הולכת רחוק"))?.title, "Wild");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal drops records when every Hebrew title form is below the threshold", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(sruResponse(`<record>
+    <datafield tag="245"><subfield code="a">כותרת אחרת :</subfield><subfield code="b">כותרת משנה /</subfield></datafield>
+    <datafield tag="246"><subfield code="a">שם חלופי אחר</subfield></datafield>
+    <datafield tag="240"><subfield code="a">Different title.</subfield></datafield>
+  </record>`), { status: 200 }));
+  try {
+    assertEquals(await nliOriginal("הספר המבוקש"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("nliOriginal does not score a Latin 246 title as a Hebrew title", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.resolve(new Response(sruResponse(`<record>
+    <datafield tag="245"><subfield code="a">כותרת אחרת /</subfield></datafield>
+    <datafield tag="246"><subfield code="a">Flawless /</subfield></datafield>
+    <datafield tag="240"><subfield code="a">Different title.</subfield></datafield>
+  </record>`), { status: 200 }));
+  try {
+    assertEquals(await nliOriginal("Flawless"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 Deno.test("nliHebrew finds a Hebrew record through its title page verso", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = () => Promise.resolve(new Response(
