@@ -1025,3 +1025,27 @@ sprints:
         depends_on:
         - S23-T2
         - S23-T3
+  S24-refresh-speed:
+    name: 'refresh:all runs books in parallel with one Simania throttle and skips
+      recently checked books'
+    tasks:
+      S24-T1:
+        file: tasks/sprint-24-refresh-speed/01-contract.md
+        stage: 1
+        depends_on: []
+      S24-T2:
+        file: tasks/sprint-24-refresh-speed/02-concurrency.md
+        stage: 2
+        depends_on:
+        - S24-T1
+      S24-T3:
+        file: tasks/sprint-24-refresh-speed/03-skip-cache.md
+        stage: 3
+        depends_on:
+        - S24-T2
+      S24-T4:
+        file: tasks/sprint-24-refresh-speed/04-docs.md
+        stage: 4
+        depends_on:
+        - S24-T2
+        - S24-T3
