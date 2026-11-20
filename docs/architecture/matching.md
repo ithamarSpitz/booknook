@@ -10,6 +10,8 @@ The current implementation in `supabase/functions/_shared/bridges.ts` and `siman
 4. Nothing accepted: `resolve_status = 'not_found'`, but only when every provider answered. If any provider request failed, keep `pending` so a later request retries.
 5. Record which step succeeded in `resolve_status` (`wikidata`, `nli`, `fuzzy`).
 
+Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared/fallback-match.ts`) against the Simania edition author. A rejected match is discarded and resolution falls through to the next path. A rejection is not a provider failure, so it does not keep the edition `pending`.
+
 ## Hardcover → Hebrew edition (localize)
 
 1. Wikidata Hebrew label for the Hardcover title and author (`wikidataHebrew`), then NLI (`nliHebrew`).
