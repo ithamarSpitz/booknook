@@ -159,7 +159,7 @@ export async function listBareEditionIds(
     select e.simania_id, e.title
     from public.editions as e
     where e.simania_id > 0
-      and e.details_at is null
+      and (e.details_at is null or e.resolve_status = 'pending')
       and e.simania_id in (
         select r.simania_id
         from public.recommendations as r
