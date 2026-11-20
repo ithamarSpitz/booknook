@@ -80,7 +80,7 @@ Deno.test("ensureEdition skips providers while details are fresh", async () => {
 });
 
 Deno.test("ensureResolved stores a Wikidata Hardcover match", async () => {
-  const current = edition() as EditionRow;
+  const current = edition({ author: "Author" }) as EditionRow;
   const db = new FakeDb({ editions: [current] });
   const hardcover: HardcoverBook = {
     id: 88,
@@ -124,6 +124,69 @@ Deno.test("ensureResolved falls back to NLI", async () => {
   });
   assertEquals(searched, ["NLI Original"]);
   assertEquals(result.resolve_status, "nli");
+});
+
+const bookBy = (id: number, title: string, ...names: string[]): HardcoverBook => ({
+  id,
+  title,
+  cached_contributors: names.map((name) => ({ author: { name } })),
+});
+
+Deno.test("ensureResolved drops a wrong-author match and uses the next path", async () => {
+  const current = edition({ title: "דברי", author: "לורי האלס אנדרסון" }) as EditionRow;
+  const db = new FakeDb({ editions: [current] });
+  const result = await ensureResolved(db, current, {
+    now: () => NOW,
+    wikidataOriginal: async () => ({ title: "Dream of the Red Chamber", author: "Cao Xueqin", source: "Wikidata" }),
+    nliOriginal: async () => ({ title: "Speak", author: "Laurie Halse Anderson", source: "NLI" }),
+    findHardcoverBook: async (title) =>
+      title === "Speak"
+        ? bookBy(2, "Speak", "Laurie Halse Anderson")
+        : bookBy(1, "Dream of the Red Chamber", "Cao Xueqin"),
+  });
+  assertEquals(result.resolve_status, "nli");
+  assertEquals(db.tables.works.length, 1);
+  assertEquals(db.tables.works[0].hardcover_id, 2);
+  assertEquals(result.work_id, "work-1");
+});
+
+Deno.test("ensureResolved stores not_found when every path is rejected", async () => {
+  const current = edition({ title: "דברי", author: "לורי האלס אנדרסון" }) as EditionRow;
+  const db = new FakeDb({ editions: [current] });
+  const result = await ensureResolved(db, current, {
+    now: () => NOW,
+    wikidataOriginal: async () => ({ title: "Dream of the Red Chamber", author: "Cao Xueqin", source: "Wikidata" }),
+    nliOriginal: async () => ({ title: "Other", author: "Cao Xueqin", source: "NLI" }),
+    findHardcoverBook: async () => bookBy(1, "Dream of the Red Chamber", "Cao Xueqin"),
+  });
+  assertEquals(result.resolve_status, "not_found");
+  assertEquals(result.work_id, null);
+  assertEquals((db.tables.works ?? []).length, 0);
+});
+
+Deno.test("ensureResolved keeps a right-author match", async () => {
+  const current = edition({ title: "NOS4A2", author: "ג'ו היל" }) as EditionRow;
+  const db = new FakeDb({ editions: [current] });
+  const result = await ensureResolved(db, current, {
+    now: () => NOW,
+    wikidataOriginal: async () => ({ title: "NOS4A2", author: "Joe Hill", source: "Wikidata" }),
+    nliOriginal: noBridge,
+    findHardcoverBook: async () => bookBy(3, "NOS4A2", "Joe Hill"),
+  });
+  assertEquals(result.resolve_status, "wikidata");
+  assertEquals(result.work_id, "work-1");
+});
+
+Deno.test("ensureResolved does not reject a match with no contributors", async () => {
+  const current = edition({ title: "דברי", author: "לורי האלס אנדרסון" }) as EditionRow;
+  const db = new FakeDb({ editions: [current] });
+  const result = await ensureResolved(db, current, {
+    now: () => NOW,
+    wikidataOriginal: async () => ({ title: "Speak", author: "", source: "Wikidata" }),
+    nliOriginal: noBridge,
+    findHardcoverBook: async () => bookBy(4, "Speak"),
+  });
+  assertEquals(result.resolve_status, "wikidata");
 });
 
 Deno.test("ensureResolved keeps a recent not_found result cached", async () => {

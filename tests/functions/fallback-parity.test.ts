@@ -1,10 +1,12 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  authorGuardRejects as browserAuthorGuardRejects,
   mainTitle as browserMainTitle,
   titleMatch as browserTitleMatch,
 } from "../../public/js/hebrew-fallback.js";
 import { nameSoundScore as browserNameSoundScore } from "../../public/js/names.js";
 import {
+  authorGuardRejects as serverAuthorGuardRejects,
   mainTitle as serverMainTitle,
   titleMatch as serverTitleMatch,
 } from "../../supabase/functions/_shared/fallback-match.ts";
@@ -47,6 +49,25 @@ const TITLE_CASES: Array<[string, string]> = [
   ["מחר ועוד מחר ועוד מחר [עטיפה חדשה]", "מחר ועוד מחר ועוד מחר"],
   ["עין החתול [מהדורת 2011]", "עין החתול"],
 ];
+
+const GUARD_CASES: Array<[string, string[], string, boolean]> = [
+  ["וויליאם פיטר בלאטי", ["Kazue Kato"], "", true],
+  ["ג'ו היל", ["Joe Hill"], "", false],
+  ["", ["Joe Hill"], "", false],
+  ["Joe Hill", ["Kazue Kato"], "", false],
+  ["וויליאם פיטר בלאטי", ["Kazue Kato"], "וויליאם פיטר בלאטי", false],
+  ["ג'ו היל", ["Kazue Kato", "Joe Hill"], "", false],
+  ["רוברט מ. פירסיג", [], "", false],
+  ["רוברט מ. פירסיג", [""], "", false],
+  ["גלית דיסטל אטבריאן", ["גלית דיסטל אטבריאן"], "", false],
+];
+
+Deno.test("server author guard matches the browser cases", () => {
+  for (const [simania, english, hebrew, expected] of GUARD_CASES) {
+    assertEquals(serverAuthorGuardRejects(simania, english, hebrew), expected, simania);
+    assertEquals(browserAuthorGuardRejects(simania, english, hebrew), expected, simania);
+  }
+});
 
 Deno.test("browser and server fallback helpers stay in parity", () => {
   assertEquals(NAME_CASES.length + TITLE_CASES.length >= 30, true);
