@@ -891,3 +891,42 @@ Deno.test("without skip-cache every English-only book is checked", async () => {
   assertEquals(localized, 2);
   assertEquals(JSON.parse(logs.at(-1)!).skipped, 0);
 });
+
+Deno.test("listBareEditionIds query includes pending editions once", async () => {
+  const { listBareEditionIds } = await import("../../scripts/refresh-all.ts");
+  let text = "";
+  const sql = ((strings: TemplateStringsArray) => {
+    text = strings.join("?");
+    return Promise.resolve([{ simania_id: "7", title: "pending" }]);
+  }) as unknown as Sql;
+  const rows = await listBareEditionIds(sql, "reader");
+  assertStringIncludes(text, "e.details_at is null");
+  assertStringIncludes(text, "e.resolve_status = 'pending'");
+  assertStringIncludes(text, "from public.editions as e");
+  assertEquals(text.includes("join"), false);
+  assertEquals(rows, [{ simania_id: 7, title: "pending" }]);
+});
+
+Deno.test("pending edition with details gets one book-details call", async () => {
+  const db = fakeSql();
+  const calls: unknown[] = [];
+  await refreshReader({
+    keys,
+    sql: db.sql,
+    readerToken: async () => "token",
+    callAs: async (_keys, _token, name, body) => {
+      if (name === "recommendations") return { recommendations: [] };
+      if (name === "book-details") calls.push(body);
+      return {};
+    },
+    fetchSimaniaPayload: async () => ({ details: {}, rating: null }),
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    localizeRecommendations: async () => {},
+    listBareEditionIds: async () => [{ simania_id: 55, title: "pending" }],
+    sleep: async () => {},
+    log: () => {},
+  }, { id: "reader", email: "reader@example.test" });
+  assertEquals(calls.length, 1);
+  assertEquals((calls[0] as { simania_id: number }).simania_id, 55);
+});
