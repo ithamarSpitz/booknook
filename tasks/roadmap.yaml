@@ -1161,3 +1161,21 @@ sprints:
         stage: 3
         depends_on:
         - S28-T2
+  S29-match-rules:
+    name: Simania match word-subset boost, label tie-break, title-only search for one-word hints;
+      replay guards prod links
+    tasks:
+      S29-T1:
+        file: tasks/sprint-29-match-rules/01-contract.md
+        stage: 1
+        depends_on: []
+      S29-T2:
+        file: tasks/sprint-29-match-rules/02-match-rules.md
+        stage: 2
+        depends_on:
+        - S29-T1
+      S29-T3:
+        file: tasks/sprint-29-match-rules/03-docs.md
+        stage: 3
+        depends_on:
+        - S29-T2
