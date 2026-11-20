@@ -1179,3 +1179,8 @@ sprints:
         stage: 3
         depends_on:
         - S29-T2
+      S29-T4:
+        file: tasks/sprint-29-match-rules/04-remove-server-match.md
+        stage: 4
+        depends_on:
+        - S29-T3
