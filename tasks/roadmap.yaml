@@ -1109,3 +1109,38 @@ sprints:
         - S26-T2
         - S26-T3
         - S26-T4
+  S27-nli-verso:
+    name: NLI title page verso bridge for translations; Hardcover daily budget check
+      before operator runs
+    tasks:
+      S27-T1:
+        file: tasks/sprint-27-nli-verso/01-contract.md
+        stage: 1
+        depends_on: []
+      S27-T2:
+        file: tasks/sprint-27-nli-verso/02-nli-verso.md
+        stage: 2
+        depends_on:
+        - S27-T1
+      S27-T3:
+        file: tasks/sprint-27-nli-verso/03-verso-author-hint.md
+        stage: 3
+        depends_on:
+        - S27-T2
+      S27-T4:
+        file: tasks/sprint-27-nli-verso/04-hardcover-budget-lib.md
+        stage: 2
+        depends_on:
+        - S27-T1
+      S27-T5:
+        file: tasks/sprint-27-nli-verso/05-budget-wiring.md
+        stage: 3
+        depends_on:
+        - S27-T4
+      S27-T6:
+        file: tasks/sprint-27-nli-verso/06-docs.md
+        stage: 4
+        depends_on:
+        - S27-T2
+        - S27-T3
+        - S27-T5
