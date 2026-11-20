@@ -16,7 +16,6 @@ context:
   - architecture.testing
 environment: null
 verification:
-  - node_modules/.bin/deno check scripts/refresh-all.ts
   - npm run test:functions
 ---
 
@@ -51,4 +50,4 @@ Add to `tests/functions/refresh-all.test.ts`, with in-memory cache deps and a fa
 
 # Acceptance criteria
 
-1. The behavior above; both verification commands pass.
+1. The behavior above; `npm run test:functions` passes (it type-checks `scripts/refresh-all.ts` through the test import).
