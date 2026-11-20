@@ -27,6 +27,127 @@ const hardcover: HardcoverBook = {
   cached_similar_book_ids: [],
 };
 
+Deno.test("NLI Hardcover match uses verso author before Wikidata", async () => {
+  const resolving = edition({
+    simania_id: 1530,
+    title: "סודות",
+    author: "ווילסון, ג'קלין",
+  }) as EditionRow;
+  const db = new FakeDb({ editions: [resolving] });
+
+  const calls: { title: string; author: string | null }[] = [];
+  let wikidataAuthorCalls = 0;
+  await ensureResolved(db, resolving, {
+    now: () => NOW,
+    wikidataOriginal: noBridge,
+    nliOriginal: async () => ({
+      title: "Secrets",
+      author: "ווילסון, ג'קלין",
+      versoAuthor: "Jacqueline Wilson",
+      source: "NLI",
+    }),
+    wikidataEnglishAuthor: async () => {
+      wikidataAuthorCalls += 1;
+      return "Wrong Author";
+    },
+    findHardcoverBook: async (title, author) => {
+      calls.push({ title, author: author ?? null });
+      return hardcover;
+    },
+  });
+
+  assertEquals(calls, [{ title: "Secrets", author: "Jacqueline Wilson" }]);
+  assertEquals(wikidataAuthorCalls, 0);
+});
+
+Deno.test("NLI Hardcover match prefers catalog hint over verso author", async () => {
+  const resolving = edition({
+    simania_id: 1530,
+    title: "סודות",
+    author: "ווילסון, ג'קלין",
+  }) as EditionRow;
+  const linked = edition({
+    simania_id: 1529,
+    title: "מסיבת פיג'מות",
+    author: "ווילסון, ג'קלין",
+    work_id: "work-wilson",
+    resolve_status: "nli",
+    resolved_at: "2026-10-20T10:00:00.000Z",
+  });
+  const db = new FakeDb({
+    editions: [linked, resolving],
+    works: [{
+      id: "work-wilson",
+      hardcover_id: 100,
+      original_title: "Sleepovers",
+      original_authors: ["Catalog Jacqueline Wilson"],
+      similar_ids: [],
+      tags: {},
+      hardcover_cover_url: null,
+      refreshed_at: null,
+    }],
+  });
+
+  const calls: { title: string; author: string | null }[] = [];
+  await ensureResolved(db, resolving, {
+    now: () => NOW,
+    wikidataOriginal: noBridge,
+    nliOriginal: async () => ({
+      title: "Secrets",
+      author: "ווילסון, ג'קלין",
+      versoAuthor: "Jacqueline Wilson",
+      source: "NLI",
+    }),
+    wikidataEnglishAuthor: async () => {
+      throw new Error(
+        "wikidataEnglishAuthor should not run when catalog hint exists",
+      );
+    },
+    findHardcoverBook: async (title, author) => {
+      calls.push({ title, author: author ?? null });
+      return hardcover;
+    },
+  });
+
+  assertEquals(calls, [{
+    title: "Secrets",
+    author: "Catalog Jacqueline Wilson",
+  }]);
+});
+
+Deno.test("NLI Hardcover hint order is unchanged without verso author", async () => {
+  const resolving = edition({
+    simania_id: 5005,
+    title: "כיבוי אורות",
+    author: "דיוויד קופ",
+  }) as EditionRow;
+  const db = new FakeDb({ editions: [resolving] });
+
+  const wikidataAuthorCalls: string[] = [];
+  const calls: { title: string; author: string | null }[] = [];
+  await ensureResolved(db, resolving, {
+    now: () => NOW,
+    wikidataOriginal: noBridge,
+    nliOriginal: async () => AURORA_NLI,
+    wikidataEnglishAuthor: async (name) => {
+      wikidataAuthorCalls.push(name);
+      return "David Koepp";
+    },
+    findHardcoverBook: async (title, author) => {
+      calls.push({ title, author: author ?? null });
+      return {
+        id: 559469,
+        title: "Aurora",
+        cached_contributors: [{ author: { name: "David Koepp" } }],
+        cached_similar_book_ids: [],
+      };
+    },
+  });
+
+  assertEquals(wikidataAuthorCalls, ["דיוויד קופ"]);
+  assertEquals(calls, [{ title: "Aurora", author: "David Koepp" }]);
+});
+
 Deno.test("NLI Hardcover match uses English author hint from a linked edition", async () => {
   const resolving = edition({
     simania_id: 1001,
