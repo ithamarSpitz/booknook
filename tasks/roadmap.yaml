@@ -1079,3 +1079,33 @@ sprints:
         - S25-T2
         - S25-T3
         - S25-T4
+  S26-requeue-labels:
+    name: matchTitle strips edition labels; requeue not_found editions; refresh resolves
+      pending editions
+    tasks:
+      S26-T1:
+        file: tasks/sprint-26-requeue-labels/01-contract.md
+        stage: 1
+        depends_on: []
+      S26-T2:
+        file: tasks/sprint-26-requeue-labels/02-edition-labels.md
+        stage: 2
+        depends_on:
+        - S26-T1
+      S26-T3:
+        file: tasks/sprint-26-requeue-labels/03-refresh-pending.md
+        stage: 2
+        depends_on:
+        - S26-T1
+      S26-T4:
+        file: tasks/sprint-26-requeue-labels/04-requeue-script.md
+        stage: 2
+        depends_on:
+        - S26-T1
+      S26-T5:
+        file: tasks/sprint-26-requeue-labels/05-docs.md
+        stage: 3
+        depends_on:
+        - S26-T2
+        - S26-T3
+        - S26-T4
