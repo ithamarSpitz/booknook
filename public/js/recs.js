@@ -16,6 +16,7 @@ import {
   soundAgrees,
   titleMatch,
 } from "./hebrew-fallback.js";
+import { nameSoundScore } from "./names.js";
 import { notifyRecsInputsChanged, notifyShelvesChanged } from "./events.js";
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
@@ -343,10 +344,11 @@ export async function localizeFallback(rec, deps) {
 /**
  * @param {{
  *   work_id: string,
+ *   author?: string|null,
  *   hebrew_author?: string|null,
  *   hebrew_hint?: { source?: string }|null,
  * }} rec
- * @param {{ id?: number|string, bookId?: number|string, title: string, author?: string }} book
+ * @param {{ id?: number|string, bookId?: number|string, simania_id?: number|string, title: string, author?: string }} book
  * @param {{
  *   callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>,
  *   similarity?: typeof similarity,
@@ -355,11 +357,21 @@ export async function localizeFallback(rec, deps) {
  */
 export async function verifyTitleMatch(rec, book, deps) {
   const sim = deps.similarity ?? similarity;
-  const simaniaId = simaniaIdOf(book);
-  if (simaniaId == null) return null;
+  const rawSimaniaId = simaniaIdOf(book) ?? Number(book?.simania_id);
+  if (!Number.isSafeInteger(rawSimaniaId) || rawSimaniaId <= 0) return null;
+  const simaniaId = rawSimaniaId;
 
   const hebrewAuthor = rec.hebrew_author;
   if (hebrewAuthor && sim(hebrewAuthor, book.author ?? "") >= 0.6) {
+    const resolve_status = rec.hebrew_hint?.source === "nli" ? "nli" : "wikidata";
+    return { simania_id: simaniaId, resolve_status };
+  }
+
+  const englishAuthors = String(rec.author ?? "")
+    .split(",")
+    .map((author) => author.trim())
+    .filter(Boolean);
+  if (englishAuthors.length && nameSoundScore(book.author ?? "", englishAuthors) >= 0.8) {
     const resolve_status = rec.hebrew_hint?.source === "nli" ? "nli" : "wikidata";
     return { simania_id: simaniaId, resolve_status };
   }
