@@ -7,9 +7,14 @@ const SIMANIA = "https://simania.co.il/api/mcp";
 const TIMEOUT_MS = 12000;
 let requestId = 0;
 
+/** Remove Hebrew points and cantillation marks; treat maqaf as a word break. */
+export function stripHebrewPoints(value) {
+  return String(value ?? "").replace(/[\u0591-\u05BD\u05BF-\u05C7]/g, "").replace(/\u05BE/g, " ");
+}
+
 /** Same normalization and word-set Dice as supabase/functions/_shared/utils.ts. */
 export function normalize(value) {
-  return String(value ?? "")
+  return stripHebrewPoints(value)
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()

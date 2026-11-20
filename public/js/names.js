@@ -1,3 +1,5 @@
+import { stripHebrewPoints } from "./simania.js";
+
 const HEBREW_LETTERS = {
   "ב": "b",
   "ג": "g",
@@ -55,7 +57,7 @@ const SOUND_CLASSES = {
  * @returns {string}
  */
 function buildHebrewSkeleton(name, vowelAwareVav, latinX) {
-  const chars = Array.from(name ?? "");
+  const chars = Array.from(stripHebrewPoints(name));
   let out = "";
   for (let i = 0; i < chars.length; i++) {
     const ch = chars[i];
@@ -213,6 +215,7 @@ function firstNameMatches(hebrewName, latinWords) {
 
 /** @param {string} hebrewName @param {string[]} latinNames @returns {number} */
 export function nameSoundScore(hebrewName, latinNames) {
+  hebrewName = stripHebrewPoints(hebrewName);
   const fullName = /\s/u.test((hebrewName ?? "").trim());
   const skeletons = [hebrewSkeleton(hebrewName)];
   if (fullName) {
