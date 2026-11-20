@@ -44,8 +44,14 @@ export async function fetchTimeout(url: string, init: RequestInit = {}, timeoutM
   }
 }
 
+export function stripHebrewPoints(value: string): string {
+  return value.replace(/[\u0591-\u05c7]/g, (character) =>
+    character === "\u05be" ? " " : ""
+  );
+}
+
 export function normalize(value: unknown): string {
-  return String(value ?? "")
+  return stripHebrewPoints(String(value ?? ""))
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()

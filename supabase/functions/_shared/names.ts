@@ -1,6 +1,8 @@
 // Name sound score (docs/contract.md, "Catalog fallback for English-only
 // books"). Pure and deterministic: no network, no database.
 
+import { stripHebrewPoints } from "./utils.ts";
+
 const HEBREW_LETTERS: Record<string, string> = {
   "ב": "b",
   "ג": "g",
@@ -61,7 +63,7 @@ function buildHebrewSkeleton(
   vowelAwareVav: boolean,
   latinX: boolean,
 ): string {
-  const chars = Array.from(name ?? "");
+  const chars = Array.from(stripHebrewPoints(name ?? ""));
   let out = "";
   for (let i = 0; i < chars.length; i++) {
     const ch = chars[i];
@@ -228,7 +230,8 @@ export function nameSoundScore(
   hebrewName: string,
   latinNames: string[],
 ): number {
-  const fullName = /\s/u.test((hebrewName ?? "").trim());
+  hebrewName = stripHebrewPoints(hebrewName ?? "");
+  const fullName = /\s/u.test(hebrewName.trim());
   const skeletons = [hebrewSkeleton(hebrewName)];
   if (fullName) {
     skeletons.push(
