@@ -11,6 +11,10 @@ import {
   readerToken,
 } from "./lib/operator-session.ts";
 import { openProdDb } from "./lib/prod-db.ts";
+import { checkHardcoverBudget } from "./lib/hardcover-budget.ts";
+
+const USAGE =
+  "Usage: refresh:all [--apply] [--concurrency <1-8>] [--skip-cache <file>] [--min-hardcover <n>] [--force-hardcover]";
 
 export interface ReaderCounts {
   englishRecommendations: number;
@@ -560,6 +564,7 @@ export async function refreshReader(
 }
 
 interface MainDeps {
+  checkHardcoverBudget: typeof checkHardcoverBudget;
   projectKeys: typeof projectKeys;
   listReaders: typeof listReaders;
   readerToken: typeof readerToken;
@@ -580,6 +585,7 @@ interface MainDeps {
 }
 
 const defaults: MainDeps = {
+  checkHardcoverBudget,
   projectKeys,
   listReaders,
   readerToken,
@@ -613,6 +619,24 @@ export async function main(
   overrides: Partial<MainDeps> = {},
 ): Promise<number> {
   const deps = { ...defaults, ...overrides };
+  let minHardcover = 1500;
+  const minHardcoverIndexes = args.flatMap((arg, index) =>
+    arg === "--min-hardcover" ? [index] : []
+  );
+  if (minHardcoverIndexes.length > 0) {
+    const index = minHardcoverIndexes[0];
+    const value = args[index + 1];
+    if (
+      minHardcoverIndexes.length !== 1 ||
+      value === undefined ||
+      !/^\d+$/.test(value) ||
+      !Number.isSafeInteger(Number(value))
+    ) {
+      deps.error(USAGE);
+      return 2;
+    }
+    minHardcover = Number(value);
+  }
   let concurrency = 4;
   const concurrencyIndexes = args.flatMap((arg, index) =>
     arg === "--concurrency" ? [index] : []
@@ -649,6 +673,13 @@ export async function main(
     }
     cachePath = value;
   }
+
+  const budgetOkay = await deps.checkHardcoverBudget({
+    min: minHardcover,
+    force: args.includes("--force-hardcover"),
+    log: deps.log,
+  });
+  if (!budgetOkay) return 4;
 
   let skipCache: SkipCache | undefined;
   if (cachePath) {

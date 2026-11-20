@@ -25,6 +25,10 @@ import {
   retryWikidata429,
 } from "./lib/fallback-compare.ts";
 import type { HebrewCandidate } from "../supabase/functions/_shared/hebrew-candidates.ts";
+import { checkHardcoverBudget } from "./lib/hardcover-budget.ts";
+
+const USAGE =
+  "Usage: verify:fallback [--population|--replay-linked|--compare <before> <after>] [--min-hardcover <n>] [--force-hardcover]";
 
 type BookSpec = {
   title: string;
@@ -570,9 +574,11 @@ function decideWithRetries(book: PopulationBook) {
   );
 }
 
-async function runPopulation(): Promise<void> {
+async function runPopulation(
+  openDb: typeof openProdDb = openProdDb,
+): Promise<void> {
   loadOperatorEnv();
-  const sql = await openProdDb({ readOnly: true });
+  const sql = await openDb({ readOnly: true });
   try {
     const rows = await fallbackPopulationRows(
       sql,
@@ -644,9 +650,11 @@ async function runPopulation(): Promise<void> {
   }
 }
 
-async function runReplayLinked(): Promise<void> {
+async function runReplayLinked(
+  openDb: typeof openProdDb = openProdDb,
+): Promise<void> {
   loadOperatorEnv();
-  const sql = await openProdDb({ readOnly: true });
+  const sql = await openDb({ readOnly: true });
   try {
     const rows = await sql`
       select
@@ -782,7 +790,7 @@ function readKeepFile(path: string): Set<string> {
   );
 }
 
-function runCompare(args: string[]): never {
+function runCompare(args: string[]): number {
   const compareAt = args.indexOf("--compare");
   const beforePath = args[compareAt + 1];
   const afterPath = args[compareAt + 2];
@@ -791,13 +799,13 @@ function runCompare(args: string[]): never {
     afterPath.startsWith("--")
   ) {
     console.error("Usage: --compare <before> <after> [--keep <file>]");
-    Deno.exit(2);
+    return 2;
   }
   const keepAt = args.indexOf("--keep");
   const keepPath = keepAt >= 0 ? args[keepAt + 1] : undefined;
   if (keepAt >= 0 && (!keepPath || keepPath.startsWith("--"))) {
     console.error("Usage: --compare <before> <after> [--keep <file>]");
-    Deno.exit(2);
+    return 2;
   }
 
   try {
@@ -815,146 +823,192 @@ function runCompare(args: string[]): never {
       only_after: comparison.onlyAfter,
     }));
     console.log(JSON.stringify({ counts: comparison.counts }));
-    Deno.exit(comparison.exitCode);
+    return comparison.exitCode;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    Deno.exit(2);
+    return 2;
   }
 }
 
-if (Deno.args.includes("--compare")) runCompare(Deno.args);
-
-loadHardcoverApiKey();
-
-if (Deno.args.includes("--population")) {
-  try {
-    await runPopulation();
-    Deno.exit(0);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    Deno.exit(2);
+async function runCases(): Promise<number> {
+  loadHardcoverApiKey();
+  const results = new Map<string, ProbeResult>();
+  for (
+    const spec of [
+      ...EXPECTED_CASES,
+      ...GUARD_CASES,
+      ...NO_DECISION_CASES,
+      ...OPTIONAL_CASES,
+    ]
+  ) {
+    const key = caseKey(spec);
+    if (!results.has(key)) {
+      results.set(
+        key,
+        await retryWikidata429(() => probe(spec), () => wait(30_000)),
+      );
+    }
   }
-}
 
-if (Deno.args.includes("--replay-linked")) {
-  try {
-    await runReplayLinked();
-    Deno.exit(0);
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    Deno.exit(2);
-  }
-}
-
-const results = new Map<string, ProbeResult>();
-for (
-  const spec of [
-    ...EXPECTED_CASES,
-    ...GUARD_CASES,
-    ...NO_DECISION_CASES,
-    ...OPTIONAL_CASES,
-  ]
-) {
-  const key = caseKey(spec);
-  if (!results.has(key)) {
-    results.set(
-      key,
-      await retryWikidata429(() => probe(spec), () => wait(30_000)),
-    );
-  }
-}
-
-let failed = false;
-let exactExpectedLinks = 0;
-let toleratedProviderFailures = 0;
-for (const spec of EXPECTED_CASES) {
-  const result = results.get(caseKey(spec))!;
-  const expected = spec.expected.join(" or ");
-  if (result.decision != null && spec.expected.includes(result.decision)) {
-    exactExpectedLinks++;
-    console.log(
-      `PASS ${spec.title} Hardcover ${
-        displayId(result.hardcoverId)
-      } decided ${result.decision} expected ${expected}${
-        errorsSuffix(result.providerErrors)
-      }`,
-    );
-    continue;
-  }
-  if (result.decision != null) {
+  let failed = false;
+  let exactExpectedLinks = 0;
+  let toleratedProviderFailures = 0;
+  for (const spec of EXPECTED_CASES) {
+    const result = results.get(caseKey(spec))!;
+    const expected = spec.expected.join(" or ");
+    if (result.decision != null && spec.expected.includes(result.decision)) {
+      exactExpectedLinks++;
+      console.log(
+        `PASS ${spec.title} Hardcover ${
+          displayId(result.hardcoverId)
+        } decided ${result.decision} expected ${expected}${
+          errorsSuffix(result.providerErrors)
+        }`,
+      );
+      continue;
+    }
+    if (result.decision != null) {
+      failed = true;
+      console.log(
+        `FAIL ${spec.title} Hardcover ${
+          displayId(result.hardcoverId)
+        } decided ${result.decision} expected ${expected}${
+          errorsSuffix(result.providerErrors)
+        }`,
+      );
+      continue;
+    }
+    if (result.providerErrors.length && toleratedProviderFailures < 2) {
+      toleratedProviderFailures++;
+      console.log(
+        `PASS ${spec.title} Hardcover ${
+          displayId(result.hardcoverId)
+        } decided none expected ${expected}; tolerated provider failure ${toleratedProviderFailures}/2${
+          errorsSuffix(result.providerErrors)
+        }`,
+      );
+      continue;
+    }
     failed = true;
     console.log(
       `FAIL ${spec.title} Hardcover ${
         displayId(result.hardcoverId)
-      } decided ${result.decision} expected ${expected}${
+      } decided none expected ${expected}${
         errorsSuffix(result.providerErrors)
       }`,
     );
-    continue;
   }
-  if (result.providerErrors.length && toleratedProviderFailures < 2) {
-    toleratedProviderFailures++;
+
+  for (const spec of GUARD_CASES) {
+    const result = results.get(caseKey(spec))!;
+    const pass = result.decision !== spec.forbidden;
+    if (!pass) failed = true;
     console.log(
-      `PASS ${spec.title} Hardcover ${
-        displayId(result.hardcoverId)
-      } decided none expected ${expected}; tolerated provider failure ${toleratedProviderFailures}/2${
-        errorsSuffix(result.providerErrors)
-      }`,
+      `${
+        pass ? "PASS" : "FAIL"
+      } ${spec.title} must not decide ${spec.forbidden}; decided ${
+        displayId(result.decision)
+      }${errorsSuffix(result.providerErrors)}`,
     );
-    continue;
   }
-  failed = true;
-  console.log(
-    `FAIL ${spec.title} Hardcover ${
-      displayId(result.hardcoverId)
-    } decided none expected ${expected}${errorsSuffix(result.providerErrors)}`,
-  );
+
+  for (const spec of NO_DECISION_CASES) {
+    const result = results.get(caseKey(spec))!;
+    const pass = result.decision == null;
+    if (!pass) failed = true;
+    console.log(
+      `${pass ? "PASS" : "FAIL"} ${spec.title} must decide nothing; decided ${
+        displayId(result.decision)
+      }${errorsSuffix(result.providerErrors)}`,
+    );
+  }
+
+  for (const spec of OPTIONAL_CASES) {
+    const result = results.get(caseKey(spec))!;
+    const pass = result.decision == null || result.decision === spec.allowed;
+    if (!pass) failed = true;
+    console.log(
+      `${
+        pass ? "PASS" : "FAIL"
+      } ${spec.title} may decide none or ${spec.allowed}; decided ${
+        displayId(result.decision)
+      }${errorsSuffix(result.providerErrors)}`,
+    );
+  }
+
+  if (exactExpectedLinks < 20) {
+    failed = true;
+    console.log(
+      `FAIL expected-link total ${exactExpectedLinks}/22; at least 20 exact links are required`,
+    );
+  } else {
+    console.log(`PASS expected-link total ${exactExpectedLinks}/22`);
+  }
+
+  return failed ? 1 : 0;
 }
 
-for (const spec of GUARD_CASES) {
-  const result = results.get(caseKey(spec))!;
-  const pass = result.decision !== spec.forbidden;
-  if (!pass) failed = true;
-  console.log(
-    `${
-      pass ? "PASS" : "FAIL"
-    } ${spec.title} must not decide ${spec.forbidden}; decided ${
-      displayId(result.decision)
-    }${errorsSuffix(result.providerErrors)}`,
-  );
+interface MainDeps {
+  checkHardcoverBudget: typeof checkHardcoverBudget;
+  openProdDb: typeof openProdDb;
+  log: (line: string) => void;
+  error: (line: string) => void;
 }
 
-for (const spec of NO_DECISION_CASES) {
-  const result = results.get(caseKey(spec))!;
-  const pass = result.decision == null;
-  if (!pass) failed = true;
-  console.log(
-    `${pass ? "PASS" : "FAIL"} ${spec.title} must decide nothing; decided ${
-      displayId(result.decision)
-    }${errorsSuffix(result.providerErrors)}`,
+const defaults: MainDeps = {
+  checkHardcoverBudget,
+  openProdDb,
+  log: console.log,
+  error: console.error,
+};
+
+export async function main(
+  args: string[] = Deno.args,
+  overrides: Partial<MainDeps> = {},
+): Promise<number> {
+  const deps = { ...defaults, ...overrides };
+  let minHardcover = 1500;
+  const minIndexes = args.flatMap((arg, index) =>
+    arg === "--min-hardcover" ? [index] : []
   );
+  if (minIndexes.length > 0) {
+    const value = args[minIndexes[0] + 1];
+    if (
+      minIndexes.length !== 1 ||
+      value === undefined ||
+      !/^\d+$/.test(value) ||
+      !Number.isSafeInteger(Number(value))
+    ) {
+      deps.error(USAGE);
+      return 2;
+    }
+    minHardcover = Number(value);
+  }
+
+  if (args.includes("--compare")) return runCompare(args);
+
+  if (args.includes("--population") || args.includes("--replay-linked")) {
+    const budgetOkay = await deps.checkHardcoverBudget({
+      min: minHardcover,
+      force: args.includes("--force-hardcover"),
+      log: deps.log,
+    });
+    if (!budgetOkay) return 4;
+
+    try {
+      if (args.includes("--population")) {
+        await runPopulation(deps.openProdDb);
+      } else {
+        await runReplayLinked(deps.openProdDb);
+      }
+      return 0;
+    } catch (error) {
+      deps.error(error instanceof Error ? error.message : String(error));
+      return 2;
+    }
+  }
+
+  return await runCases();
 }
 
-for (const spec of OPTIONAL_CASES) {
-  const result = results.get(caseKey(spec))!;
-  const pass = result.decision == null || result.decision === spec.allowed;
-  if (!pass) failed = true;
-  console.log(
-    `${
-      pass ? "PASS" : "FAIL"
-    } ${spec.title} may decide none or ${spec.allowed}; decided ${
-      displayId(result.decision)
-    }${errorsSuffix(result.providerErrors)}`,
-  );
-}
-
-if (exactExpectedLinks < 20) {
-  failed = true;
-  console.log(
-    `FAIL expected-link total ${exactExpectedLinks}/22; at least 20 exact links are required`,
-  );
-} else {
-  console.log(`PASS expected-link total ${exactExpectedLinks}/22`);
-}
-
-Deno.exit(failed ? 1 : 0);
+if (import.meta.main) Deno.exit(await main());
