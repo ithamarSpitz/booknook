@@ -173,8 +173,45 @@ interface RefreshDeps {
   countReaderRows: typeof countReaderRows;
   listEnglishGenreRows: typeof listEnglishGenreRows;
   listBareEditionIds: typeof listBareEditionIds;
+  concurrency?: number;
+  simaniaThrottle?: () => Promise<void>;
   sleep: (milliseconds: number) => Promise<void>;
   log: (message: string) => void;
+}
+
+export function createSimaniaThrottle(
+  sleep: (milliseconds: number) => Promise<void>,
+): () => Promise<void> {
+  let started = false;
+  let tail = Promise.resolve();
+  return () => {
+    const turn = tail.then(async () => {
+      if (started) await sleep(1_000);
+      started = true;
+    });
+    tail = turn.catch(() => {});
+    return turn;
+  };
+}
+
+async function runPool<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const runWorker = async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      await worker(item);
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(concurrency, items.length) },
+      () => runWorker(),
+    ),
+  );
 }
 
 export class ReaderSessionError extends Error {
@@ -253,10 +290,11 @@ export async function refreshReader(
 
   const linkedWorks = new Set<string>();
   const fallbackLinkedWorks = new Set<string>();
-  let simaniaStarted = false;
+  const concurrency = deps.concurrency ?? 1;
+  const simaniaThrottle = deps.simaniaThrottle ??
+    createSimaniaThrottle(deps.sleep);
   const throttledFetch: FetchPayload = async (simaniaId, fetchImpl) => {
-    if (simaniaStarted) await deps.sleep(1_000);
-    simaniaStarted = true;
+    await simaniaThrottle();
     return await deps.fetchSimaniaPayload(simaniaId, fetchImpl);
   };
   const callFunction = (name: string, body: Record<string, unknown>) =>
@@ -285,62 +323,60 @@ export async function refreshReader(
     }));
   };
 
-  const localize = async (items: Record<string, unknown>[]) => {
-    for (const item of items) {
-      const title = typeof item.title === "string" ? item.title : "";
-      let observedFailures = 0;
-      const guardedCall = async (
-        name: string,
-        body: Record<string, unknown>,
-      ) => {
-        try {
-          const response = await callFunction(name, body);
-          if (
-            name === FUNCTIONS.LINK_EDITION &&
-            body.source === "nli_author" &&
-            typeof body.work_id === "string" &&
-            Number(record(response)?.simania_id) === Number(body.simania_id)
-          ) {
-            fallbackLinkedWorks.add(body.work_id);
-          }
-          return response;
-        } catch (error) {
-          observedFailures++;
-          reportFailure(title, "localize", name, error);
-          throw error;
-        }
-      };
-      const guardedFetch: FetchPayload = async (simaniaId, fetchImpl) => {
-        try {
-          return await throttledFetch(simaniaId, fetchImpl);
-        } catch (error) {
-          observedFailures++;
-          reportFailure(title, "localize", "simania", error);
-          throw error;
-        }
-      };
+  const localize = async (item: Record<string, unknown>) => {
+    const title = typeof item.title === "string" ? item.title : "";
+    let observedFailures = 0;
+    const guardedCall = async (
+      name: string,
+      body: Record<string, unknown>,
+    ) => {
       try {
-        await deps.localizeRecommendations([item] as never, {
-          callFunction: guardedCall,
-          onLinked,
-          isCurrent: () => true,
-          fetchPayload: guardedFetch,
-          concurrency: 1,
-        });
-      } catch (error) {
-        if (observedFailures === 0) {
-          observedFailures++;
-          reportFailure(title, "localize", "localizeRecommendations", error);
+        const response = await callFunction(name, body);
+        if (
+          name === FUNCTIONS.LINK_EDITION &&
+          body.source === "nli_author" &&
+          typeof body.work_id === "string" &&
+          Number(record(response)?.simania_id) === Number(body.simania_id)
+        ) {
+          fallbackLinkedWorks.add(body.work_id);
         }
+        return response;
+      } catch (error) {
+        observedFailures++;
+        reportFailure(title, "localize", name, error);
+        throw error;
       }
-      failed += observedFailures;
+    };
+    const guardedFetch: FetchPayload = async (simaniaId, fetchImpl) => {
+      try {
+        return await throttledFetch(simaniaId, fetchImpl);
+      } catch (error) {
+        observedFailures++;
+        reportFailure(title, "localize", "simania", error);
+        throw error;
+      }
+    };
+    try {
+      await deps.localizeRecommendations([item] as never, {
+        callFunction: guardedCall,
+        onLinked,
+        isCurrent: () => true,
+        fetchPayload: guardedFetch,
+        concurrency: 1,
+      });
+    } catch (error) {
+      if (observedFailures === 0) {
+        observedFailures++;
+        reportFailure(title, "localize", "localizeRecommendations", error);
+      }
     }
+    failed += observedFailures;
   };
 
   const localizableCards = recommendations.filter((item) =>
     item.english_only === true
   );
-  await localize(localizableCards);
+  await runPool(localizableCards, concurrency, localize);
 
   let genreRows: GenreRow[] = [];
   try {
@@ -348,22 +384,22 @@ export async function refreshReader(
   } catch {
     failed++;
   }
-  for (const row of genreRows) {
+  await runPool(genreRows, concurrency, async (row) => {
     try {
       const hint = record(
         await callFunction(FUNCTIONS.GENRE_HINT, { work_id: row.work_id }),
       );
-      await localize([{
+      await localize({
         ...row,
         can_add: true,
         hebrew_hint: hint?.hebrew_hint ?? null,
         hebrew_author: hint?.hebrew_author ?? null,
-      }]);
+      });
     } catch (error) {
       failed++;
       reportFailure(row.title, "genre-hint", FUNCTIONS.GENRE_HINT, error);
     }
-  }
+  });
 
   let editionsFilled = 0;
   let bareEditions: BareEdition[] = [];
@@ -449,6 +485,26 @@ export async function main(
   overrides: Partial<MainDeps> = {},
 ): Promise<number> {
   const deps = { ...defaults, ...overrides };
+  let concurrency = 4;
+  const concurrencyIndexes = args.flatMap((arg, index) =>
+    arg === "--concurrency" ? [index] : []
+  );
+  if (concurrencyIndexes.length > 0) {
+    const index = concurrencyIndexes[0];
+    const value = args[index + 1];
+    if (
+      concurrencyIndexes.length !== 1 ||
+      value === undefined ||
+      !/^[1-8]$/.test(value)
+    ) {
+      deps.error(
+        "Invalid --concurrency value; expected an integer from 1 to 8.",
+      );
+      return 2;
+    }
+    concurrency = Number(value);
+  }
+  const simaniaThrottle = createSimaniaThrottle(deps.sleep);
   let keys: ProjectKeys;
   try {
     keys = await deps.projectKeys();
@@ -484,7 +540,13 @@ export async function main(
 
     for (const reader of readers) {
       try {
-        await refreshReader({ ...deps, keys, sql }, reader);
+        await refreshReader({
+          ...deps,
+          keys,
+          sql,
+          concurrency,
+          simaniaThrottle,
+        }, reader);
       } catch (error) {
         if (error instanceof ReaderSessionError) {
           deps.error(error.message);

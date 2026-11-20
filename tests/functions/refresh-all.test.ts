@@ -418,3 +418,188 @@ Deno.test("summary reports before/after, links, fills, and failures from fakes",
   });
   assertEquals(JSON.parse(logs.at(-1)!), summary);
 });
+
+function stagger(index: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, index % 3));
+}
+
+function genreRow(workId: string) {
+  return {
+    work_id: workId,
+    hardcover_id: 1,
+    simania_id: null,
+    title: workId,
+    author: null,
+    cover_url: null,
+    english_only: true as const,
+    because: [],
+    because_titles: [],
+  };
+}
+
+Deno.test("concurrent localization has the same summary and link bodies", async () => {
+  const run = async (concurrency: number) => {
+    const db = fakeSql();
+    const linkBodies = new Set<string>();
+    const cards = Array.from({ length: 6 }, (_, index) => ({
+      work_id: `card-${index}`,
+      title: `card-${index}`,
+      english_only: true,
+    }));
+    const genres = Array.from(
+      { length: 6 },
+      (_, index) => genreRow(`genre-${index}`),
+    );
+    const summary = await refreshReader({
+      keys,
+      sql: db.sql,
+      concurrency,
+      readerToken: async () => "token",
+      callAs: async (_keys, _token, name, body) => {
+        if (name === "recommendations") return { recommendations: cards };
+        if (name === "genre-hint") {
+          const request = body as Record<string, unknown>;
+          await stagger(Number(String(request.work_id).at(-1)));
+          return {};
+        }
+        if (name === "link-edition") linkBodies.add(JSON.stringify(body));
+        return body;
+      },
+      fetchSimaniaPayload: async () => ({ details: {}, rating: null }),
+      localizeRecommendations: async (items, deps) => {
+        const workId = String(items[0]?.work_id);
+        const index = Number(workId.at(-1));
+        await stagger(2 - index % 3);
+        if (workId === "card-5") throw new Error("one failure");
+        if (index % 2 === 0) {
+          const body = {
+            work_id: workId,
+            simania_id: 100 + index,
+            source: "wikidata",
+          };
+          await deps.callFunction("link-edition", body);
+          deps.onLinked(workId, {
+            simania_id: 100 + index,
+            title: "linked",
+            author: null,
+            cover_url: null,
+          });
+        }
+      },
+      countReaderRows: async () => ({
+        englishRecommendations: 6,
+        englishGenres: 6,
+        bareEditions: 0,
+      }),
+      listEnglishGenreRows: async () => genres,
+      listBareEditionIds: async () => [],
+      sleep: async () => {},
+      log: () => {},
+    }, { id: "reader", email: "reader@example.test" });
+    return { summary, linkBodies };
+  };
+
+  const serial = await run(1);
+  const concurrent = await run(4);
+  assertEquals(concurrent.summary, serial.summary);
+  assertEquals(concurrent.linkBodies, serial.linkBodies);
+});
+
+Deno.test("localization worker pool never exceeds its configured size", async () => {
+  const db = fakeSql();
+  let active = 0;
+  let maxActive = 0;
+  const cards = Array.from({ length: 8 }, (_, index) => ({
+    work_id: `work-${index}`,
+    title: `work-${index}`,
+    english_only: true,
+  }));
+
+  await refreshReader({
+    keys,
+    sql: db.sql,
+    concurrency: 3,
+    readerToken: async () => "token",
+    callAs: async (_keys, _token, name) =>
+      name === "recommendations" ? { recommendations: cards } : {},
+    fetchSimaniaPayload: async () => ({ details: {}, rating: null }),
+    localizeRecommendations: async (items) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await stagger(Number(String(items[0]?.work_id).at(-1)));
+      active--;
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    listBareEditionIds: async () => [],
+    sleep: async () => {},
+    log: () => {},
+  }, { id: "reader", email: "reader@example.test" });
+
+  assertEquals(maxActive, 3);
+  assertEquals(active, 0);
+});
+
+Deno.test("one Simania throttle is shared across concurrent books and readers", async () => {
+  const db = fakeSql();
+  let clock = 0;
+  const starts: number[] = [];
+  const readers = [
+    { id: "reader-1", email: "a@example.test" },
+    { id: "reader-2", email: "b@example.test" },
+  ];
+  const cards = Array.from({ length: 4 }, (_, index) => ({
+    work_id: `work-${index}`,
+    title: `work-${index}`,
+    english_only: true,
+  }));
+
+  const code = await main(["--apply", "--concurrency", "4"], {
+    projectKeys: async () => keys,
+    listReaders: async () => readers,
+    openProdDb: async () => db.sql,
+    readerToken: async (_keys, email) => `token:${email}`,
+    callAs: async (_keys, _token, name) =>
+      name === "recommendations" ? { recommendations: cards } : {},
+    fetchSimaniaPayload: async () => {
+      starts.push(clock);
+      return { details: {}, rating: null };
+    },
+    localizeRecommendations: async (_items, deps) => {
+      await deps.fetchPayload!(1);
+    },
+    countReaderRows: async () => zeroCounts,
+    listEnglishGenreRows: async () => [],
+    listBareEditionIds: async (_sql, readerId) => [{
+      simania_id: readerId === "reader-1" ? 11 : 12,
+      title: "bare",
+    }],
+    sleep: async (milliseconds) => {
+      clock += milliseconds;
+    },
+    log: () => {},
+  });
+
+  assertEquals(code, 0);
+  assertEquals(starts.length, 10);
+  for (let index = 1; index < starts.length; index++) {
+    assertEquals(starts[index] - starts[index - 1] >= 1_000, true);
+  }
+});
+
+Deno.test("bad concurrency exits before any network or database call", async () => {
+  for (const value of ["0", "9", "x"]) {
+    let calls = 0;
+    const errors: string[] = [];
+    const code = await main(["--apply", "--concurrency", value], {
+      projectKeys: async () => {
+        calls++;
+        return keys;
+      },
+      error: (message) => errors.push(message),
+    });
+    assertEquals(code, 2);
+    assertEquals(calls, 0);
+    assertStringIncludes(errors[0], "--concurrency");
+  }
+});
