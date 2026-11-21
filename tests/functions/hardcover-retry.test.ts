@@ -18,7 +18,10 @@ function book(
   };
 }
 
-function stubHardcover(resultsByQuery: Record<string, HardcoverBook[]>) {
+function stubHardcover(
+  resultsByQuery: Record<string, HardcoverBook[]>,
+  resultsPayload: Record<string, unknown> = {},
+) {
   const originalFetch = globalThis.fetch;
   const allBooks = new Map(
     Object.values(resultsByQuery).flat().map((entry) => [entry.id, entry]),
@@ -30,7 +33,10 @@ function stubHardcover(resultsByQuery: Record<string, HardcoverBook[]>) {
       searchCount++;
       const text = query.match(/search\(query: "([^"]*)"/)?.[1] ?? "";
       const ids = (resultsByQuery[text] ?? []).map((entry) => entry.id);
-      return Promise.resolve(Response.json({ data: { search: { ids } } }));
+      const results = query.includes("ids results") ? resultsPayload[text] : undefined;
+      return Promise.resolve(
+        Response.json({ data: { search: { ids, ...(results ? { results } : {}) } } }),
+      );
     }
     if (query.includes("books(")) {
       const encodedIds = query.match(/id:\{_in:(\[[^\]]*\])\}/)?.[1] ?? "[]";
@@ -156,6 +162,60 @@ Deno.test("a first-pass hit is final when retry is enabled", async () => {
     );
     assertEquals(result?.id, 601);
     assertEquals(stub.searches(), 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+const ferranteTitle = "Storia di chi fugge e di chi resta";
+function ferranteStub(author: string, withResults: boolean) {
+  const hit = book(101133, "Those Who Leave and Those Who Stay", author, 500);
+  return stubHardcover(
+    {
+      [ferranteTitle]: [book(101133, "Those Who Leave and Those Who Stay", "Elena Ferrante", 500)],
+      [`${ferranteTitle} Elena Ferrante`]: [hit],
+    },
+    withResults
+      ? {
+        [`${ferranteTitle} Elena Ferrante`]: {
+          hits: [{ document: { id: "101133", alternative_titles: [ferranteTitle] } }],
+        },
+      }
+      : {},
+  );
+}
+
+Deno.test("alternative titles let the retry match Ferrante", async () => {
+  const stub = ferranteStub("Elena Ferrante", true);
+  try {
+    const result = await findHardcoverBook(ferranteTitle, "Elena Ferrante", {
+      retryWithAuthor: true,
+    });
+    assertEquals(result?.id, 101133);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test("retry without results has no alternative titles", async () => {
+  const stub = ferranteStub("Elena Ferrante", false);
+  try {
+    const result = await findHardcoverBook(ferranteTitle, "Elena Ferrante", {
+      retryWithAuthor: true,
+    });
+    assertEquals(result, null);
+  } finally {
+    stub.restore();
+  }
+});
+
+Deno.test("an alternative title still needs author evidence", async () => {
+  const stub = ferranteStub("Someone Else", true);
+  try {
+    const result = await findHardcoverBook(ferranteTitle, "Elena Ferrante", {
+      retryWithAuthor: true,
+    });
+    assertEquals(result, null);
   } finally {
     stub.restore();
   }
