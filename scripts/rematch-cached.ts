@@ -22,7 +22,9 @@ import {
 import {
   type AuthorStore,
   nameKey,
+  soundNames,
 } from "../supabase/functions/_shared/authors.ts";
+import { hebrewAuthorBySound } from "../supabase/functions/_shared/author-sound.ts";
 import { sqlAuthorStore } from "./lib/author-store.ts";
 import { defaultHebrewHint } from "../supabase/functions/recommendations/index.ts";
 import type { EditionRow } from "../supabase/functions/_shared/types.ts";
@@ -81,6 +83,7 @@ export interface RunDeps {
   ) => Promise<{ title: string; author?: string | null } | null>;
   matchHebrewBook: (title: string, author: string) => Promise<unknown>;
   searchBooks: RematchDeps["searchBooks"];
+  hebrewAuthorBySound: (englishName: string) => Promise<string | null>;
   fetchEditionDetails: (id: number) => Promise<Record<string, unknown>>;
   resolveMatch: (
     db: CatalogDb,
@@ -163,6 +166,8 @@ const runDefaults: RunDeps = {
   hebrewHint: (book) => defaultHebrewHint(book),
   matchHebrewBook: (title, author) => matchHebrewBook(title, author),
   searchBooks,
+  hebrewAuthorBySound: (englishName) =>
+    hebrewAuthorBySound(englishName, searchBooks),
   fetchEditionDetails,
   resolveMatch: (db, edition) => resolveMatch(db, edition),
   applyRepair: applyRepair as unknown as RunDeps["applyRepair"],
@@ -410,6 +415,8 @@ export async function main(
   overrides: Partial<RunDeps> = {},
 ): Promise<number> {
   const deps = { ...runDefaults, ...overrides };
+  deps.hebrewAuthorBySound = overrides.hebrewAuthorBySound ??
+    ((englishName) => hebrewAuthorBySound(englishName, deps.searchBooks));
   const options = parseArgs(args);
   if (!options) {
     deps.error(USAGE);
@@ -430,6 +437,14 @@ export async function main(
     const works = await deps.loadWorks(sql, options);
     const linkedSimaniaIds = await deps.loadLinkedSimaniaIds(sql);
     const store = deps.authorStore(sql);
+    const soundStore: AuthorStore = options.apply ? store : {
+      ...store,
+      create: () => Promise.resolve(crypto.randomUUID()),
+      addNames: () => Promise.resolve(),
+      merge: () => Promise.resolve(),
+      markWikidataChecked: () => Promise.resolve(),
+      markSoundChecked: () => Promise.resolve(),
+    };
 
     const knownHebrewNames = async (englishAuthors: string[]) => {
       const names: string[] = [];
@@ -543,7 +558,16 @@ export async function main(
               Number(x.source === "wikidata") - Number(y.source === "wikidata")
             )
             .map((row) => row.name);
-          return [...new Set([...stored, ...(wikidataNames.get(name) ?? [])])];
+          const knownNames = [
+            ...new Set([...stored, ...(wikidataNames.get(name) ?? [])]),
+          ];
+          if (knownNames.length > 0) return knownNames;
+          return await soundNames(
+            soundStore,
+            name,
+            (englishName) => deps.hebrewAuthorBySound(englishName),
+            deps.now,
+          );
         })();
       },
       searchBooks: deps.searchBooks,

@@ -69,6 +69,7 @@ function harness(over: Partial<RunDeps> = {}, file = "") {
     hebrewHint: forbidden as unknown as RunDeps["hebrewHint"],
     matchHebrewBook: forbidden as unknown as RunDeps["matchHebrewBook"],
     searchBooks: forbidden as unknown as RunDeps["searchBooks"],
+    hebrewAuthorBySound: () => Promise.resolve(null),
     resolveMatch: forbidden as unknown as RunDeps["resolveMatch"],
     fetchEditionDetails: (id) =>
       Promise.resolve({ simania_id: id, title: "רזה", author: "סטיבן קינג" }),
