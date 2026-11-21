@@ -140,6 +140,7 @@ export interface RunDeps {
   ) => Promise<RepairResult>;
   checkHardcoverBudget: typeof checkHardcoverBudget;
   now: () => Date;
+  sleep: (ms: number) => Promise<void>;
   log: (message: string) => void;
   error: (message: string) => void;
 }
@@ -151,6 +152,7 @@ const runDefaults: RunDeps = {
   applyRepair: applyRepair as unknown as RunDeps["applyRepair"],
   checkHardcoverBudget,
   now: () => new Date(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   log: console.log,
   error: console.error,
 };
@@ -222,20 +224,13 @@ export async function main(
     let relinks = 0;
     let unlinks = 0;
 
-    // Deliberately sequential: one provider request at a time.
-    for (const edition of editions) {
-      checked++;
-      const resolved = await deps.resolveMatch(db, edition);
-      if (resolved.failed) {
-        deps.log(JSON.stringify({
-          simania_id: edition.simania_id,
-          skipped: "provider_failure",
-        }));
-        continue;
-      }
+    const handle = (
+      edition: RecheckEdition,
+      resolved: Awaited<ReturnType<typeof resolveMatch>>,
+    ) => {
       const found = resolved.found;
       if (found) {
-        if (found.book.id === edition.work_hardcover_id) continue;
+        if (found.book.id === edition.work_hardcover_id) return;
         relinks++;
         deps.log(JSON.stringify({
           action: "relink",
@@ -281,10 +276,32 @@ export async function main(
           work_id: edition.work_id as string,
         });
       }
+    };
+
+    // Deliberately sequential: one provider request at a time.
+    const failedEditions: RecheckEdition[] = [];
+    for (const edition of editions) {
+      checked++;
+      const resolved = await deps.resolveMatch(db, edition);
+      if (resolved.failed) failedEditions.push(edition);
+      else handle(edition, resolved);
+    }
+    // Retry each provider failure once, after the main pass.
+    let retried = 0;
+    for (const edition of failedEditions) {
+      retried++;
+      await deps.sleep(2000);
+      const resolved = await deps.resolveMatch(db, edition);
+      if (resolved.failed) {
+        deps.log(JSON.stringify({
+          simania_id: edition.simania_id,
+          skipped: "provider_failure",
+        }));
+      } else handle(edition, resolved);
     }
 
     if (!options.apply) {
-      deps.log(JSON.stringify({ checked, relinks, unlinks }));
+      deps.log(JSON.stringify({ checked, relinks, unlinks, retried }));
       return 0;
     }
 
