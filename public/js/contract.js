@@ -129,7 +129,7 @@ export const RPCS = Object.freeze({
  * @property {string} generated_at
  * @property {boolean} english_only
  * @property {boolean} can_add
- * @property {{source: 'wikidata'|'nli', title: string, author: string|null}|null} hebrew_hint English-only: Hebrew title for the browser's Simania match
+ * @property {{source: 'wikidata'|'nli', title: string, author: string|null, alternate?: string|null}|null} hebrew_hint English-only: Hebrew title for the browser's Simania match
  * @property {string|null} hebrew_author English-only: Hebrew author name for the browser's Simania author search; not stored
  */
 
