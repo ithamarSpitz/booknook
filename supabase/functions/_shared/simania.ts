@@ -62,13 +62,14 @@ async function callTool(
 export async function searchBooks(
   query: string,
   limit = 8,
+  offset = 0,
 ): Promise<SimaniaBook[]> {
   const value = query.trim();
   if (value.length < 2) return [];
   const data = await callTool("books_search", {
     query: value,
     limit,
-    offset: 0,
+    offset,
   }) as Record<string, unknown> | unknown[];
   if (Array.isArray(data)) return data as SimaniaBook[];
   return (data?.books ?? data?.results ?? data?.items ?? data?.data ??
