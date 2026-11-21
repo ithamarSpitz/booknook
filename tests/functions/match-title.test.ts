@@ -41,6 +41,12 @@ Deno.test("matchTitle handles multiple labels and edge cases", () => {
   assertEquals(matchTitle("ואם היו אומרים לך "), "ואם היו אומרים לך");
 });
 
+Deno.test("matchTitle collapses whitespace runs into one space", () => {
+  assertEquals(matchTitle("עולם חדש  מופלא"), "עולם חדש מופלא");
+  assertEquals(matchTitle("עולם\tחדש\n\n מופלא"), "עולם חדש מופלא");
+  assertEquals(matchTitle("Title  (Hebrew)"), "Title");
+});
+
 Deno.test("ensureResolved sends match title to providers and keeps stored title", async () => {
   const displayTitle = "חפצים חדים (2015)";
   const matchTitleClean = "חפצים חדים";
