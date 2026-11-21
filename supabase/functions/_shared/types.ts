@@ -16,7 +16,8 @@ export type ResolveStatus =
   | "not_found"
   | "hardcover"
   | "original_title"
-  | "nli_author";
+  | "nli_author"
+  | "omnibus";
 
 export interface ProfileRow {
   id: string;
