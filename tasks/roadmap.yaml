@@ -1324,3 +1324,8 @@ sprints:
         depends_on:
         - S31-T5
         - S31-T9
+      S31-T11:
+        file: tasks/sprint-31-box-sets-recheck/S31-T11.md
+        stage: 3
+        depends_on:
+        - S31-T2
