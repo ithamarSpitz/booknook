@@ -16,6 +16,19 @@ Before any provider lookup, `matchTitle` (`_shared/catalog.ts`) strips trailing 
 
 - `retryWithAuthor`: when the title-only search yields no accepted match and the author hint contains a Latin letter, search again with `<title> <author>` and rank that result list. Title Dice there is the best of the full Hardcover title, the part before the first `:`, and the book's `alternative_titles`, and the retry requires an author boost.
 - `soundAuthor`: a Hebrew author name. A candidate whose authors have `nameSoundScore(soundAuthor, authors) >= 0.6` gets the same author boost as a similar English author hint.
+- `boxTitle`: see "Box sets" below.
+
+Every Hardcover match, in the first search and the author retry, also scores the title against the book's `alternative_titles` (read from the search `results` payload, keyed by book id). Title Dice is the best of the full title, the part before the first `:` and each alternative title.
+
+### Box sets
+
+`isBoxSet(matchTitle)` (`_shared/catalog.ts`) is true when the match title contains a whole-word box word: מארז, טרילוגיית, טרילוגיה, ערכת or סט. `boxCore` removes those words and the noise words מלא, דיגיטלי and דיגיטלית, splits on ` - ` / ` – ` and keeps the longest part. For a box set, `resolveMatch` uses `boxCore` as the title for Wikidata and NLI, and the Hardcover lookup of each bridge title tries the suffixes `Trilogy`, `Collection` and `Box Set` in that order. Each lookup passes `requireAuthor: true` and `boxTitle: true`, and a result rejected by `authorGuardRejects` is skipped. The final fuzzy path does not run for box sets.
+
+With `boxTitle`, `findHardcoverBook` keeps only candidates whose title has a box word (Trilogy, Collection, Box Set, Boxed Set, Omnibus), removes those words from the query and from the candidate titles before scoring, and requires an author boost.
+
+### `resolveMatch`
+
+`resolveMatch(db, edition, overrides)` (`_shared/catalog.ts`) runs the Wikidata → NLI → fuzzy decision described above. It never writes, and it ignores `resolve_status`, so it also evaluates an already linked edition. It returns `{ found: { book, status } | null, failed }`, where `failed` is true when any provider request failed. `ensureResolved` calls it and then writes the work and status. `npm run recheck:links` calls it directly.
 
 `ensureResolved` (`_shared/catalog.ts`) passes `retryWithAuthor: true` on the Wikidata and NLI paths. On the NLI path it adds `soundAuthor` (the edition's Hebrew author) only when no English author hint was found. The final fuzzy path uses `requireAuthor` only.
 
@@ -27,6 +40,9 @@ Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared
 
 1. Wikidata Hebrew label for the Hardcover title and author (`wikidataHebrew`), then NLI (`nliHebrew`).
 2. Find that Hebrew title on Simania and keep the closest match above the existing threshold. For a hint of at least two words, when an author was supplied and its Dice agreement with the result author is at least 0.6, a result containing every hint-title word gets a title-score floor of 0.85. Results are ordered by the boosted weighted score, then the original unboosted weighted score, then title similarity after trailing bracketed or parenthesized labels are stripped, then their original search order. A one-word hint always makes a second, title-only search even when the title-plus-author search returned results; the two result lists are combined in search order and deduplicated by numeric Simania ID. This step runs in the browser (`localizeRecommendations` in `public/js/recs.js`, using `public/js/simania.js`): the `recommendations` function returns the step 1 result as `hebrew_hint`, and the browser calls `link-edition` for an accepted match.
+   Box-set hint rule: unless the recommendation's English title has a box word (Trilogy, Collection, Box Set, Boxed Set, Omnibus), `localizeRecommendations` strips Hebrew box words from the hint title with `stripHebrewBoxWords` before matching. `matchHebrewBook` drops Simania results that contain a Hebrew box word (`hasHebrewBoxWord`, whole words מארז, טרילוגיית, טרילוגיה, ערכת, סט) unless the searched title itself has one.
+
+   NLI `alternate` hint: when Wikidata supplies the Hebrew title, `recommendations` also asks NLI. If NLI answers with a title that differs after normalization, the hint carries it as `alternate`; an NLI failure leaves the hint unchanged. The browser tries `alternate` only when the main hint title found no Simania book (`match` returned null), using the same author hint and, under the same box-word rule, with box words stripped. A verified match links with source `nli`.
 3. Before calling any provider, check `editions` for a row whose `work_id` is already this work. Reuse it.
 
 `tests/web/match-replay.test.mjs` replays captured Simania result sets and guards the matcher picks that equal the production links.
