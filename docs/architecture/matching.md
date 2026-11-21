@@ -35,6 +35,15 @@ Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared
 
 5. Omnibus, only when step 2 found no title match (`localizeRecommendations`). `matchOmnibus(hintTitle, results)` (`public/js/simania.js`, pure) looks at a Simania search for the hint title (6 results). A result counts when its `subtitle` splits on ` | ` into at least 2 parts and some part has `similarity >= 0.9` with the hint title. It returns the result only when exactly one result counts, otherwise null. The browser also requires author agreement: `similarity(hebrew_author, result author) >= 0.6` when the recommendation has a Hebrew author, otherwise `nameSoundScore(result author, English authors) >= 0.8`. A search failure leaves the card unchanged and the author path continues. The link gets `resolve_status = 'omnibus'`. `npm run report:omnibus` lists these links.
 
+### Series links (`npm run series:links`)
+
+`scripts/series-links.ts` is an operator tool, not part of `resolve`. It targets positive editions with `resolve_status = 'not_found'`, no `work_id` and a non-empty `series`, and uses the Simania `seriesNumber` from `bookDetails` as the target number (a positive integer, else the target is skipped as `no_number`).
+
+- **Anchors.** Linked editions with the same trimmed `series` whose author agrees with the target's (equal after removing Hebrew points and parentheses, or `similarity >= 0.6`) and that have their own `seriesNumber`. For each, the Hardcover `book_series` rows of its work are read.
+- **Accepted series.** A Hardcover series is accepted when an anchor's `position` equals its Simania number there and no anchor has a different position in it. Disagreement gives `anchor_disagrees`, several accepted series `ambiguous_series`, none `no_anchor`.
+- **Book pick.** The books at the target's number in that series, minus compilations and books with no author whose Dice with an anchor work's `original_authors` is above 0.45. The book with the most `users_read_count` wins only with at least 5 readers and at least 3 times the readers of every other book whose title has Dice below 0.8 with its title. Otherwise `no_book` or `ambiguous_book`.
+- **Status.** `--apply` links through the `repair:links` upsert with `resolve_status = 'series'`, only where `work_id` is still null. The default run is a read-only dry run.
+
 ## Normalization
 
 `utils.ts normalize` and `similarity` are authoritative: NFKD, Latin diacritics removed, lower case, a leading English article removed, everything that is not a letter or digit turned into a space. `similarity` is word-set Dice overlap. Display text is never changed. `stripHebrewPoints` runs first in `normalize`: it removes Hebrew points and cantillation marks (U+0591-U+05C7, except maqaf U+05BE, which becomes a space). `nameSoundScore` applies it to Hebrew names too. It exists in the browser (`public/js/simania.js`, `public/js/names.js`) and on the server (`_shared/utils.ts`, `_shared/names.ts`). Hebrew final-letter folding is not implemented; do not add it unless a task asks.
