@@ -43,6 +43,7 @@ function harness(over: Partial<RunDeps> = {}, works = [work(325603)]) {
     },
     wikidataOriginals: () => Promise.resolve(new Map()),
     nliOriginal: () => Promise.resolve(null),
+    wiktionaryGlosses: () => Promise.resolve([]),
     hebrewHint: () => Promise.resolve({ title: "רזה" }),
     matchHebrewBook: () => Promise.resolve({ id: 3191, title: "רזה" }),
     searchBooks: () => Promise.resolve([]),
@@ -162,6 +163,53 @@ Deno.test("rejected and failed candidates are skipped with a reason", async () =
   });
   assertEquals(await main([], failedRun.deps), 0);
   assertEquals(last(failedRun.lines).skipped, { provider_failure: 1 });
+});
+
+Deno.test("dictionary fallback proposes the author's book for the current work", async () => {
+  const h = harness({
+    hebrewHint: () => Promise.resolve(null),
+    wikidataHebrewAuthors: () =>
+      Promise.resolve(new Map([["Stephen King", ["סטיבן קינג"]]])),
+    searchBooks: () =>
+      Promise.resolve([{ id: 3191, title: "רזה", author: "סטיבן קינג" }]),
+    wiktionaryGlosses: (word) => Promise.resolve(word === "רזה" ? ["thin, lean"] : []),
+  });
+  assertEquals(await main([], h.deps), 0);
+  assertEquals(JSON.parse(h.lines[0]).proposal, {
+    simania_id: 3191,
+    book_id: 325603,
+    hebrew_title: "רזה",
+    via: "dictionary",
+    status: "dictionary",
+  });
+});
+
+Deno.test("dictionary provider failure skips the work as provider_failure", async () => {
+  const h = harness({
+    hebrewHint: () => Promise.resolve(null),
+    wikidataHebrewAuthors: () =>
+      Promise.resolve(new Map([["Stephen King", ["סטיבן קינג"]]])),
+    searchBooks: () =>
+      Promise.resolve([{ id: 3191, title: "רזה", author: "סטיבן קינג" }]),
+    wiktionaryGlosses: () => Promise.reject(new Error("down")),
+  });
+  assertEquals(await main([], h.deps), 0);
+  assertEquals(last(h.lines).skipped, { provider_failure: 1 });
+});
+
+Deno.test("apply links a dictionary proposal with dictionary status", async () => {
+  const h = harness({
+    hebrewHint: () => Promise.resolve(null),
+    wikidataHebrewAuthors: () =>
+      Promise.resolve(new Map([["Stephen King", ["סטיבן קינג"]]])),
+    searchBooks: () =>
+      Promise.resolve([{ id: 3191, title: "רזה", author: "סטיבן קינג" }]),
+    wiktionaryGlosses: (word) => Promise.resolve(word === "רזה" ? ["thin"] : []),
+  });
+  assertEquals(await main(["--apply"], h.deps), 0);
+  assertEquals(h.calls.apply, ["dictionary"]);
+  assertEquals(h.calls.insert, 1);
+  assertEquals(last(h.lines).linked, 1);
 });
 
 Deno.test("unknown argument prints usage and exits 2", async () => {

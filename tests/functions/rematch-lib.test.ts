@@ -62,6 +62,7 @@ Deno.test("forward candidate skips search", async () => {
   );
   assertEquals(result, {
     candidates: [{ simania_id: 3191, via: "forward" }],
+    authorBooks: [],
     failed: false,
   });
   assertEquals(searched, 0);
@@ -95,6 +96,10 @@ Deno.test("reverse search pages and skips linked ids", async () => {
   );
   assertEquals(result, {
     candidates: [{ simania_id: 77, via: "reverse" }],
+    authorBooks: [
+      { simania_id: 1000, title: "ספר אחר" },
+      { simania_id: 77, title: "נדודי שינה" },
+    ],
     failed: false,
   });
   assertEquals(offsets, [0, 50]);
@@ -112,6 +117,7 @@ Deno.test("originals throwing sets failed", async () => {
   );
   assertEquals(result.failed, true);
   assertEquals(result.candidates, []);
+  assertEquals(result.authorBooks, [{ simania_id: 5, title: "נדודי שינה" }]);
 });
 
 const edition = { simania_id: 108889, title: "ארץ אחרת- 4 כרכים" } as EditionRow;

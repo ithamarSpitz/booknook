@@ -5,6 +5,7 @@ import {
 } from "../supabase/functions/_shared/catalog.ts";
 import {
   nliOriginal,
+  wiktionaryGlosses,
   wikidataHebrewAuthors,
   wikidataOriginals,
 } from "../supabase/functions/_shared/bridges.ts";
@@ -33,6 +34,7 @@ import {
   type RematchDeps,
   type RematchWork,
 } from "./lib/rematch.ts";
+import { pickByDictionary } from "./lib/dictionary.ts";
 import { serviceCatalogDb } from "./recheck-links.ts";
 import {
   applyRepair,
@@ -45,7 +47,7 @@ const USAGE =
 
 const BUDGET_CHECK_EVERY = 50;
 
-export type RematchStatus = "wikidata" | "nli" | "fuzzy";
+export type RematchStatus = "wikidata" | "nli" | "fuzzy" | "dictionary";
 
 export interface RunDeps {
   loadOperatorEnv: typeof loadOperatorEnv;
@@ -64,6 +66,7 @@ export interface RunDeps {
     title: string,
     author: string,
   ) => Promise<{ title: string } | null>;
+  wiktionaryGlosses: (word: string) => Promise<string[]>;
   hebrewHint: (
     book: HardcoverBook,
   ) => Promise<{ title: string; author?: string | null } | null>;
@@ -147,6 +150,7 @@ const runDefaults: RunDeps = {
   wikidataHebrewAuthors,
   wikidataOriginals,
   nliOriginal,
+  wiktionaryGlosses,
   hebrewHint: (book) => defaultHebrewHint(book),
   matchHebrewBook: (title, author) => matchHebrewBook(title, author),
   searchBooks,
@@ -244,7 +248,7 @@ type Proposal = {
   work: RematchWork;
   edition: EditionRow;
   existed: boolean;
-  via: "forward" | "reverse";
+  via: "forward" | "reverse" | "dictionary";
   status: RematchStatus;
   book: HardcoverBook;
 };
@@ -271,7 +275,8 @@ function parseSavedProposals(text: string): SavedProposal[] {
     const { simania_id, book_id, status } = proposal;
     if (
       typeof simania_id === "number" && typeof book_id === "number" &&
-      (status === "wikidata" || status === "nli" || status === "fuzzy")
+      (status === "wikidata" || status === "nli" || status === "fuzzy" ||
+        status === "dictionary")
     ) found.push({ simania_id, book_id, status });
   }
   return found;
@@ -496,7 +501,7 @@ export async function main(
     for (const work of works) {
       processed++;
       const base = { hardcover_id: work.hardcover_id, title: work.original_title };
-      const { candidates, failed: searchFailed } = await findCandidates(
+      const { candidates, authorBooks, failed: searchFailed } = await findCandidates(
         work,
         rematchDeps,
       );
@@ -542,6 +547,56 @@ export async function main(
         }
       }
 
+      const reasonBeforeDictionary = anyFailed
+        ? "provider_failure"
+        : rejected
+        ? "rejected"
+        : linkedElsewhere
+        ? "linked_elsewhere"
+        : "no_candidate";
+      if (
+        !proposal && !anyFailed && authorBooks.length > 0 &&
+        (reasonBeforeDictionary === "no_candidate" ||
+          reasonBeforeDictionary === "rejected")
+      ) {
+        try {
+          const picked = await pickByDictionary(
+            work.original_title,
+            authorBooks,
+            deps.wiktionaryGlosses,
+          );
+          if (picked) {
+            let edition = await deps.loadEdition(sql, picked.simania_id);
+            if (edition?.work_id) {
+              linkedElsewhere = true;
+            } else {
+              const existed = edition !== null;
+              if (!edition) {
+                edition = toEditionRow(
+                  await deps.fetchEditionDetails(picked.simania_id),
+                );
+              }
+              proposal = {
+                work,
+                edition,
+                existed,
+                via: "dictionary",
+                status: "dictionary",
+                book: {
+                  id: work.hardcover_id,
+                  title: work.original_title,
+                  cached_contributors: (work.original_authors ?? []).map((name) => ({
+                    author: { name },
+                  })),
+                },
+              };
+            }
+          }
+        } catch {
+          anyFailed = true;
+        }
+      }
+
       if (!proposal) {
         const reason = anyFailed
           ? "provider_failure"
@@ -569,7 +624,7 @@ export async function main(
           try {
             let book = proposal.book;
             let detailsOk = true;
-            if (deps.isSearchDocumentBook(book)) {
+            if (proposal.via === "dictionary" || deps.isSearchDocumentBook(book)) {
               let detailed: HardcoverBook | undefined;
               try {
                 detailed = (await deps.hardcoverBooks([book.id]))[0];

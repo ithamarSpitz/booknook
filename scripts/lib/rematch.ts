@@ -17,6 +17,7 @@ export type RematchWork = {
 };
 
 export type Candidate = { simania_id: number; via: "forward" | "reverse" };
+export type AuthorBook = { simania_id: number; title: string };
 
 export type RematchDeps = {
   hebrewHint(
@@ -80,8 +81,9 @@ function searchQuery(name: string): string {
 export async function findCandidates(
   work: RematchWork,
   deps: RematchDeps,
-): Promise<{ candidates: Candidate[]; failed: boolean }> {
+): Promise<{ candidates: Candidate[]; authorBooks: AuthorBook[]; failed: boolean }> {
   const candidates: Candidate[] = [];
+  const authorBooks: AuthorBook[] = [];
   try {
     const hint = await deps.hebrewHint(work);
     if (hint) {
@@ -90,7 +92,7 @@ export async function findCandidates(
         candidates.push({ simania_id: id, via: "forward" });
       }
     }
-    if (candidates.length > 0) return { candidates, failed: false };
+    if (candidates.length > 0) return { candidates, authorBooks, failed: false };
 
     const names = await deps.hebrewNames(work);
     const seen = new Set<number>();
@@ -109,6 +111,7 @@ export async function findCandidates(
           ) continue;
           seen.add(id);
           checked++;
+          authorBooks.push({ simania_id: id, title: book.title });
           const originals = await deps.originals(book.title, name);
           if (originals.some((o) => titleMatches(work.original_title, o))) {
             candidates.push({ simania_id: id, via: "reverse" });
@@ -118,9 +121,9 @@ export async function findCandidates(
       }
       if (checked >= MAX_BOOKS) break;
     }
-    return { candidates, failed: false };
+    return { candidates, authorBooks, failed: false };
   } catch {
-    return { candidates, failed: true };
+    return { candidates, authorBooks, failed: true };
   }
 }
 
