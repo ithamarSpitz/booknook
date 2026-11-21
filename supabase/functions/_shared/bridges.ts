@@ -10,11 +10,16 @@ export class ProviderError extends Error {}
 
 class WikidataResponseError extends ProviderError {}
 
-async function providerFetch(url: string, init: RequestInit = {}, timeoutMs?: number): Promise<Response> {
+async function providerFetch(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs?: number,
+  allowNotFound = false,
+): Promise<Response> {
   const headers = { ...PROVIDER_HEADERS, ...(init.headers as Record<string, string> | undefined) };
   for (let attempt = 0; ; attempt += 1) {
     const response = await fetchTimeout(url, { ...init, headers }, timeoutMs);
-    if (response.ok) return response;
+    if (response.ok || (allowNotFound && response.status === 404)) return response;
     await response.body?.cancel();
     if (attempt === 0 && (response.status === 429 || response.status >= 500)) {
       const retryAfter = Number(response.headers.get("retry-after"));
@@ -23,6 +28,29 @@ async function providerFetch(url: string, init: RequestInit = {}, timeoutMs?: nu
     }
     throw new ProviderError(`${new URL(url).host} returned ${response.status}`);
   }
+}
+
+/** English Wiktionary definitions for a Hebrew word. */
+export async function wiktionaryGlosses(word: string): Promise<string[]> {
+  const url = `https://en.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(word)}`;
+  const response = await providerFetch(url, {}, undefined, true);
+  if (response.status === 404) {
+    await response.body?.cancel();
+    return [];
+  }
+  const body = await response.json() as {
+    he?: Array<{ definitions?: Array<{ definition?: unknown }> }>;
+  };
+  if (!Array.isArray(body?.he)) return [];
+  return body.he.flatMap((section) =>
+    Array.isArray(section?.definitions)
+      ? section.definitions.flatMap((entry) =>
+        typeof entry?.definition === "string"
+          ? [entry.definition.replace(/<[^>]*>/g, "").toLowerCase()]
+          : []
+      )
+      : []
+  );
 }
 
 const NLI_SRU = "https://nli.alma.exlibrisgroup.com/view/sru/972NNL_INST";

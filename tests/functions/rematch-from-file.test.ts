@@ -56,6 +56,7 @@ function harness(over: Partial<RunDeps> = {}, file = "") {
     wikidataHebrewAuthors: forbidden as unknown as RunDeps["wikidataHebrewAuthors"],
     wikidataOriginals: forbidden as unknown as RunDeps["wikidataOriginals"],
     nliOriginal: forbidden as unknown as RunDeps["nliOriginal"],
+    wiktionaryGlosses: forbidden as unknown as RunDeps["wiktionaryGlosses"],
     hebrewHint: forbidden as unknown as RunDeps["hebrewHint"],
     matchHebrewBook: forbidden as unknown as RunDeps["matchHebrewBook"],
     searchBooks: forbidden as unknown as RunDeps["searchBooks"],
@@ -135,6 +136,22 @@ Deno.test("--from applies one proposal and ignores other lines", async () => {
     action: "link",
   });
   assertEquals(last(h.lines), { proposals: 1, linked: 1, skipped: {} });
+});
+
+Deno.test("--from accepts a dictionary proposal", async () => {
+  const file = JSON.stringify({
+    proposal: {
+      simania_id: 3191,
+      book_id: 77,
+      hebrew_title: "רזה",
+      via: "dictionary",
+      status: "dictionary",
+    },
+  });
+  const h = harness({}, file);
+  assertEquals(await main(["--from", "x", "--apply"], h.deps), 0);
+  assertEquals(h.calls.apply, ["dictionary"]);
+  assertEquals(h.calls.forbidden, 0);
 });
 
 Deno.test("--from fetches Hardcover books in chunks of 50", async () => {
