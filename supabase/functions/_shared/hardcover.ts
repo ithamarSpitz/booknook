@@ -52,6 +52,7 @@ export type FindHardcoverBookOptions = {
   requireAuthor?: boolean;
   retryWithAuthor?: boolean;
   soundAuthor?: string;
+  boxTitle?: boolean;
 };
 
 function authorBoost(
@@ -100,13 +101,30 @@ function rankHardcoverBooks(
   return top.book;
 }
 
-async function searchHardcoverDetails(query: string): Promise<HardcoverBook[]> {
+const BOX_WORDS = /\b(?:Trilogy|Collection|Box\s+Set|Boxed\s+Set|Omnibus)\b/gi;
+
+function hasBoxWord(title: string): boolean {
+  return new RegExp(BOX_WORDS.source, "i").test(title);
+}
+
+function stripBoxWords(title: string): string {
+  return title.replace(BOX_WORDS, " ").replace(/\s+/g, " ").trim();
+}
+
+async function searchHardcoverDetails(
+  query: string,
+): Promise<{ books: HardcoverBook[]; alternatives: Map<number, string[]> }> {
   const safe = query.replace(/[\\"]/g, " ").trim();
-  const search = await graphql<{ search?: { ids?: Array<string | number> } }>(
-    `query { search(query: "${safe}", query_type: "Book", per_page: 8) { ids } }`,
+  const search = await graphql<{
+    search?: { ids?: Array<string | number>; results?: unknown };
+  }>(
+    `query { search(query: "${safe}", query_type: "Book", per_page: 8) { ids results } }`,
   );
   const ids = (search.search?.ids ?? []).map(Number).filter(Number.isFinite);
-  return ids.length ? await hardcoverBooks(ids) : [];
+  return {
+    books: ids.length ? await hardcoverBooks(ids) : [],
+    alternatives: alternativeTitlesById(search.search?.results),
+  };
 }
 
 export async function findHardcoverBook(
@@ -115,43 +133,40 @@ export async function findHardcoverBook(
   options?: FindHardcoverBookOptions,
 ): Promise<HardcoverBook | null> {
   const soundAuthor = options?.soundAuthor ?? "";
-  const details = await searchHardcoverDetails(originalTitle);
-  const firstMatch = rankHardcoverBooks(
-    details,
-    authorHint,
-    soundAuthor,
-    (book) => similarity(originalTitle, book.title),
+  const boxTitle = options?.boxTitle ?? false;
+  const queryTitle = boxTitle ? stripBoxWords(originalTitle) : originalTitle;
+
+  const rank = (
+    found: { books: HardcoverBook[]; alternatives: Map<number, string[]> },
+    requireAuthor: boolean,
+  ) =>
+    rankHardcoverBooks(
+      boxTitle ? found.books.filter((book) => hasBoxWord(book.title)) : found.books,
+      authorHint,
+      soundAuthor,
+      (book) => {
+        const prep = boxTitle ? stripBoxWords : (t: string) => t;
+        const beforeColon = book.title.split(":", 1)[0].trim();
+        let best = Math.max(
+          similarity(queryTitle, prep(book.title)),
+          similarity(queryTitle, prep(beforeColon)),
+        );
+        for (const alt of found.alternatives.get(Number(book.id)) ?? []) {
+          best = Math.max(best, similarity(queryTitle, prep(alt)));
+        }
+        return best;
+      },
+      requireAuthor || boxTitle,
+    );
+
+  const firstMatch = rank(
+    await searchHardcoverDetails(originalTitle),
     options?.requireAuthor ?? false,
   );
   if (firstMatch) return firstMatch;
   if (!options?.retryWithAuthor || !/[A-Za-z]/.test(authorHint)) return null;
 
-  const retryQuery = `${originalTitle} ${authorHint}`.replace(/[\\"]/g, " ").trim();
-  const search = await graphql<{
-    search?: { ids?: Array<string | number>; results?: unknown };
-  }>(
-    `query { search(query: "${retryQuery}", query_type: "Book", per_page: 8) { ids results } }`,
-  );
-  const retryIds = (search.search?.ids ?? []).map(Number).filter(Number.isFinite);
-  const retryDetails = retryIds.length ? await hardcoverBooks(retryIds) : [];
-  const alternatives = alternativeTitlesById(search.search?.results);
-  return rankHardcoverBooks(
-    retryDetails,
-    authorHint,
-    soundAuthor,
-    (book) => {
-      const beforeColon = book.title.split(":", 1)[0].trim();
-      let best = Math.max(
-        similarity(originalTitle, book.title),
-        similarity(originalTitle, beforeColon),
-      );
-      for (const alt of alternatives.get(Number(book.id)) ?? []) {
-        best = Math.max(best, similarity(originalTitle, alt));
-      }
-      return best;
-    },
-    true,
-  );
+  return rank(await searchHardcoverDetails(`${originalTitle} ${authorHint}`), true);
 }
 
 /** Map numeric book id to `alternative_titles` from a search `results` payload. */
