@@ -41,7 +41,7 @@ import {
 } from "./repair-links.ts";
 
 const USAGE =
-  "Usage: rematch:cached [--apply] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--min-hardcover <n>] [--force-hardcover]";
+  "Usage: rematch:cached [--apply] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--min-hardcover <n>] [--force-hardcover]";
 
 const BUDGET_CHECK_EVERY = 50;
 
@@ -85,6 +85,8 @@ export interface RunDeps {
   hardcoverDailyRemaining: () => Promise<number | null>;
   checkHardcoverBudget: typeof checkHardcoverBudget;
   now: () => Date;
+  sleep: (ms: number) => Promise<void>;
+  readTextFile: (path: string) => Promise<string>;
   log: (message: string) => void;
   error: (message: string) => void;
 }
@@ -163,6 +165,8 @@ const runDefaults: RunDeps = {
   hardcoverDailyRemaining: () => hardcoverDailyRemaining(),
   checkHardcoverBudget,
   now: () => new Date(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  readTextFile: (path) => Deno.readTextFile(path),
   log: console.log,
   error: console.error,
 };
@@ -174,6 +178,7 @@ interface CliOptions {
   limit: number | null;
   minHardcover: number;
   forceHardcover: boolean;
+  from: string | null;
 }
 
 function parseArgs(args: string[]): CliOptions | null {
@@ -184,11 +189,18 @@ function parseArgs(args: string[]): CliOptions | null {
     limit: null,
     minHardcover: 1500,
     forceHardcover: false,
+    from: null,
   };
+  let usedOthers = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--apply") options.apply = true;
     else if (arg === "--force-hardcover") options.forceHardcover = true;
+    else if (arg === "--from") {
+      const value = args[++i];
+      if (value === undefined || value === "") return null;
+      options.from = value;
+    }
     else if (
       arg === "--hardcover-id" || arg === "--offset" || arg === "--limit" ||
       arg === "--min-hardcover"
@@ -204,8 +216,10 @@ function parseArgs(args: string[]): CliOptions | null {
       else if (arg === "--offset") options.offset = number;
       else if (arg === "--limit") options.limit = number;
       else options.minHardcover = number;
+      if (arg !== "--min-hardcover") usedOthers = true;
     } else return null;
   }
+  if (options.from !== null && usedOthers) return null;
   return options;
 }
 
@@ -242,6 +256,117 @@ type Proposal = {
   book: HardcoverBook;
 };
 
+interface SavedProposal {
+  simania_id: number;
+  book_id: number;
+  status: RematchStatus;
+}
+
+function parseSavedProposals(text: string): SavedProposal[] {
+  const found: SavedProposal[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const proposal = (value as { proposal?: Record<string, unknown> } | null)
+      ?.proposal;
+    if (!proposal || typeof proposal !== "object") continue;
+    const { simania_id, book_id, status } = proposal;
+    if (
+      typeof simania_id === "number" && typeof book_id === "number" &&
+      (status === "wikidata" || status === "nli" || status === "fuzzy")
+    ) found.push({ simania_id, book_id, status });
+  }
+  return found;
+}
+
+async function runFromFile(
+  deps: RunDeps,
+  sql: Sql,
+  options: CliOptions,
+): Promise<number> {
+  const saved = parseSavedProposals(await deps.readTextFile(options.from!));
+  const ids = [...new Set(saved.map((p) => p.book_id))];
+  const books = new Map<number, HardcoverBook>();
+  for (let i = 0; i < ids.length; i += 50) {
+    try {
+      for (const book of await deps.hardcoverBooks(ids.slice(i, i + 50))) {
+        books.set(book.id, book);
+      }
+    } catch {
+      // Proposals of this chunk are reported as details_failure below.
+    }
+  }
+
+  const skipped: Record<string, number> = {};
+  const skip = (simania_id: number, book_id: number, reason: string) => {
+    skipped[reason] = (skipped[reason] ?? 0) + 1;
+    deps.log(JSON.stringify({ simania_id, book_id, skipped: reason }));
+  };
+  let linked = 0;
+  let failed = false;
+
+  for (const item of saved) {
+    const { simania_id, book_id } = item;
+    try {
+      const book = books.get(book_id);
+      if (!book) {
+        skip(simania_id, book_id, "details_failure");
+        continue;
+      }
+      let edition = await deps.loadEdition(sql, simania_id);
+      if (edition?.work_id) {
+        skip(simania_id, book_id, "linked_elsewhere");
+        continue;
+      }
+      const existed = edition !== null;
+      if (!edition) {
+        edition = toEditionRow(await deps.fetchEditionDetails(simania_id));
+      }
+      if (options.apply) {
+        if (!existed) await deps.insertEdition(sql, edition);
+        const plan = {
+          kind: "link",
+          simania_id,
+          title: edition.title,
+          author: edition.author,
+          translator: edition.translator,
+          original_title: book.title,
+          book,
+          reason: "ok",
+        } as unknown as LinkRepairPlan;
+        const result = await deps.applyRepair(sql, plan, deps.now(), item.status);
+        if (result.status !== "linked") {
+          skip(simania_id, book_id, "not_linked");
+          continue;
+        }
+        linked++;
+      }
+      deps.log(JSON.stringify({
+        simania_id,
+        book_id,
+        hebrew_title: edition.title,
+        action: options.apply ? "link" : "would_link",
+      }));
+    } catch (error) {
+      failed = true;
+      deps.log(JSON.stringify({
+        simania_id,
+        book_id,
+        status: "failed",
+        error: error instanceof Error ? error.message : "Unknown error",
+      }));
+    }
+  }
+
+  deps.log(JSON.stringify({ proposals: saved.length, linked, skipped }));
+  return failed ? 1 : 0;
+}
+
 /** Run the CLI and return its exit code. Exported for database-free tests. */
 export async function main(
   args: string[] = Deno.args,
@@ -264,6 +389,7 @@ export async function main(
   deps.loadOperatorEnv();
   const sql = await deps.openProdDb({ readOnly: !options.apply });
   try {
+    if (options.from !== null) return await runFromFile(deps, sql, options);
     const works = await deps.loadWorks(sql, options);
     const linkNames = authorNamesFromLinks(await deps.loadLinkPairs(sql));
     const linkedSimaniaIds = await deps.loadLinkedSimaniaIds(sql);
@@ -279,11 +405,18 @@ export async function main(
     ];
     let wikidataNames = new Map<string, string[]>();
     if (missing.length > 0) {
-      try {
-        wikidataNames = await deps.wikidataHebrewAuthors(missing);
-      } catch {
-        deps.log(JSON.stringify({ error: "wikidata_authors" }));
-        return 3;
+      const attempts = 3;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          wikidataNames = await deps.wikidataHebrewAuthors(missing);
+          break;
+        } catch {
+          if (attempt >= attempts) {
+            deps.log(JSON.stringify({ error: "wikidata_authors" }));
+            return 3;
+          }
+          await deps.sleep(30000);
+        }
       }
     }
 
@@ -404,6 +537,7 @@ export async function main(
           ...base,
           proposal: {
             simania_id: proposal.edition.simania_id,
+            book_id: proposal.book.id,
             hebrew_title: proposal.edition.title,
             via: proposal.via,
             status: proposal.status,
