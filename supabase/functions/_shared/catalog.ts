@@ -310,6 +310,23 @@ export async function upsertWork(
   return workResult.data.id;
 }
 
+function seriesPrefixRest(
+  title: string,
+  seriesRaw: string | null | undefined,
+): string | null {
+  const series = seriesRaw?.trim();
+  if (!series) return null;
+  for (const dash of ["-", "–"]) {
+    const prefix = `${series} ${dash} `;
+    if (title.startsWith(prefix)) {
+      const rest = title.slice(prefix.length).trim();
+      if (!rest || /^(כרך|ספר|חלק)\s*\S+$/.test(rest)) return null;
+      return rest;
+    }
+  }
+  return null;
+}
+
 async function tryMatch(
   operation: () => Promise<HardcoverBook | null>,
   failures: { count: number },
@@ -400,7 +417,7 @@ export async function ensureResolved(
     wikidataTitle = bridge?.title ?? "";
     if (bridge) {
       match = await tryMatch(
-        () => api.findHardcoverBook(bridge.title, bridge.author),
+        () => api.findHardcoverBook(bridge.title, bridge.author, { retryWithAuthor: true }),
         failures,
       );
     }
@@ -412,10 +429,15 @@ export async function ensureResolved(
 
   if (!match) {
     try {
-      const bridge = await api.nliOriginal(
+      let nli = await api.nliOriginal(
         titleForMatch,
         edition.author ?? "",
       );
+      if (nli === null) {
+        const rest = seriesPrefixRest(titleForMatch, edition.series);
+        if (rest) nli = await api.nliOriginal(rest, edition.author ?? "");
+      }
+      const bridge = nli;
       if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
         let hint = await englishAuthorHint(db, edition);
         if (hint === null) hint = bridge.versoAuthor?.trim() || null;
@@ -426,8 +448,11 @@ export async function ensureResolved(
             failures.count += 1;
           }
         }
+        const nliOptions = hint === null
+          ? { retryWithAuthor: true, soundAuthor: edition.author ?? "" }
+          : { retryWithAuthor: true };
         match = await tryMatch(
-          () => api.findHardcoverBook(bridge.title, hint ?? bridge.author),
+          () => api.findHardcoverBook(bridge.title, hint ?? bridge.author, nliOptions),
           failures,
         );
         if (match && guardRejects(edition, match)) match = null;
