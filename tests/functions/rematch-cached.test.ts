@@ -62,6 +62,7 @@ function harness(over: Partial<RunDeps> = {}, works = [work(325603)]) {
     },
     hardcoverBooks: () => Promise.resolve([book]),
     now: () => new Date(0),
+    sleep: () => Promise.resolve(),
     log: (m) => lines.push(m),
     error: (m) => errors.push(m),
     ...over,
@@ -80,6 +81,7 @@ Deno.test("dry run proposes without writing", async () => {
     title: "Thinner",
     proposal: {
       simania_id: 3191,
+      book_id: 325603,
       hebrew_title: "רזה",
       via: "forward",
       status: "wikidata",
