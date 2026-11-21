@@ -61,6 +61,7 @@ function harness(
   const errors: string[] = [];
   const opens: unknown[] = [];
   const resolved: number[] = [];
+  const sleeps: number[] = [];
   const repairs: { plan: unknown; status: unknown }[] = [];
   const deps: Partial<RunDeps> = {
     loadOperatorEnv: () => ({ dbPassword: "x" }),
@@ -82,10 +83,14 @@ function harness(
     },
     checkHardcoverBudget: () => Promise.resolve(true),
     now: () => new Date("2026-11-21T00:00:00Z"),
+    sleep: (ms) => {
+      sleeps.push(ms);
+      return Promise.resolve();
+    },
     log: (m) => logs.push(m),
     error: (m) => errors.push(m),
   };
-  return { deps, logs, errors, opens, resolved, repairs };
+  return { deps, logs, errors, opens, resolved, repairs, sleeps };
 }
 
 const rebel: Match = {
@@ -109,7 +114,7 @@ Deno.test("dry run prints a relink and the summary, read-only, no write", async 
   assertEquals(line.from.hardcover_id, 1851773);
   assertEquals(line.to, { hardcover_id: 488917, title: "The Rebel" });
   assertEquals(line.status, "wikidata");
-  assertEquals(JSON.parse(h.logs[1]), { checked: 1, relinks: 1, unlinks: 0 });
+  assertEquals(JSON.parse(h.logs[1]), { checked: 1, relinks: 1, unlinks: 0, retried: 0 });
   assertEquals(fake.ended(), 1);
 });
 
@@ -123,7 +128,7 @@ Deno.test("the same hardcover_id prints nothing", async () => {
   });
   assertEquals(await main([], h.deps), 0);
   assertEquals(h.logs.map((l) => JSON.parse(l)), [
-    { checked: 1, relinks: 0, unlinks: 0 },
+    { checked: 1, relinks: 0, unlinks: 0, retried: 0 },
   ]);
 });
 
@@ -132,7 +137,7 @@ Deno.test("a box set with no match prints an unlink", async () => {
   const h = harness(fake, { 3: { found: null, failed: false } });
   assertEquals(await main([], h.deps), 0);
   assertEquals(JSON.parse(h.logs[0]).action, "unlink");
-  assertEquals(JSON.parse(h.logs[1]), { checked: 1, relinks: 0, unlinks: 1 });
+  assertEquals(JSON.parse(h.logs[1]), { checked: 1, relinks: 0, unlinks: 1, retried: 0 });
 });
 
 Deno.test("a provider failure never relinks or unlinks", async () => {
@@ -223,4 +228,50 @@ Deno.test("scope: used works by default, every automatic link with --all", async
   assert(!all.queries[0].text.includes("shelf_books"));
   assert(!one.queries[0].text.includes("shelf_books"));
   assert(one.queries[0].values.includes(16301));
+});
+
+Deno.test("a provider failure is retried once and can relink", async () => {
+  const fake = fakeSql([RELINK]);
+  const h = harness(fake, {});
+  let calls = 0;
+  h.deps.resolveMatch = () =>
+    Promise.resolve(
+      ++calls === 1 ? { found: null, failed: true } as Match : rebel,
+    );
+  assertEquals(await main([], h.deps), 0);
+  assertEquals(calls, 2);
+  assert(h.sleeps.length === 1 && h.sleeps[0] >= 2000);
+  const lines = h.logs.map((l) => JSON.parse(l));
+  assertEquals(lines.filter((l) => l.skipped).length, 0);
+  assertEquals(lines[0].action, "relink");
+  assertEquals(lines.at(-1), {
+    checked: 1,
+    relinks: 1,
+    unlinks: 0,
+    retried: 1,
+  });
+});
+
+Deno.test("an edition that fails twice prints one provider_failure", async () => {
+  const fake = fakeSql([BOX]);
+  const h = harness(fake, { 3: { found: null, failed: true } });
+  assertEquals(await main([], h.deps), 0);
+  assertEquals(h.resolved, [3, 3]);
+  const lines = h.logs.map((l) => JSON.parse(l));
+  assertEquals(lines[0], { simania_id: 3, skipped: "provider_failure" });
+  assertEquals(lines.filter((l) => l.skipped).length, 1);
+  assertEquals(lines.at(-1), {
+    checked: 1,
+    relinks: 0,
+    unlinks: 0,
+    retried: 1,
+  });
+});
+
+Deno.test("with no failures sleep is never called", async () => {
+  const fake = fakeSql([RELINK]);
+  const h = harness(fake, { 16301: rebel });
+  assertEquals(await main([], h.deps), 0);
+  assertEquals(h.sleeps.length, 0);
+  assertEquals(JSON.parse(h.logs.at(-1)!).retried, 0);
 });
