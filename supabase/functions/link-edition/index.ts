@@ -4,6 +4,7 @@ import {
   suppliedProviders,
   suppliedSimania,
 } from "../_shared/catalog.ts";
+import { catalogAuthorStore, recordPair } from "../_shared/authors.ts";
 import { type ChunkQueryResult, selectInChunks } from "../_shared/chunked.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type {
@@ -26,6 +27,7 @@ type FunctionDeps = {
   serviceClient: () => CatalogDb;
   userClient: (req: Request) => CatalogDb;
   ensureEdition: typeof ensureEdition;
+  recordPair: typeof recordPair;
 };
 
 type LinkEditionInput = Omit<LinkEditionRequest, "source"> & {
@@ -37,6 +39,7 @@ const defaults: FunctionDeps = {
   serviceClient,
   userClient,
   ensureEdition,
+  recordPair,
 };
 
 function dbFailure(error: { message?: string }): never {
@@ -206,6 +209,21 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
         .eq("user_id", userId).eq("work_id", input.work_id).select("work_id");
       if (updatedGenreRecommendation.error) {
         dbFailure(updatedGenreRecommendation.error);
+      }
+
+      if (!duplicateWorkId && linked.author?.trim()) {
+        try {
+          const work = await db.from("works").select("original_authors")
+            .eq("id", input.work_id).maybeSingle();
+          if (work.error) dbFailure(work.error);
+          const original = (work.data as { original_authors?: string[] | null } | null)
+            ?.original_authors?.[0];
+          if (original?.trim()) {
+            await deps.recordPair(catalogAuthorStore(db), linked.author, original);
+          }
+        } catch (error) {
+          console.error("link-edition: recordPair failed", error);
+        }
       }
 
       const response: LinkEditionResponse = {
