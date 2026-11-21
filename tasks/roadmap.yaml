@@ -1412,3 +1412,33 @@ sprints:
         stage: 2
         depends_on:
         - S35-T1
+  S36-duplicates-hc-hint:
+    name: link-edition accepts same-book duplicate works; Hardcover Hebrew edition hint
+    tasks:
+      S36-T1:
+        file: tasks/sprint-36-duplicates-hc-hint/01-contract.md
+        stage: 1
+        depends_on: []
+      S36-T2:
+        file: tasks/sprint-36-duplicates-hc-hint/02-duplicate-works.md
+        stage: 2
+        depends_on:
+        - S36-T1
+      S36-T3:
+        file: tasks/sprint-36-duplicates-hc-hint/03-hc-hint-server.md
+        stage: 2
+        depends_on:
+        - S36-T1
+      S36-T4:
+        file: tasks/sprint-36-duplicates-hc-hint/04-hc-hint-browser.md
+        stage: 3
+        depends_on:
+        - S36-T2
+        - S36-T3
+      S36-T5:
+        file: tasks/sprint-36-duplicates-hc-hint/05-docs.md
+        stage: 4
+        depends_on:
+        - S36-T2
+        - S36-T3
+        - S36-T4
