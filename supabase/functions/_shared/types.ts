@@ -17,7 +17,8 @@ export type ResolveStatus =
   | "hardcover"
   | "original_title"
   | "nli_author"
-  | "omnibus";
+  | "omnibus"
+  | "series";
 
 export interface ProfileRow {
   id: string;
