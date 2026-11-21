@@ -19,13 +19,18 @@ export function sqlAuthorStore(sql: Sql): AuthorStore {
         select author_id, lang, name, name_key, source from public.author_names
         where author_id = ${authorId}
       `;
-      const author = await sql<{ wikidata_checked_at: Date | string | null }[]>`
-        select wikidata_checked_at from public.authors where id = ${authorId}
+      const author = await sql<{
+        wikidata_checked_at: Date | string | null;
+        sound_checked_at: Date | string | null;
+      }[]>`
+        select wikidata_checked_at, sound_checked_at from public.authors where id = ${authorId}
       `;
       const checked = author[0]?.wikidata_checked_at ?? null;
+      const soundChecked = author[0]?.sound_checked_at ?? null;
       return {
         author_id: authorId,
         wikidata_checked_at: checked === null ? null : new Date(checked).toISOString(),
+        sound_checked_at: soundChecked === null ? null : new Date(soundChecked).toISOString(),
         names: [...names],
       };
     },
@@ -55,6 +60,9 @@ export function sqlAuthorStore(sql: Sql): AuthorStore {
     },
     async markWikidataChecked(authorId, at) {
       await sql`update public.authors set wikidata_checked_at = ${at.toISOString()} where id = ${authorId}`;
+    },
+    async markSoundChecked(authorId, at) {
+      await sql`update public.authors set sound_checked_at = ${at.toISOString()} where id = ${authorId}`;
     },
   };
 }

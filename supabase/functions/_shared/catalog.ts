@@ -75,6 +75,7 @@ function resolveAuthorStore(db: CatalogDb): AuthorStore {
     addNames: async () => {},
     merge: async () => {},
     markWikidataChecked: async () => {},
+    markSoundChecked: async () => {},
   };
 }
 

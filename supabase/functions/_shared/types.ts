@@ -26,7 +26,7 @@ export interface AuthorNameRow {
   lang: "en" | "he";
   name: string;
   name_key: string;
-  source: "link" | "wikidata";
+  source: "link" | "wikidata" | "sound";
 }
 
 export interface ProfileRow {
