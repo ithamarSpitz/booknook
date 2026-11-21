@@ -1,4 +1,5 @@
 import { fetchTimeout, HttpError, normalize, similarity } from "./utils.ts";
+import { nameSoundScore } from "./names.ts";
 
 const HARDCOVER = "https://api.hardcover.app/v1/graphql";
 
@@ -49,40 +50,46 @@ async function graphql<T>(query: string): Promise<T> {
 
 export type FindHardcoverBookOptions = {
   requireAuthor?: boolean;
+  retryWithAuthor?: boolean;
+  soundAuthor?: string;
 };
 
-function authorBoost(authorHint: string, book: HardcoverBook): number {
-  if (!authorHint.trim()) return 0;
-  return authors(book).some((author) => similarity(authorHint, author) > 0.45) ? 2 : 0;
+function authorBoost(
+  authorHint: string,
+  soundAuthor: string,
+  book: HardcoverBook,
+): number {
+  const bookAuthors = authors(book);
+  if (
+    (authorHint.trim() &&
+      bookAuthors.some((author) => similarity(authorHint, author) > 0.45)) ||
+    (soundAuthor.trim() && nameSoundScore(soundAuthor, bookAuthors) >= 0.6)
+  ) return 2;
+  return 0;
 }
 
 function firstContributorNormalized(book: HardcoverBook): string {
   return normalize(authors(book)[0] ?? "");
 }
 
-export async function findHardcoverBook(
-  originalTitle: string,
-  authorHint = "",
-  options?: FindHardcoverBookOptions,
-): Promise<HardcoverBook | null> {
-  const safe = originalTitle.replace(/[\\"]/g, " ").trim();
-  const search = await graphql<{ search?: { ids?: Array<string | number> } }>(
-    `query { search(query: "${safe}", query_type: "Book", per_page: 8) { ids } }`,
-  );
-  const ids = (search.search?.ids ?? []).map(Number).filter(Number.isFinite);
-  if (!ids.length) return null;
-  const details = await hardcoverBooks(ids);
-  const ranked = details.map((book) => {
-    const titleDice = similarity(originalTitle, book.title);
+function rankHardcoverBooks(
+  books: HardcoverBook[],
+  authorHint: string,
+  soundAuthor: string,
+  titleDiceFor: (book: HardcoverBook) => number,
+  requireAuthor: boolean,
+): HardcoverBook | null {
+  const ranked = books.map((book) => {
+    const titleDice = titleDiceFor(book);
     let score = titleDice * 3;
-    const boost = authorBoost(authorHint, book);
+    const boost = authorBoost(authorHint, soundAuthor, book);
     score += boost;
     score += Math.log10(1 + (book.users_read_count ?? 0)) / 20;
     return { book, score, titleDice, boost };
   }).sort((a, b) => b.score - a.score || a.book.id - b.book.id);
   const top = ranked[0];
   if (!top || top.titleDice < 0.5) return null;
-  if (options?.requireAuthor && top.boost === 0) return null;
+  if (requireAuthor && top.boost === 0) return null;
   if (top.boost === 0) {
     const topAuthor = firstContributorNormalized(top.book);
     for (const entry of ranked.slice(1)) {
@@ -91,6 +98,48 @@ export async function findHardcoverBook(
     }
   }
   return top.book;
+}
+
+async function searchHardcoverDetails(query: string): Promise<HardcoverBook[]> {
+  const safe = query.replace(/[\\"]/g, " ").trim();
+  const search = await graphql<{ search?: { ids?: Array<string | number> } }>(
+    `query { search(query: "${safe}", query_type: "Book", per_page: 8) { ids } }`,
+  );
+  const ids = (search.search?.ids ?? []).map(Number).filter(Number.isFinite);
+  return ids.length ? await hardcoverBooks(ids) : [];
+}
+
+export async function findHardcoverBook(
+  originalTitle: string,
+  authorHint = "",
+  options?: FindHardcoverBookOptions,
+): Promise<HardcoverBook | null> {
+  const soundAuthor = options?.soundAuthor ?? "";
+  const details = await searchHardcoverDetails(originalTitle);
+  const firstMatch = rankHardcoverBooks(
+    details,
+    authorHint,
+    soundAuthor,
+    (book) => similarity(originalTitle, book.title),
+    options?.requireAuthor ?? false,
+  );
+  if (firstMatch) return firstMatch;
+  if (!options?.retryWithAuthor || !/[A-Za-z]/.test(authorHint)) return null;
+
+  const retryDetails = await searchHardcoverDetails(`${originalTitle} ${authorHint}`);
+  return rankHardcoverBooks(
+    retryDetails,
+    authorHint,
+    soundAuthor,
+    (book) => {
+      const beforeColon = book.title.split(":", 1)[0].trim();
+      return Math.max(
+        similarity(originalTitle, book.title),
+        similarity(originalTitle, beforeColon),
+      );
+    },
+    true,
+  );
 }
 
 export async function hardcoverBooks(ids: number[]): Promise<HardcoverBook[]> {
