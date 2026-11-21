@@ -16,7 +16,9 @@ import {
   errorResponse,
   HttpError,
   json,
+  normalize,
   options,
+  similarity,
 } from "../_shared/utils.ts";
 
 type FunctionDeps = {
@@ -39,6 +41,37 @@ const defaults: FunctionDeps = {
 
 function dbFailure(error: { message?: string }): never {
   throw new Error(error.message ?? "Database operation failed.");
+}
+
+type WorkIdentity = {
+  original_title: string | null;
+  original_authors: string[] | null;
+};
+
+// Hardcover has duplicate entries of one book; two works are the same book when
+// the titles before the first colon match and the first authors are alike.
+export function sameBook(a: WorkIdentity, b: WorkIdentity): boolean {
+  const head = (title: string | null) => normalize(String(title ?? "").split(":")[0]);
+  const titleA = head(a.original_title);
+  if (!titleA || titleA !== head(b.original_title)) return false;
+  return similarity(a.original_authors?.[0], b.original_authors?.[0]) >= 0.85;
+}
+
+async function requireSameBook(
+  db: CatalogDb,
+  editionWorkId: string,
+  requestedWorkId: string,
+): Promise<void> {
+  const result = await db.from("works")
+    .select("id, original_title, original_authors")
+    .in("id", [editionWorkId, requestedWorkId]);
+  if (result.error) dbFailure(result.error);
+  const rows = (result.data ?? []) as (WorkIdentity & { id: string })[];
+  const current = rows.find((row) => row.id === editionWorkId);
+  const requested = rows.find((row) => row.id === requestedWorkId);
+  if (!current || !requested || !sameBook(current, requested)) {
+    throw new HttpError(409, "Edition belongs to another work.");
+  }
 }
 
 // The browser matched an English-only recommendation to a Simania edition
@@ -89,8 +122,10 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
         simaniaId,
         suppliedProviders(supplied),
       );
+      let duplicateWorkId: string | null = null;
       if (edition.work_id && edition.work_id !== input.work_id) {
-        throw new HttpError(409, "Edition belongs to another work.");
+        await requireSameBook(db, edition.work_id, input.work_id);
+        duplicateWorkId = edition.work_id;
       }
       if (!edition.work_id) {
         // Claim only an unlinked row. PostgreSQL rechecks this predicate after
@@ -106,8 +141,12 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
         .eq("simania_id", simaniaId).single();
       if (stored.error) dbFailure(stored.error);
       const linked = stored.data as EditionRow;
-      if (linked.work_id !== input.work_id) {
-        throw new HttpError(409, "Edition belongs to another work.");
+      if (linked.work_id !== input.work_id && linked.work_id !== duplicateWorkId) {
+        if (!linked.work_id) {
+          throw new HttpError(409, "Edition belongs to another work.");
+        }
+        await requireSameBook(db, linked.work_id, input.work_id);
+        duplicateWorkId = linked.work_id;
       }
 
       const onThisEdition = await callerDb.from("shelf_books")
@@ -117,7 +156,12 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
       let onShelf = !!onThisEdition.data;
       if (!onShelf) {
         const siblings = await callerDb.from("editions").select("simania_id")
-          .eq("work_id", input.work_id);
+          .in(
+            "work_id",
+            duplicateWorkId
+              ? [input.work_id, duplicateWorkId]
+              : [input.work_id],
+          );
         if (siblings.error) dbFailure(siblings.error);
         const siblingIds = (siblings.data ?? [])
           .map((row: { simania_id: number }) => row.simania_id)
