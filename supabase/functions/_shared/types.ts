@@ -189,6 +189,7 @@ export interface HebrewHint {
   source: "wikidata" | "nli";
   title: string;
   author: string | null;
+  alternate?: string | null;
 }
 
 export interface GenreHintRequest {

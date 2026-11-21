@@ -79,17 +79,30 @@ export type RecommendationDependencies = {
 
 export async function defaultHebrewHint(
   book: HardcoverBook,
+  bridges: {
+    wikidataHebrew: typeof wikidataHebrew;
+    nliHebrew: typeof nliHebrew;
+  } = { wikidataHebrew, nliHebrew },
 ): Promise<HebrewHint | null> {
   const author = authors(book)[0] ?? "";
-  const wikidata = await wikidataHebrew(book.title, author);
+  const wikidata = await bridges.wikidataHebrew(book.title, author);
   if (wikidata) {
-    return {
+    const hint: HebrewHint = {
       source: "wikidata",
       title: wikidata.title,
       author: wikidata.author || null,
     };
+    try {
+      const alt = await bridges.nliHebrew(book.title, author);
+      if (alt?.title && normalize(alt.title) !== normalize(wikidata.title)) {
+        hint.alternate = alt.title;
+      }
+    } catch {
+      // NLI failure leaves the Wikidata hint unchanged.
+    }
+    return hint;
   }
-  const nli = await nliHebrew(book.title, author);
+  const nli = await bridges.nliHebrew(book.title, author);
   return nli
     ? { source: "nli", title: nli.title, author: nli.author || null }
     : null;
