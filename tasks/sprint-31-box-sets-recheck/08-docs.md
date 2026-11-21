@@ -12,6 +12,8 @@ depends_on:
   - S31-T5
   - S31-T6
   - S31-T7
+  - S31-T9
+  - S31-T10
 allowed_paths:
   - docs/architecture/matching.md
   - docs/architecture/testing.md
@@ -38,7 +40,8 @@ The architecture docs describe the merged S31 code briefly.
    - alternative titles in every Hardcover match;
    - box sets (`isBoxSet`, `boxCore`, the `boxTitle` option);
    - `resolveMatch`;
-   - the browser box-set hint rule (`hasHebrewBoxWord`, `stripHebrewBoxWords`).
+   - the browser box-set hint rule (`hasHebrewBoxWord`, `stripHebrewBoxWords`);
+   - the NLI `alternate` hint and when the browser tries it.
 2. `docs/architecture/testing.md`: the operator steps for `npm run recheck:links`. Dry run, review every line, `--apply`, then `audit:authors`.
 3. `docs/architecture/frontend.md`: one sentence saying genre shelves skip works that are on the reader's shelves.
 

@@ -14,7 +14,7 @@ environment: null
 verification:
   - npm run check:contract
   - >-
-    node -e "const t=require('fs').readFileSync('docs/contract.md','utf8');for(const w of ['**Alternative titles in every match (S31).**','**Box sets (S31).**','**Box-set hints (S31).**','npm run recheck:links','593165','488917','**Genre shelves skip shelved works (S31).**'])if(!t.includes(w))throw new Error('missing '+w)"
+    node -e "const t=require('fs').readFileSync('docs/contract.md','utf8');for(const w of ['**Alternative titles in every match (S31).**','**Box sets (S31).**','**Box-set hints (S31).**','npm run recheck:links','593165','488917','**Genre shelves skip shelved works (S31).**','**NLI alternate hint (S31).**','994102'])if(!t.includes(w))throw new Error('missing '+w)"
 ---
 
 # Goal
@@ -59,5 +59,9 @@ Measured on prod on 2026-11-21. A review of all 453 Wikidata/NLI links found wro
    - **`resolveMatch(edition, providers)`.** Exported from the resolver: the full Wikidata → NLI → fuzzy decision with no database write. It returns `{ book, status }` or `null`, with the same provider-failure behavior. `ensureResolved` uses it.
 5. In **Genre recommendation shelves**, add:
    - **Genre shelves skip shelved works (S31).** When the browser loads genre shelves, it drops rows whose `work_id` is the `work_id` of any edition on the reader's shelves. Live case: a shelved edition was linked to its work after the genre rows were stored, and the same work then showed on a genre shelf. If that read fails, all rows are kept.
+6. In recommendation localization (the `hebrew_hint` paragraph), add:
+   - **NLI alternate hint (S31).** When the hint comes from Wikidata, the function also runs the NLI Hebrew lookup. When it gives a different title (after normalization), the hint carries it as `alternate`. When the browser's step 2 match finds no book for the hint title, it tries `alternate` once, with the same verification, and links with `source` `nli`.
+     - Live case: Pet Sematary. The Wikidata hint `בית קברות לחיות` finds only a DVD. NLI gives the edition title `בית כברות לחיות`, which is Simania 994102.
+     - This adds at most 3 NLI requests per English-only candidate. Update the request bounds accordingly.
 
 Change nothing else.

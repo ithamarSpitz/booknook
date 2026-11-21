@@ -1281,3 +1281,16 @@ sprints:
         - S31-T5
         - S31-T6
         - S31-T7
+        - S31-T9
+        - S31-T10
+      S31-T9:
+        file: tasks/sprint-31-box-sets-recheck/09-nli-alt-hint-server.md
+        stage: 2
+        depends_on:
+        - S31-T1
+      S31-T10:
+        file: tasks/sprint-31-box-sets-recheck/10-nli-alt-hint-browser.md
+        stage: 3
+        depends_on:
+        - S31-T5
+        - S31-T9
