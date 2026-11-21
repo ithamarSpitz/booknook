@@ -5,10 +5,11 @@ import { normalize, stripHebrewPoints } from "./utils.ts";
 import type { CatalogDb } from "./catalog.ts";
 
 export type AuthorLang = "en" | "he";
-export type NewAuthorName = { lang: AuthorLang; name: string; source: "link" | "wikidata" };
+export type NewAuthorName = { lang: AuthorLang; name: string; source: "link" | "wikidata" | "sound" };
 export type FoundAuthor = {
   author_id: string;
   wikidata_checked_at: string | null;
+  sound_checked_at: string | null;
   names: AuthorNameRow[];
 };
 
@@ -20,6 +21,7 @@ export interface AuthorStore {
   /** Moves the dropped author's names to `keepId` and deletes the dropped author. */
   merge(keepId: string, dropId: string): Promise<void>;
   markWikidataChecked(authorId: string, at: Date): Promise<void>;
+  markSoundChecked(authorId: string, at: Date): Promise<void>;
 }
 
 const THIRTY_DAYS = 30 * 86_400_000;
@@ -43,12 +45,15 @@ export function catalogAuthorStore(db: CatalogDb): AuthorStore {
       const authorId = hit?.[0]?.author_id;
       if (!authorId) return null;
       const names = check(await db.from("author_names").select("*").eq("author_id", authorId)) as AuthorNameRow[];
-      const authorRows = check(await db.from("authors").select("id, wikidata_checked_at").eq("id", authorId)) as
-        | Array<{ wikidata_checked_at: string | null }>
+      const authorRows = check(
+        await db.from("authors").select("id, wikidata_checked_at, sound_checked_at").eq("id", authorId),
+      ) as
+        | Array<{ wikidata_checked_at: string | null; sound_checked_at: string | null }>
         | null;
       return {
         author_id: authorId,
         wikidata_checked_at: authorRows?.[0]?.wikidata_checked_at ?? null,
+        sound_checked_at: authorRows?.[0]?.sound_checked_at ?? null,
         names: names ?? [],
       };
     },
@@ -86,6 +91,12 @@ export function catalogAuthorStore(db: CatalogDb): AuthorStore {
     },
     async markWikidataChecked(authorId, at) {
       check(await db.from("authors").update({ wikidata_checked_at: at.toISOString() }).eq("id", authorId));
+    },
+    async markSoundChecked(authorId, at) {
+      check(
+        await db.from("authors").update({ sound_checked_at: at.toISOString() })
+          .eq("id", authorId),
+      );
     },
   };
 }
@@ -128,7 +139,7 @@ async function namesFor(
   if (found) {
     const stored = found.names
       .filter((row) => row.lang === toLang)
-      .sort((a, b) => Number(a.source === "wikidata") - Number(b.source === "wikidata"))
+      .sort((a, b) => sourceRank(a.source) - sourceRank(b.source))
       .map((row) => row.name);
     if (stored.length) return stored;
     if (found.wikidata_checked_at) {
@@ -142,6 +153,52 @@ async function namesFor(
   if (!found) await store.addNames(authorId, [{ lang: fromLang, name: from.trim(), source: "wikidata" }]);
   if (answer) await store.addNames(authorId, [{ lang: toLang, name: answer, source: "wikidata" }]);
   await store.markWikidataChecked(authorId, now());
+  return answer ? [answer] : [];
+}
+
+function sourceRank(source: AuthorNameRow["source"]): number {
+  return source === "link" ? 0 : source === "wikidata" ? 1 : 2;
+}
+
+export async function soundNames(
+  store: AuthorStore,
+  en: string,
+  lookup: (name: string) => Promise<string | null>,
+  now: () => Date,
+): Promise<string[]> {
+  const key = nameKey(en ?? "");
+  if (!key) return [];
+  const found = await store.find("en", key);
+  if (found) {
+    const stored = found.names
+      .filter((row) => row.lang === "he")
+      .sort((a, b) => sourceRank(a.source) - sourceRank(b.source))
+      .map((row) => row.name);
+    if (stored.length) return stored;
+    if (found.sound_checked_at) {
+      const age = now().getTime() - new Date(found.sound_checked_at).getTime();
+      if (age < THIRTY_DAYS) return [];
+    }
+  }
+  // A provider failure throws here, before anything is stored.
+  const answer = (await lookup(en.trim()))?.trim() || null;
+  const checkedAt = now();
+  const authorId = found?.author_id ?? await store.create();
+  if (!found) {
+    await store.addNames(authorId, [{
+      lang: "en",
+      name: en.trim(),
+      source: "wikidata",
+    }]);
+  }
+  if (answer) {
+    await store.addNames(authorId, [{
+      lang: "he",
+      name: answer,
+      source: "sound",
+    }]);
+  }
+  await store.markSoundChecked(authorId, checkedAt);
   return answer ? [answer] : [];
 }
 

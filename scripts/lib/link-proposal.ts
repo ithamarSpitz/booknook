@@ -19,7 +19,7 @@ import { fetchSimaniaPage, pageOriginal } from "./simania-page.ts";
 
 /** In-process `AuthorStore`, for dry runs and for scripts without a database. */
 export function memoryAuthorStore(): AuthorStore {
-  let authors: Array<{ id: string; checked: string | null }> = [];
+  let authors: Array<{ id: string; checked: string | null; soundChecked: string | null }> = [];
   const names: AuthorNameRow[] = [];
   let next = 1;
   return {
@@ -30,13 +30,14 @@ export function memoryAuthorStore(): AuthorStore {
       const found: FoundAuthor = {
         author_id: author.id,
         wikidata_checked_at: author.checked,
+        sound_checked_at: author.soundChecked,
         names: names.filter((row) => row.author_id === author.id).map((row) => ({ ...row })),
       };
       return Promise.resolve(found);
     },
     create() {
       const id = `m${next++}`;
-      authors.push({ id, checked: null });
+      authors.push({ id, checked: null, soundChecked: null });
       return Promise.resolve(id);
     },
     addNames(authorId: string, added: NewAuthorName[]) {
@@ -55,6 +56,11 @@ export function memoryAuthorStore(): AuthorStore {
     markWikidataChecked(authorId, at) {
       const author = authors.find((a) => a.id === authorId);
       if (author) author.checked = at.toISOString();
+      return Promise.resolve();
+    },
+    markSoundChecked(authorId, at) {
+      const author = authors.find((a) => a.id === authorId);
+      if (author) author.soundChecked = at.toISOString();
       return Promise.resolve();
     },
   };

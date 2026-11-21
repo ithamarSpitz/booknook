@@ -18,7 +18,7 @@ import type { AuthorNameRow } from "../../supabase/functions/_shared/types.ts";
 import { FakeDb } from "./helpers/fake-db.ts";
 
 class MemoryStore implements AuthorStore {
-  authors: Array<{ id: string; checked: string | null }> = [];
+  authors: Array<{ id: string; checked: string | null; soundChecked: string | null }> = [];
   names: AuthorNameRow[] = [];
   private next = 1;
 
@@ -29,12 +29,13 @@ class MemoryStore implements AuthorStore {
     return Promise.resolve({
       author_id: author.id,
       wikidata_checked_at: author.checked,
+      sound_checked_at: author.soundChecked,
       names: this.names.filter((row) => row.author_id === author.id).map((row) => ({ ...row })),
     });
   }
   create(): Promise<string> {
     const id = `a${this.next++}`;
-    this.authors.push({ id, checked: null });
+    this.authors.push({ id, checked: null, soundChecked: null });
     return Promise.resolve(id);
   }
   addNames(authorId: string, names: NewAuthorName[]): Promise<void> {
@@ -52,6 +53,10 @@ class MemoryStore implements AuthorStore {
   }
   markWikidataChecked(authorId: string, at: Date): Promise<void> {
     this.authors.find((a) => a.id === authorId)!.checked = at.toISOString();
+    return Promise.resolve();
+  }
+  markSoundChecked(authorId: string, at: Date): Promise<void> {
+    this.authors.find((a) => a.id === authorId)!.soundChecked = at.toISOString();
     return Promise.resolve();
   }
 }
@@ -123,12 +128,17 @@ for (const { label, make } of stores()) {
     const id = await store.create();
     await store.addNames(id, [
       { lang: "en", name: "Alice Feeney", source: "link" },
+      { lang: "he", name: "אליס פיני צליל", source: "sound" },
       { lang: "he", name: "אליס פיני וי", source: "wikidata" },
       { lang: "he", name: "אליס פיני", source: "link" },
     ]);
     let calls = 0;
     const deps = { wikidataHebrewAuthorStrict: () => (calls++, Promise.resolve("x")), now: () => T0 };
-    assertEquals(await hebrewNames(store, "alice feeney", deps), ["אליס פיני", "אליס פיני וי"]);
+    assertEquals(await hebrewNames(store, "alice feeney", deps), [
+      "אליס פיני",
+      "אליס פיני וי",
+      "אליס פיני צליל",
+    ]);
     assertEquals(calls, 0);
   });
 
