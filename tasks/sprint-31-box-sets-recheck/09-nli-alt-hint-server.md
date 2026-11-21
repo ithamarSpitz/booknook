@@ -4,7 +4,7 @@ stage: 2
 model_class: worker
 timeout_minutes: 25
 review: true
-allow_protected: false
+allow_protected: true
 depends_on:
   - S31-T1
 allowed_paths:

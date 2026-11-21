@@ -65,3 +65,7 @@ Measured on prod on 2026-11-21. A review of all 453 Wikidata/NLI links found wro
      - This adds at most 3 NLI requests per English-only candidate. Update the request bounds accordingly.
 
 Change nothing else.
+
+# Acceptance criteria
+
+1. The text matches the measured cases above; both verification commands pass.
