@@ -1495,3 +1495,44 @@ sprints:
         stage: 3
         depends_on:
         - S38-T2
+  S39-authors-dictionary:
+    name: Authors table used by every author lookup; dictionary as the last rematch step
+    tasks:
+      S39-T1:
+        file: tasks/sprint-39-authors-dictionary/01-contract.md
+        stage: 1
+        depends_on: []
+      S39-T2:
+        file: tasks/sprint-39-authors-dictionary/02-migration.md
+        stage: 2
+        depends_on:
+        - S39-T1
+      S39-T3:
+        file: tasks/sprint-39-authors-dictionary/03-authors-module.md
+        stage: 3
+        depends_on:
+        - S39-T2
+      S39-T4:
+        file: tasks/sprint-39-authors-dictionary/04-app-wiring.md
+        stage: 4
+        depends_on:
+        - S39-T3
+      S39-T5:
+        file: tasks/sprint-39-authors-dictionary/05-operator-wiring.md
+        stage: 4
+        depends_on:
+        - S39-T3
+      S39-T6:
+        file: tasks/sprint-39-authors-dictionary/06-dictionary.md
+        stage: 5
+        depends_on:
+        - S39-T5
+      S39-T7:
+        file: tasks/sprint-39-authors-dictionary/07-docs.md
+        stage: 6
+        depends_on:
+        - S39-T2
+        - S39-T3
+        - S39-T4
+        - S39-T5
+        - S39-T6
