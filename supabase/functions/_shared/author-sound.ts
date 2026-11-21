@@ -1,4 +1,11 @@
 import { nameSoundScore } from "./names.ts";
+import type { SimaniaBook } from "./simania.ts";
+
+export type SearchBooks = (
+  query: string,
+  limit: number,
+  offset: number,
+) => Promise<SimaniaBook[]>;
 
 const FINAL: Record<string, string> = {
   "מ": "ם",
@@ -220,4 +227,64 @@ function sameName(he: string, en: string): number {
 
 export function sameAuthor(hebrewName: string, englishName: string): boolean {
   return sameName(hebrewName, englishName) > 0;
+}
+
+export async function hebrewAuthorBySound(
+  englishName: string,
+  searchBooks: SearchBooks,
+): Promise<string | null> {
+  const et = enTokens(englishName);
+  if (!et.length) return null;
+  const lastS = surnameSpellings(et[et.length - 1], 6);
+  const firstS = et.length > 1 ? hebrewSpellings(et[0], 4) : [];
+  const plan: [string, number][] = [];
+  // Full names first (precise), then each surname spelling alone (Simania
+  // matches prefixes).
+  for (const f of firstS) {
+    for (const l of lastS.slice(0, 2)) plan.push([`${f} ${l}`, 0]);
+  }
+  for (const l of lastS) plan.push([l, 0]);
+  for (const l of lastS.slice(2)) {
+    if (firstS[0]) plan.push([`${firstS[0]} ${l}`, 0]);
+  }
+  plan.push([lastS[0], 50]);
+  // Simania treats ' and ׳ as different characters: send both.
+  const queries = plan.slice(0, 20)
+    .flatMap(([query, offset]) =>
+      (query.includes("'")
+        ? [[query, offset], [query.replace(/'/g, "׳"), offset]]
+        : [[query, offset]]) as [string, number][]
+    )
+    .slice(0, 26);
+  const counts = new Map<string, { n: number; score: number }>();
+  const seen = new Set<number>();
+  for (const [query, offset] of queries) {
+    const list = await searchBooks(query, 50, offset);
+    for (const book of list) {
+      const id = Number(book.id);
+      if (!Number.isFinite(id) || seen.has(id)) continue;
+      seen.add(id);
+      const author = String(book.author ?? "").trim();
+      if (!/[א-ת]/.test(author)) continue;
+      // Whole comma-separated names too: splitting on " ו" ("and") alone
+      // would cut surnames that start with ו (וולטון).
+      const parts = new Set([
+        ...author.split(/\s*[,،]\s*|\s+ו(?=[א-ת])/),
+        ...author.split(/\s*,\s*/),
+      ]);
+      for (const part of parts) {
+        const score = sameName(part, englishName);
+        if (!score) continue;
+        const key = variants(part)[0];
+        const count = counts.get(key) ?? { n: 0, score: 0 };
+        count.n++;
+        count.score = Math.max(count.score, score);
+        counts.set(key, count);
+      }
+    }
+  }
+  const ranked = [...counts].sort((x, y) =>
+    y[1].n - x[1].n || y[1].score - x[1].score
+  );
+  return ranked[0]?.[0] ?? null;
 }
