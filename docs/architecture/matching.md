@@ -37,6 +37,8 @@ With `boxTitle`, `findHardcoverBook` keeps only candidates whose title has a box
 
 `ensureResolved` (`_shared/catalog.ts`) passes `retryWithAuthor: true` on the Wikidata and NLI paths. On the NLI path it adds `soundAuthor` (the edition's Hebrew author) only when no English author hint was found. The final fuzzy path uses `requireAuthor` only.
 
+Search documents and details: Hardcover matching ranks candidates built from the search documents. It falls back to the details request only when a document is missing. `ensureResolved` fetches one book's details with `hardcoverBooks` before writing a new work.
+
 Series-prefix NLI retry: when the NLI lookup of the full title finds nothing and the edition has a `series` such that the title starts with `<series> - ` (hyphen or en dash), `ensureResolved` repeats `nliOriginal` with the rest of the title. It does not retry when the rest is empty or is only a volume label (`כרך`, `ספר` or `חלק` plus one word).
 
 Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared/fallback-match.ts`) against the Simania edition author. A rejected match is discarded and resolution falls through to the next path. A rejection is not a provider failure, so it does not keep the edition `pending`.
