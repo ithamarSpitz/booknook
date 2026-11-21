@@ -55,15 +55,33 @@ export type FindHardcoverBookOptions = {
   boxTitle?: boolean;
 };
 
-function authorBoost(
+/** Lowercase, ignore dots, and join each run of single-letter words (`C. J.` -> `cj`). */
+function canonicalInitials(name: string): string {
+  const words = name.toLowerCase().replace(/\./g, " ").split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  let prevSingle = false;
+  for (const word of words) {
+    const single = [...word].length === 1;
+    if (single && prevSingle) out[out.length - 1] += word;
+    else out.push(word);
+    prevSingle = single;
+  }
+  return out.join(" ");
+}
+
+export function authorBoost(
   authorHint: string,
   soundAuthor: string,
   book: HardcoverBook,
 ): number {
   const bookAuthors = authors(book);
+  const canonicalHint = canonicalInitials(authorHint);
   if (
     (authorHint.trim() &&
-      bookAuthors.some((author) => similarity(authorHint, author) > 0.45)) ||
+      bookAuthors.some((author) =>
+        similarity(authorHint, author) > 0.45 ||
+        similarity(canonicalHint, canonicalInitials(author)) > 0.45
+      )) ||
     (soundAuthor.trim() && nameSoundScore(soundAuthor, bookAuthors) >= 0.6)
   ) return 2;
   return 0;
