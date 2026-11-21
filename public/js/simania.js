@@ -140,6 +140,23 @@ function stripTrailingLabels(value) {
   return stripped || original;
 }
 
+const HEBREW_BOX_WORDS = "מארז|טרילוגיית|טרילוגיה|ערכת|סט";
+const HEBREW_BOX_RE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${HEBREW_BOX_WORDS})(?![\\p{L}\\p{N}])`,
+  "u",
+);
+const HEBREW_BOX_RE_ALL = new RegExp(HEBREW_BOX_RE.source, "gu");
+
+/** True when the title contains a Hebrew box-set word (whole word). */
+export function hasHebrewBoxWord(title) {
+  return HEBREW_BOX_RE.test(String(title ?? ""));
+}
+
+/** Removes Hebrew box-set words, collapses spaces and trims. */
+export function stripHebrewBoxWords(title) {
+  return String(title ?? "").replace(HEBREW_BOX_RE_ALL, " ").replace(/\s+/g, " ").trim();
+}
+
 /** Contract step 2 of recommendation localization. */
 export async function matchHebrewBook(title, author = "", fetchImpl = fetch) {
   const hintWords = titleWords(title);
@@ -157,6 +174,10 @@ export async function matchHebrewBook(title, author = "", fetchImpl = fetch) {
     });
   } else if (!results.length) {
     results = await searchBooks(title, 6, fetchImpl);
+  }
+
+  if (!hasHebrewBoxWord(title)) {
+    results = results.filter((book) => !hasHebrewBoxWord(book?.title));
   }
 
   const authorSupplied = Boolean(String(author ?? "").trim());

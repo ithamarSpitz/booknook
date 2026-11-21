@@ -8,6 +8,7 @@ import {
   searchByAuthor,
   similarity,
   simaniaIdOf,
+  stripHebrewBoxWords,
 } from "./simania.js";
 import {
   authorAgrees,
@@ -19,6 +20,8 @@ import {
 } from "./hebrew-fallback.js";
 import { nameSoundScore } from "./names.js";
 import { notifyRecsInputsChanged, notifyShelvesChanged } from "./events.js";
+
+const ENGLISH_BOX_RE = /\b(?:Trilogy|Collection|Box Set|Boxed Set|Omnibus)\b/i;
 
 export const LIBRARY_MOVE_LABEL = "העבר למדף";
 export const LIBRARY_REMOVE_LABEL = "הסר";
@@ -420,7 +423,11 @@ export async function localizeRecommendations(items, deps) {
   const queue = items.filter((rec) => rec.english_only && rec.simania_id == null);
   async function one(rec) {
     const payloadById = new Map();
-    const hint = rec.hebrew_hint;
+    let hint = rec.hebrew_hint;
+    if (hint?.title && !ENGLISH_BOX_RE.test(String(rec.title ?? ""))) {
+      const stripped = stripHebrewBoxWords(hint.title);
+      if (stripped && stripped !== hint.title) hint = { ...hint, title: stripped };
+    }
     let simaniaId = null;
     let chosenSimaniaAuthor = "";
     /** @type {"wikidata"|"nli"|"nli_author"|"omnibus"|null} */

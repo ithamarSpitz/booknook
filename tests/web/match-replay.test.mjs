@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { matchHebrewBook, simaniaIdOf } from "../../public/js/simania.js";
+import { matchHebrewBook, simaniaIdOf, stripHebrewBoxWords } from "../../public/js/simania.js";
 
 const fixtureUrl = new URL("./fixtures/match-replay.jsonl", import.meta.url);
 
@@ -22,13 +22,25 @@ test("S29 Simania matching preserves linked picks and accepts the replay cases",
   let linkedCases = 0;
 
   for (const replay of cases) {
+    // Mirrors localizeRecommendations: single-book cards drop Hebrew box words.
+    const boxCard = /(?:Trilogy|Collection|Box Set|Boxed Set|Omnibus)/i.test(replay.english_title ?? "");
+    const stripped = stripHebrewBoxWords(replay.hint.title);
+    const hintTitle = !boxCard && stripped && stripped !== replay.hint.title
+      ? stripped
+      : replay.hint.title;
     const pick = await matchHebrewBook(
-      replay.hint.title,
+      hintTitle,
       replay.hint.author ?? "",
       fakeFetch(replay.results),
     );
     const pickedId = simaniaIdOf(pick);
 
+    if (replay.hardcover_id === 88639) {
+      // S31 box-set hints: the Hunger Games hint no longer picks the box set.
+      assert.notEqual(pickedId, 980165, "hardcover_id 88639");
+      if (replay.linked.includes(replay.current)) linkedCases++;
+      continue;
+    }
     if (replay.linked.includes(replay.current)) {
       linkedCases++;
       assert.equal(pickedId, replay.current, `hardcover_id ${replay.hardcover_id}`);
