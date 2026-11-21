@@ -1,4 +1,12 @@
-import { wikidataEnglishAuthor } from "../../supabase/functions/_shared/bridges.ts";
+import {
+  type AuthorStore,
+  englishNames,
+  type FoundAuthor,
+  nameKey,
+  type NewAuthorName,
+} from "../../supabase/functions/_shared/authors.ts";
+import { wikidataEnglishAuthorStrict } from "../../supabase/functions/_shared/bridges.ts";
+import type { AuthorNameRow } from "../../supabase/functions/_shared/types.ts";
 import {
   authors,
   type HardcoverBook,
@@ -9,9 +17,53 @@ import { similarity } from "../../supabase/functions/_shared/utils.ts";
 import { nameSoundScore } from "./names.ts";
 import { fetchSimaniaPage, pageOriginal } from "./simania-page.ts";
 
+/** In-process `AuthorStore`, for dry runs and for scripts without a database. */
+export function memoryAuthorStore(): AuthorStore {
+  let authors: Array<{ id: string; checked: string | null }> = [];
+  const names: AuthorNameRow[] = [];
+  let next = 1;
+  return {
+    find(lang, key) {
+      const hit = names.find((row) => row.lang === lang && row.name_key === key);
+      if (!hit) return Promise.resolve(null);
+      const author = authors.find((a) => a.id === hit.author_id)!;
+      const found: FoundAuthor = {
+        author_id: author.id,
+        wikidata_checked_at: author.checked,
+        names: names.filter((row) => row.author_id === author.id).map((row) => ({ ...row })),
+      };
+      return Promise.resolve(found);
+    },
+    create() {
+      const id = `m${next++}`;
+      authors.push({ id, checked: null });
+      return Promise.resolve(id);
+    },
+    addNames(authorId: string, added: NewAuthorName[]) {
+      for (const entry of added) {
+        const key = nameKey(entry.name);
+        if (!key || names.some((row) => row.lang === entry.lang && row.name_key === key)) continue;
+        names.push({ author_id: authorId, lang: entry.lang, name: entry.name, name_key: key, source: entry.source });
+      }
+      return Promise.resolve();
+    },
+    merge(keepId, dropId) {
+      for (const row of names) if (row.author_id === dropId) row.author_id = keepId;
+      authors = authors.filter((a) => a.id !== dropId);
+      return Promise.resolve();
+    },
+    markWikidataChecked(authorId, at) {
+      const author = authors.find((a) => a.id === authorId);
+      if (author) author.checked = at.toISOString();
+      return Promise.resolve();
+    },
+  };
+}
+
 export interface ProposalDeps {
   fetchPage(id: number): Promise<string>;
-  wikidataEnglishAuthor(name: string): Promise<string | null>;
+  store: AuthorStore;
+  wikidataEnglishAuthorStrict(name: string): Promise<string | null>;
   searchIds(title: string): Promise<number[]>;
   books(ids: number[]): Promise<HardcoverBook[]>;
 }
@@ -31,7 +83,8 @@ export interface LinkProposal {
 
 const defaultDeps: ProposalDeps = {
   fetchPage: fetchSimaniaPage,
-  wikidataEnglishAuthor,
+  store: memoryAuthorStore(),
+  wikidataEnglishAuthorStrict,
   searchIds: searchHardcoverBooks,
   books: hardcoverBooks,
 };
@@ -60,7 +113,10 @@ export async function proposeLink(
 
     originalTitle = original.title;
     englishAuthor = original.author ??
-      await providers.wikidataEnglishAuthor(edition.author ?? "");
+      (await englishNames(providers.store, edition.author ?? "", {
+        wikidataEnglishAuthorStrict: providers.wikidataEnglishAuthorStrict,
+        now: () => new Date(),
+      }))[0] ?? null;
     const searchedIds = (await providers.searchIds(originalTitle)).slice(0, 8);
     const searchedIdSet = new Set(searchedIds);
     const candidates = (await providers.books(searchedIds))
