@@ -27,7 +27,7 @@ async function providerFetch(url: string, init: RequestInit = {}, timeoutMs?: nu
 
 const NLI_SRU = "https://nli.alma.exlibrisgroup.com/view/sru/972NNL_INST";
 const WORK_TYPES = new Set(["Q571", "Q8261", "Q7725634", "Q47461344", "Q49084", "Q25379"]);
-const REJECT_TYPES = new Set(["Q11424", "Q24856", "Q5398426", "Q277759", "Q7058673", "Q7889"]);
+const REJECT_TYPES = new Set(["Q11424", "Q24856", "Q5398426", "Q277759", "Q7058673", "Q7889", "Q1667921", "Q13593966", "Q7725310"]);
 
 type Bridge = { title: string; author?: string; versoAuthor?: string; source: "Wikidata" | "NLI" };
 type Entity = {
