@@ -169,10 +169,53 @@ async function searchHardcoverDetails(
     `query { search(query: "${safe}", query_type: "Book", per_page: 8) { ids results } }`,
   );
   const ids = (search.search?.ids ?? []).map(Number).filter(Number.isFinite);
+  const fromDocs = booksFromDocuments(ids, search.search?.results);
   return {
-    books: ids.length ? await hardcoverBooks(ids) : [],
+    books: fromDocs ?? (ids.length ? await hardcoverBooks(ids) : []),
     alternatives: alternativeTitlesById(search.search?.results),
   };
+}
+
+const searchDocumentBooks = new WeakSet<HardcoverBook>();
+
+/** True for a book built from a search document, so its details were never fetched. */
+export function isSearchDocumentBook(book: HardcoverBook): boolean {
+  return searchDocumentBooks.has(book);
+}
+
+/** Build books from search documents in `ids` order; null when any ID lacks a document. */
+function booksFromDocuments(ids: number[], results: unknown): HardcoverBook[] | null {
+  const hits = (results as { hits?: unknown } | null | undefined)?.hits;
+  const docs = new Map<number, Record<string, unknown>>();
+  if (Array.isArray(hits)) {
+    for (const hit of hits) {
+      const doc = (hit as { document?: Record<string, unknown> } | null)?.document;
+      if (!doc || typeof doc !== "object") continue;
+      const id = Number(doc.id);
+      // A document without contributors is not a full search document; treat it as missing.
+      if (Number.isFinite(id) && Array.isArray(doc.contributions) && !docs.has(id)) docs.set(id, doc);
+    }
+  }
+  const books: HardcoverBook[] = [];
+  for (const id of ids) {
+    const doc = docs.get(id);
+    if (!doc) return null;
+    const contributions = Array.isArray(doc.contributions) ? doc.contributions : [];
+    const image = doc.image as { url?: unknown } | null | undefined;
+    const book: HardcoverBook = {
+      id,
+      title: String(doc.title ?? ""),
+      slug: typeof doc.slug === "string" ? doc.slug : undefined,
+      users_read_count: Number(doc.users_read_count) || 0,
+      cached_contributors: contributions.map((c) => ({
+        author: { name: (c as { author?: { name?: string } } | null)?.author?.name },
+      })),
+      image: image && typeof image.url === "string" ? { url: image.url } : null,
+    };
+    searchDocumentBooks.add(book);
+    books.push(book);
+  }
+  return books;
 }
 
 export async function findHardcoverBook(
