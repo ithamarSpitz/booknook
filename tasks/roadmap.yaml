@@ -729,8 +729,8 @@ sprints:
       - npm run test:functions
       - npm run test:web
   S17-genre-control:
-    name: Genres from data (normalized tags, aliases, en-prefixed genres) and reader control over
-      genre shelves (pin, hide, 1-20 shelves, settings page)
+    name: Genres from data (normalized tags, aliases, en-prefixed genres) and reader
+      control over genre shelves (pin, hide, 1-20 shelves, settings page)
     tasks:
       S17-T1:
         file: tasks/sprint-17-genre-control/01-contract.md
@@ -1026,8 +1026,8 @@ sprints:
         - S23-T2
         - S23-T3
   S24-refresh-speed:
-    name: 'refresh:all runs books in parallel with one Simania throttle and skips
-      recently checked books'
+    name: refresh:all runs books in parallel with one Simania throttle and skips recently
+      checked books
     tasks:
       S24-T1:
         file: tasks/sprint-24-refresh-speed/01-contract.md
@@ -1162,8 +1162,8 @@ sprints:
         depends_on:
         - S28-T2
   S29-match-rules:
-    name: Simania match word-subset boost, label tie-break, title-only search for one-word hints;
-      replay guards prod links
+    name: Simania match word-subset boost, label tie-break, title-only search for
+      one-word hints; replay guards prod links
     tasks:
       S29-T1:
         file: tasks/sprint-29-match-rules/01-contract.md
@@ -1185,8 +1185,8 @@ sprints:
         depends_on:
         - S29-T3
   S30-hc-retry-omnibus:
-    name: Hardcover title+author retry and Hebrew author sound, NLI series prefix, omnibus
-      volume links with report, requeue by ID
+    name: Hardcover title+author retry and Hebrew author sound, NLI series prefix,
+      omnibus volume links with report, requeue by ID
     tasks:
       S30-T1:
         file: tasks/sprint-30-hc-retry-omnibus/01-contract.md
@@ -1232,6 +1232,36 @@ sprints:
         - S30-T5
         - S30-T6
         - S30-T7
+      S30-T10:
+        file: tasks/sprint-30-hc-retry-omnibus/S30-T10.md
+        stage: 3
+        depends_on:
+        - S30-T2
+        - S30-T9
+      S30-T11:
+        file: tasks/sprint-30-hc-retry-omnibus/S30-T11.md
+        stage: 3
+        depends_on:
+        - S30-T4
+        - S30-T9
+      S30-T12:
+        file: tasks/sprint-30-hc-retry-omnibus/S30-T12.md
+        stage: 4
+        depends_on:
+        - S30-T7
+        - S30-T11
+      S30-T13:
+        file: tasks/sprint-30-hc-retry-omnibus/S30-T13.md
+        stage: 5
+        depends_on:
+        - S30-T8
+        - S30-T10
+        - S30-T12
+      S30-T9:
+        file: tasks/sprint-30-hc-retry-omnibus/S30-T9.md
+        stage: 2
+        depends_on:
+        - S30-T1
   S31-box-sets-recheck:
     name: Alternative titles in every Hardcover match, box sets, box-set hints, genre
       shelves skip shelved works, recheck:links operator tool
