@@ -1232,3 +1232,52 @@ sprints:
         - S30-T5
         - S30-T6
         - S30-T7
+  S31-box-sets-recheck:
+    name: Alternative titles in every Hardcover match, box sets, box-set hints, genre
+      shelves skip shelved works, recheck:links operator tool
+    tasks:
+      S31-T1:
+        file: tasks/sprint-31-box-sets-recheck/01-contract.md
+        stage: 1
+        depends_on: []
+      S31-T2:
+        file: tasks/sprint-31-box-sets-recheck/02-hardcover-alt-box.md
+        stage: 2
+        depends_on:
+        - S31-T1
+      S31-T3:
+        file: tasks/sprint-31-box-sets-recheck/03-resolve-match.md
+        stage: 2
+        depends_on:
+        - S31-T1
+      S31-T5:
+        file: tasks/sprint-31-box-sets-recheck/05-box-hints.md
+        stage: 2
+        depends_on:
+        - S31-T1
+      S31-T6:
+        file: tasks/sprint-31-box-sets-recheck/06-genre-shelved-filter.md
+        stage: 2
+        depends_on:
+        - S31-T1
+      S31-T4:
+        file: tasks/sprint-31-box-sets-recheck/04-box-resolver.md
+        stage: 3
+        depends_on:
+        - S31-T2
+        - S31-T3
+      S31-T7:
+        file: tasks/sprint-31-box-sets-recheck/07-recheck-links.md
+        stage: 4
+        depends_on:
+        - S31-T4
+      S31-T8:
+        file: tasks/sprint-31-box-sets-recheck/08-docs.md
+        stage: 5
+        depends_on:
+        - S31-T2
+        - S31-T3
+        - S31-T4
+        - S31-T5
+        - S31-T6
+        - S31-T7
