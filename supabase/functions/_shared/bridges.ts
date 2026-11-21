@@ -154,9 +154,14 @@ async function wikidataHebrewLookup(title: string, author: string): Promise<Brid
   return null;
 }
 
+/** Throws `ProviderError` on a provider failure; null means Wikidata has no Hebrew name. */
+export async function wikidataHebrewAuthorStrict(englishName: string): Promise<string | null> {
+  return await wikidataHebrewAuthorLookup(englishName);
+}
+
 export async function wikidataHebrewAuthor(englishName: string): Promise<string | null> {
   try {
-    return await wikidataHebrewAuthorLookup(englishName);
+    return await wikidataHebrewAuthorStrict(englishName);
   } catch {
     return null;
   }
@@ -182,9 +187,14 @@ async function wikidataHebrewAuthorLookup(englishName: string): Promise<string |
   return null;
 }
 
+/** Throws `ProviderError` on a provider failure; null means Wikidata has no English name. */
+export async function wikidataEnglishAuthorStrict(hebrewName: string): Promise<string | null> {
+  return await wikidataEnglishAuthorLookup(hebrewName);
+}
+
 export async function wikidataEnglishAuthor(hebrewName: string): Promise<string | null> {
   try {
-    return await wikidataEnglishAuthorLookup(hebrewName);
+    return await wikidataEnglishAuthorStrict(hebrewName);
   } catch (error) {
     if (error instanceof ProviderError) throw error;
     return null;
