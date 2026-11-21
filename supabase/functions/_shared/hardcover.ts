@@ -126,20 +126,51 @@ export async function findHardcoverBook(
   if (firstMatch) return firstMatch;
   if (!options?.retryWithAuthor || !/[A-Za-z]/.test(authorHint)) return null;
 
-  const retryDetails = await searchHardcoverDetails(`${originalTitle} ${authorHint}`);
+  const retryQuery = `${originalTitle} ${authorHint}`.replace(/[\\"]/g, " ").trim();
+  const search = await graphql<{
+    search?: { ids?: Array<string | number>; results?: unknown };
+  }>(
+    `query { search(query: "${retryQuery}", query_type: "Book", per_page: 8) { ids results } }`,
+  );
+  const retryIds = (search.search?.ids ?? []).map(Number).filter(Number.isFinite);
+  const retryDetails = retryIds.length ? await hardcoverBooks(retryIds) : [];
+  const alternatives = alternativeTitlesById(search.search?.results);
   return rankHardcoverBooks(
     retryDetails,
     authorHint,
     soundAuthor,
     (book) => {
       const beforeColon = book.title.split(":", 1)[0].trim();
-      return Math.max(
+      let best = Math.max(
         similarity(originalTitle, book.title),
         similarity(originalTitle, beforeColon),
       );
+      for (const alt of alternatives.get(Number(book.id)) ?? []) {
+        best = Math.max(best, similarity(originalTitle, alt));
+      }
+      return best;
     },
     true,
   );
+}
+
+/** Map numeric book id to `alternative_titles` from a search `results` payload. */
+function alternativeTitlesById(results: unknown): Map<number, string[]> {
+  const map = new Map<number, string[]>();
+  const hits = (results as { hits?: unknown } | null | undefined)?.hits;
+  if (!Array.isArray(hits)) return map;
+  for (const hit of hits) {
+    const doc = (hit as { document?: { id?: unknown; alternative_titles?: unknown } } | null)
+      ?.document;
+    if (!doc || typeof doc.id !== "string") continue;
+    const id = Number(doc.id);
+    if (!Number.isFinite(id) || !Array.isArray(doc.alternative_titles)) continue;
+    map.set(
+      id,
+      doc.alternative_titles.filter((t): t is string => typeof t === "string"),
+    );
+  }
+  return map;
 }
 
 export async function hardcoverBooks(ids: number[]): Promise<HardcoverBook[]> {
