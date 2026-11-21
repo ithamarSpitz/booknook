@@ -1536,3 +1536,20 @@ sprints:
         - S39-T4
         - S39-T5
         - S39-T6
+  S40-author-agreement:
+    name: rematch:cached requires the Hebrew edition author to agree with the work
+    tasks:
+      S40-T1:
+        file: tasks/sprint-40-author-agreement/01-contract.md
+        stage: 1
+        depends_on: []
+      S40-T2:
+        file: tasks/sprint-40-author-agreement/02-author-agreement.md
+        stage: 2
+        depends_on:
+        - S40-T1
+      S40-T3:
+        file: tasks/sprint-40-author-agreement/03-docs.md
+        stage: 3
+        depends_on:
+        - S40-T2
