@@ -27,7 +27,7 @@ type FunctionDeps = {
 };
 
 type LinkEditionInput = Omit<LinkEditionRequest, "source"> & {
-  source: LinkEditionRequest["source"] | "nli_author";
+  source: LinkEditionRequest["source"] | "nli_author" | "omnibus";
 };
 
 const defaults: FunctionDeps = {
@@ -57,11 +57,11 @@ export function createHandler(overrides: Partial<FunctionDeps> = {}) {
         !Number.isSafeInteger(input.simania_id) ||
         Number(input.simania_id) <= 0 ||
         (input.source !== "wikidata" && input.source !== "nli" &&
-          input.source !== "nli_author")
+          input.source !== "nli_author" && input.source !== "omnibus")
       ) {
         throw new HttpError(
           400,
-          "work_id, simania_id and source (wikidata, nli or nli_author) are required.",
+          "work_id, simania_id and source (wikidata, nli, nli_author or omnibus) are required.",
         );
       }
       const supplied = suppliedSimania(input.simania);
