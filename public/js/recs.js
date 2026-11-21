@@ -30,6 +30,10 @@ export const RECS_REMOVE_LABEL = "הסר";
 export const RECS_NOT_MY_TYPE_LABEL = "לא הסגנון שלי";
 export const RECS_SHELF_PLACEHOLDER = "בחרו מדף";
 export const ENGLISH_ONLY_NOTE = "אין מהדורה עברית זמינה לספר זה.";
+/** @param {unknown} source */
+function hintStatus(source) {
+  return source === "nli" || source === "hardcover" ? source : "wikidata";
+}
 const REFRESH_FAILED_STATUS = "העדכון האחרון של ההמלצות נכשל. ננסה שוב בשינוי הבא.";
 
 /**
@@ -194,7 +198,7 @@ export function recommendationFromApiCard(card) {
     can_add: true,
     hebrew_hint: simaniaId == null && c.hebrew_hint && typeof c.hebrew_hint === "object"
       ? {
-        source: c.hebrew_hint.source === "nli" ? "nli" : "wikidata",
+        source: hintStatus(c.hebrew_hint.source),
         title: String(c.hebrew_hint.title ?? ""),
         author: c.hebrew_hint.author != null ? String(c.hebrew_hint.author) : null,
         ...(typeof c.hebrew_hint.alternate === "string" && c.hebrew_hint.alternate.trim()
@@ -360,7 +364,7 @@ export async function localizeFallback(rec, deps) {
  *   callFunction: (name: string, body: Record<string, unknown>) => Promise<unknown>,
  *   similarity?: typeof similarity,
  * }} deps
- * @returns {Promise<{ simania_id: number, resolve_status: "wikidata" | "nli" } | null>}
+ * @returns {Promise<{ simania_id: number, resolve_status: "wikidata" | "nli" | "hardcover" } | null>}
  */
 export async function verifyTitleMatch(rec, book, deps) {
   const sim = deps.similarity ?? similarity;
@@ -370,7 +374,7 @@ export async function verifyTitleMatch(rec, book, deps) {
 
   const hebrewAuthor = rec.hebrew_author;
   if (hebrewAuthor && sim(hebrewAuthor, book.author ?? "") >= 0.6) {
-    const resolve_status = rec.hebrew_hint?.source === "nli" ? "nli" : "wikidata";
+    const resolve_status = hintStatus(rec.hebrew_hint?.source);
     return { simania_id: simaniaId, resolve_status };
   }
 
@@ -379,7 +383,7 @@ export async function verifyTitleMatch(rec, book, deps) {
     .map((author) => author.trim())
     .filter(Boolean);
   if (englishAuthors.length && nameSoundScore(book.author ?? "", englishAuthors) >= 0.8) {
-    const resolve_status = rec.hebrew_hint?.source === "nli" ? "nli" : "wikidata";
+    const resolve_status = hintStatus(rec.hebrew_hint?.source);
     return { simania_id: simaniaId, resolve_status };
   }
 
