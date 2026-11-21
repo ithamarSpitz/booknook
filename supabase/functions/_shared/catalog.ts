@@ -1,4 +1,9 @@
 import {
+  type AuthorStore,
+  catalogAuthorStore,
+  englishNames,
+} from "./authors.ts";
+import {
   nliOriginal,
   wikidataEnglishAuthor,
   wikidataOriginal,
@@ -54,6 +59,24 @@ const providers: CatalogProviders = {
   hardcoverBooks,
   now: () => new Date(),
 };
+
+/**
+ * Operator resolver scripts expose a deliberately read-only CatalogDb adapter.
+ * They can still perform the authors-table lookup, but cannot cache a provider
+ * answer. Edge Function clients have the normal mutation methods and keep the
+ * persistent authors-table behavior.
+ */
+function resolveAuthorStore(db: CatalogDb): AuthorStore {
+  const store = catalogAuthorStore(db);
+  if (typeof db.from("authors")?.insert === "function") return store;
+  return {
+    ...store,
+    create: async () => crypto.randomUUID(),
+    addNames: async () => {},
+    merge: async () => {},
+    markWikidataChecked: async () => {},
+  };
+}
 
 const DAY = 86_400_000;
 
@@ -512,7 +535,11 @@ export async function resolveMatch(
         if (hint === null) hint = bridge.versoAuthor?.trim() || null;
         if (hint === null && edition.author?.trim()) {
           try {
-            hint = await api.wikidataEnglishAuthor(edition.author);
+            const names = await englishNames(resolveAuthorStore(db), edition.author, {
+              wikidataEnglishAuthorStrict: api.wikidataEnglishAuthor,
+              now: api.now,
+            });
+            hint = names[0] ?? null;
           } catch {
             failures.count += 1;
           }

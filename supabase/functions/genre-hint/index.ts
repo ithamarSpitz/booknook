@@ -1,4 +1,4 @@
-import { wikidataHebrewAuthor } from "../_shared/bridges.ts";
+import { wikidataHebrewAuthorStrict as wikidataHebrewAuthor } from "../_shared/bridges.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
 import type { HardcoverBook } from "../_shared/hardcover.ts";
 import type {

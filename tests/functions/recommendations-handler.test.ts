@@ -11,11 +11,46 @@ import type {
   WorkRow,
 } from "../../supabase/functions/_shared/types.ts";
 import { GENRE_MAP } from "../../supabase/functions/_shared/genres.ts";
+import { nameKey } from "../../supabase/functions/_shared/authors.ts";
 import { HttpError } from "../../supabase/functions/_shared/utils.ts";
 import { FakeDb as SharedFakeDb } from "./helpers/fake-db.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function authorTables(hebrew: string, english: string) {
+  return {
+    authors: [{ id: "author-1", wikidata_checked_at: null }],
+    author_names: [
+      {
+        author_id: "author-1",
+        lang: "en",
+        name: english,
+        name_key: nameKey(english),
+        source: "link",
+      },
+      {
+        author_id: "author-1",
+        lang: "he",
+        name: hebrew,
+        name_key: nameKey(hebrew),
+        source: "link",
+      },
+    ],
+  };
+}
+
+function withAuthorTables(db: FakeDb, tables: Record<string, Record<string, unknown>[]>) {
+  const authors = new SharedFakeDb(tables);
+  return {
+    from(table: string) {
+      return table === "authors" || table === "author_names"
+        ? authors.from(table)
+        : db.from(table);
+    },
+    rpc: db.rpc.bind(db),
+  };
 }
 
 class FakeQuery implements PromiseLike<{ data: unknown; error: null }> {
@@ -1018,37 +1053,19 @@ Deno.test("English-only card uses catalog Hebrew author without Wikidata", async
   const seed = work("seed", 1, [100]);
   const candidate = work("candidate", 100);
   candidate.original_authors = ["Freida McFadden"];
-  const catalogWork = work("catalog", 9999);
-  catalogWork.original_authors = ["Freida McFadden"];
   const db = new FakeDb(
     [shelfBook(11, "read", seed, { rating: 5 })],
-    [seed, candidate, catalogWork],
-    [],
-    [{
-      simania_id: 555,
-      work_id: "catalog",
-      title: "משרתת",
-      author: "פרידה מקפדן",
-      resolve_status: "wikidata",
-      resolved_at: "2026-10-01T00:00:00Z",
-      translator: null,
-      publisher: null,
-      series: null,
-      category: null,
-      year: null,
-      pages: null,
-      description: null,
-      cover_url: null,
-      simania_rating: null,
-      simania_rating_count: null,
-      details_at: null,
-    }],
+    [seed, candidate],
+  );
+  const serviceDb = withAuthorTables(
+    db,
+    authorTables("פרידה מקפדן", "Freida McFadden"),
   );
   let wikidataCalled = false;
   const response = await handleRecommendations(request(), {
     authenticate: async () => "user",
     userDatabase: () => db as never,
-    serviceDatabase: () => db as never,
+    serviceDatabase: () => serviceDb as never,
     hebrewHint: async () => null,
     wikidataHebrewAuthor: async () => {
       wikidataCalled = true;
@@ -1069,27 +1086,18 @@ Deno.test("catalog Hebrew author ignores a newer English edition", async () => {
   const seed = work("seed", 1, [100]);
   const candidate = work("candidate", 100);
   candidate.original_authors = ["Taylor Jenkins Reid"];
-  const catalogWork = work("catalog", 9999);
-  catalogWork.original_authors = ["Taylor Jenkins Reid"];
   const db = new FakeDb(
     [shelfBook(11, "read", seed, { rating: 5 })],
-    [seed, candidate, catalogWork],
-    [],
-    [
-      {
-        ...linkedEdition(-474156, "catalog", "2026-11-05T00:00:00Z"),
-        author: "Taylor Jenkins Reid",
-      },
-      {
-        ...linkedEdition(1006655, "catalog", "2026-10-01T00:00:00Z"),
-        author: "טיילור ג'נקינס-ריד",
-      },
-    ],
+    [seed, candidate],
+  );
+  const serviceDb = withAuthorTables(
+    db,
+    authorTables("טיילור ג'נקינס-ריד", "Taylor Jenkins Reid"),
   );
   const response = await handleRecommendations(request(), {
     authenticate: async () => "user",
     userDatabase: () => db as never,
-    serviceDatabase: () => db as never,
+    serviceDatabase: () => serviceDb as never,
     hebrewHint: async () => null,
     wikidataHebrewAuthor: async () => "לא אמור להיקרא",
   });
@@ -1097,31 +1105,14 @@ Deno.test("catalog Hebrew author ignores a newer English edition", async () => {
   assert(response.status === 200, "expected 200");
   assert(
     payload.recommendations[0].hebrew_author === "טיילור ג'נקינס-ריד",
-    "positive-ID Hebrew edition should supply the catalog author",
+    "authors table should supply the catalog author",
   );
 });
 
 Deno.test("catalog Hebrew author works with the shared localization fake", async () => {
-  const db = new SharedFakeDb({
-    works: [{
-      id: "catalog",
-      original_authors: ["Taylor Jenkins Reid"],
-    }],
-    editions: [
-      {
-        simania_id: -474156,
-        work_id: "catalog",
-        author: "Taylor Jenkins Reid",
-        resolved_at: "2026-11-05T00:00:00Z",
-      },
-      {
-        simania_id: 1006655,
-        work_id: "catalog",
-        author: "טיילור ג'נקינס-ריד",
-        resolved_at: "2026-10-01T00:00:00Z",
-      },
-    ],
-  });
+  const db = new SharedFakeDb(
+    authorTables("טיילור ג'נקינס-ריד", "Taylor Jenkins Reid"),
+  );
   let wikidataCalled = false;
   const result = await hebrewAuthorFor(
     db as never,
@@ -1136,7 +1127,7 @@ Deno.test("catalog Hebrew author works with the shared localization fake", async
   );
   assert(
     result === "טיילור ג'נקינס-ריד",
-    "shared fake should return the positive-ID catalog author",
+    "shared fake should return the authors-table name",
   );
   assert(!wikidataCalled, "Wikidata author bridge should not run");
 });
@@ -1149,10 +1140,11 @@ Deno.test("English-only card uses Wikidata Hebrew author when catalog misses", a
     [shelfBook(11, "read", seed, { rating: 5 })],
     [seed, candidate],
   );
+  const serviceDb = withAuthorTables(db, { authors: [], author_names: [] });
   const response = await handleRecommendations(request(), {
     authenticate: async () => "user",
     userDatabase: () => db as never,
-    serviceDatabase: () => db as never,
+    serviceDatabase: () => serviceDb as never,
     hebrewHint: async () => null,
     wikidataHebrewAuthor: async () => "פרדריק בקמן",
   });

@@ -16,7 +16,9 @@ import {
   nliHebrew,
   wikidataHebrew,
   wikidataHebrewAuthor,
+  wikidataHebrewAuthorStrict,
 } from "../_shared/bridges.ts";
+import { catalogAuthorStore, hebrewNames } from "../_shared/authors.ts";
 import { ensureResolved } from "../_shared/catalog.ts";
 import { selectInChunks } from "../_shared/chunked.ts";
 import { requireUser, serviceClient, userClient } from "../_shared/db.ts";
@@ -130,59 +132,20 @@ export async function hebrewAuthorFor(
   const lookup = (async (): Promise<string | null> => {
     let resolved: string | null = null;
     try {
-      const worksResult = await db.from("works")
-        .select("id, original_authors")
-        .contains("original_authors", [englishAuthor.trim()])
-        .limit(50);
-      if (worksResult.error) throw worksResult.error;
-
-      const matchedWorkIds = (
-        (worksResult.data ?? []) as Pick<WorkRow, "id" | "original_authors">[]
-      )
-        .filter((work) => normalize(work.original_authors[0] ?? "") === key)
-        .map((work) => work.id);
-
-      if (matchedWorkIds.length) {
-        const editionsResult = await selectInChunks(
-          matchedWorkIds,
-          (chunk) => {
-            const editionsQuery = db.from("editions")
-              .select("simania_id, author, resolved_at")
-              .in("work_id", chunk);
-            const positiveEditionsQuery = "gt" in editionsQuery
-              ? editionsQuery.gt("simania_id", 0)
-              : editionsQuery;
-            return positiveEditionsQuery
-              .not("work_id", "is", null)
-              .order("resolved_at", { ascending: false });
-          },
-        );
-        if (editionsResult.error) throw editionsResult.error;
-
-        const editionRows = [
-          ...((editionsResult.data ?? []) as {
-            simania_id: number;
-            author: string | null;
-            resolved_at?: string | null;
-          }[]),
-        ].sort((left, right) =>
-          (right.resolved_at ?? "").localeCompare(left.resolved_at ?? "")
-        );
-        for (const row of editionRows) {
-          if (row.simania_id <= 0) continue;
-          const author = row.author?.trim();
-          if (author) {
-            resolved = author;
-            break;
-          }
-        }
-      }
-
-      if (!resolved) {
-        resolved = await deps.wikidataHebrewAuthor(englishAuthor);
-      }
+      // The live localization gate historically injected the lenient bridge.
+      // Upgrade that known dependency so provider failures remain retryable.
+      const strictLookup = deps.wikidataHebrewAuthor === wikidataHebrewAuthor
+        ? wikidataHebrewAuthorStrict
+        : deps.wikidataHebrewAuthor;
+      const names = await hebrewNames(catalogAuthorStore(db), englishAuthor.trim(), {
+        wikidataHebrewAuthorStrict: strictLookup,
+        now: () => new Date(),
+      });
+      resolved = names[0] ?? null;
     } catch {
-      resolved = null;
+      // A failed lookup is not cached, so a later call may retry.
+      inFlight.delete(key);
+      return null;
     }
 
     cache.set(key, resolved);
@@ -202,7 +165,7 @@ const defaults: RecommendationDependencies = {
   // Simania blocks data-center IPs, so the server only finds the Hebrew title;
   // the browser matches it in Simania and calls link-edition.
   hebrewHint: defaultHebrewHint,
-  wikidataHebrewAuthor,
+  wikidataHebrewAuthor: wikidataHebrewAuthorStrict,
   ensureResolved,
   genreRecommendations: storeGenreRecommendations,
 };
