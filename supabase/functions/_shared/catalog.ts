@@ -78,6 +78,33 @@ export function matchTitle(title: string): string {
   return result === "" ? trimmed : result;
 }
 
+const BOX_WORDS = ["מארז", "טרילוגיית", "טרילוגיה", "ערכת", "סט"];
+const BOX_NOISE_WORDS = ["מלא", "דיגיטלי", "דיגיטלית"];
+const NOT_WORD = "[^\\s\\-–()\\[\\]]";
+
+function wordPattern(words: string[]): RegExp {
+  return new RegExp(`(?<!${NOT_WORD})(?:${words.join("|")})(?!${NOT_WORD})`, "g");
+}
+
+/** True when the match title contains a box-set word as a whole word. */
+export function isBoxSet(matchTitle: string): boolean {
+  return wordPattern(BOX_WORDS).test(matchTitle);
+}
+
+/** Match title without box-set words, keeping the longest ` - ` / ` – ` part. */
+export function boxCore(matchTitle: string): string {
+  const stripped = matchTitle
+    .replace(wordPattern([...BOX_WORDS, ...BOX_NOISE_WORDS]), " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = stripped.split(/(?:^|\s)[-–](?:\s|$)/).map((part) => part.trim());
+  let best = "";
+  for (const part of parts) if (part.length > best.length) best = part;
+  return best;
+}
+
+const BOX_SUFFIXES = ["Trilogy", "Collection", "Box Set"];
+
 function stale(
   value: string | null | undefined,
   days: number,
@@ -408,16 +435,40 @@ export async function resolveMatch(
   // A provider error is not evidence that the book is missing. If nothing matched
   // and any request failed, stay pending so the next request retries.
   const failures = { count: 0 };
-  const titleForMatch = matchTitle(edition.title);
+  const fullTitle = matchTitle(edition.title);
+  const box = isBoxSet(fullTitle);
+  const titleForMatch = box ? boxCore(fullTitle) : fullTitle;
+
+  const matchBridge = async (
+    bridgeTitle: string,
+    hint: string | undefined,
+    options: Parameters<typeof findHardcoverBook>[2],
+  ): Promise<HardcoverBook | null> => {
+    if (!box) {
+      return await tryMatch(
+        () => api.findHardcoverBook(bridgeTitle, hint, options),
+        failures,
+      );
+    }
+    for (const suffix of BOX_SUFFIXES) {
+      const found = await tryMatch(
+        () =>
+          api.findHardcoverBook(`${bridgeTitle} ${suffix}`, hint, {
+            requireAuthor: true,
+            boxTitle: true,
+          }),
+        failures,
+      );
+      if (found && !guardRejects(edition, found)) return found;
+    }
+    return null;
+  };
 
   try {
     const bridge = await api.wikidataOriginal(titleForMatch);
     wikidataTitle = bridge?.title ?? "";
     if (bridge) {
-      match = await tryMatch(
-        () => api.findHardcoverBook(bridge.title, bridge.author, { retryWithAuthor: true }),
-        failures,
-      );
+      match = await matchBridge(bridge.title, bridge.author, { retryWithAuthor: true });
     }
     if (match && guardRejects(edition, match)) match = null;
     if (match) status = "wikidata";
@@ -449,10 +500,7 @@ export async function resolveMatch(
         const nliOptions = hint === null
           ? { retryWithAuthor: true, soundAuthor: edition.author ?? "" }
           : { retryWithAuthor: true };
-        match = await tryMatch(
-          () => api.findHardcoverBook(bridge.title, hint ?? bridge.author, nliOptions),
-          failures,
-        );
+        match = await matchBridge(bridge.title, hint ?? bridge.author, nliOptions);
         if (match && guardRejects(edition, match)) match = null;
         if (match) status = "nli";
       }
@@ -461,7 +509,7 @@ export async function resolveMatch(
     }
   }
 
-  if (!match) {
+  if (!match && !box) {
     match = await tryMatch(
       () => api.findHardcoverBook(titleForMatch, edition.author ?? "", { requireAuthor: true }),
       failures,
