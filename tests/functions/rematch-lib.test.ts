@@ -10,7 +10,11 @@ import {
 import type { HardcoverBook } from "../../supabase/functions/_shared/hardcover.ts";
 import type { EditionRow } from "../../supabase/functions/_shared/types.ts";
 
-const work = (title: string, author: string, hardcover_id = 1): RematchWork => ({
+const work = (
+  title: string,
+  author: string,
+  hardcover_id = 1,
+): RematchWork => ({
   id: "w1",
   hardcover_id,
   original_title: title,
@@ -120,7 +124,10 @@ Deno.test("originals throwing sets failed", async () => {
   assertEquals(result.authorBooks, [{ simania_id: 5, title: "נדודי שינה" }]);
 });
 
-const edition = { simania_id: 108889, title: "ארץ אחרת- 4 כרכים" } as EditionRow;
+const edition = {
+  simania_id: 108889,
+  title: "ארץ אחרת- 4 כרכים",
+} as EditionRow;
 const hc = (id: number, title: string, author: string): HardcoverBook => ({
   id,
   title,
@@ -130,28 +137,58 @@ const hc = (id: number, title: string, author: string): HardcoverBook => ({
 Deno.test("confirmCandidate", async () => {
   const w = work("Another Country", "James Baldwin", 10);
   const found = (book: HardcoverBook) =>
-    Promise.resolve({ found: { book, status: "wikidata" as const }, failed: false });
+    Promise.resolve({
+      found: { book, status: "wikidata" as const },
+      failed: false,
+    });
 
   assertEquals(
-    (await confirmCandidate(w, edition, {
+    (await confirmCandidate(w, edition, true, {
       resolveMatch: () => found(hc(10, "Another Country", "James Baldwin")),
     })).accepted,
     true,
   );
-  const dup = await confirmCandidate(w, edition, {
+  const dup = await confirmCandidate(w, edition, true, {
     resolveMatch: () =>
       found(hc(11, "Another Country: A Novel", "James Baldwin")),
   });
   assertEquals(dup.accepted, true);
   assertEquals(dup.status, "wikidata");
   assertEquals(
-    (await confirmCandidate(w, edition, {
+    (await confirmCandidate(w, edition, true, {
       resolveMatch: () => found(hc(12, "Another Country", "Tad Williams")),
     })).accepted,
     false,
   );
-  const none = await confirmCandidate(w, edition, {
+  const none = await confirmCandidate(w, edition, true, {
     resolveMatch: () => Promise.resolve({ found: null, failed: true }),
   });
-  assertEquals(none, { accepted: false, status: null, book: null, failed: true });
+  assertEquals(none, {
+    accepted: false,
+    status: null,
+    book: null,
+    failed: true,
+  });
+});
+
+Deno.test("confirmCandidate does not resolve an author mismatch", async () => {
+  let calls = 0;
+  const result = await confirmCandidate(
+    work("Spare", "Prince Harry"),
+    edition,
+    false,
+    {
+      resolveMatch: () => {
+        calls++;
+        return Promise.reject(new Error("must not run"));
+      },
+    },
+  );
+  assertEquals(result, {
+    accepted: false,
+    status: null,
+    book: null,
+    failed: false,
+  });
+  assertEquals(calls, 0);
 });

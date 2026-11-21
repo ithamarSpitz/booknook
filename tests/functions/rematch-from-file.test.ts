@@ -13,14 +13,20 @@ const work: RematchWork = {
 const bookOf = (id: number): HardcoverBook => ({
   id,
   title: `Book ${id}`,
-  cached_contributors: [],
+  cached_contributors: [{ author: { name: "Stephen King" } }],
 });
 
 const proposalLine = (simania_id: number, book_id: number) =>
   JSON.stringify({
     hardcover_id: 1,
     title: "t",
-    proposal: { simania_id, book_id, hebrew_title: "רזה", via: "forward", status: "wikidata" },
+    proposal: {
+      simania_id,
+      book_id,
+      hebrew_title: "רזה",
+      via: "forward",
+      status: "wikidata",
+    },
   });
 
 function harness(over: Partial<RunDeps> = {}, file = "") {
@@ -40,7 +46,9 @@ function harness(over: Partial<RunDeps> = {}, file = "") {
   const deps: Partial<RunDeps> = {
     loadOperatorEnv: (() => ({})) as unknown as RunDeps["loadOperatorEnv"],
     openProdDb: (() =>
-      Promise.resolve({ end: () => Promise.resolve() })) as unknown as RunDeps[
+      Promise.resolve({
+        end: () => Promise.resolve(),
+      })) as unknown as RunDeps[
         "openProdDb"
       ],
     checkHardcoverBudget: () => Promise.resolve(true),
@@ -53,7 +61,8 @@ function harness(over: Partial<RunDeps> = {}, file = "") {
       calls.insert++;
       return Promise.resolve();
     },
-    wikidataHebrewAuthors: forbidden as unknown as RunDeps["wikidataHebrewAuthors"],
+    wikidataHebrewAuthors:
+      forbidden as unknown as RunDeps["wikidataHebrewAuthors"],
     wikidataOriginals: forbidden as unknown as RunDeps["wikidataOriginals"],
     nliOriginal: forbidden as unknown as RunDeps["nliOriginal"],
     wiktionaryGlosses: forbidden as unknown as RunDeps["wiktionaryGlosses"],
@@ -155,7 +164,10 @@ Deno.test("--from accepts a dictionary proposal", async () => {
 });
 
 Deno.test("--from fetches Hardcover books in chunks of 50", async () => {
-  const file = Array.from({ length: 120 }, (_, i) => proposalLine(1000 + i, 5000 + i))
+  const file = Array.from(
+    { length: 120 },
+    (_, i) => proposalLine(1000 + i, 5000 + i),
+  )
     .join("\n");
   const h = harness({}, file);
   assertEquals(await main(["--from", "x"], h.deps), 0);
@@ -174,7 +186,10 @@ Deno.test("--from skips an edition linked elsewhere", async () => {
 });
 
 Deno.test("--from marks a book missing from the answer as details_failure", async () => {
-  const h = harness({ hardcoverBooks: () => Promise.resolve([]) }, proposalLine(3191, 77));
+  const h = harness(
+    { hardcoverBooks: () => Promise.resolve([]) },
+    proposalLine(3191, 77),
+  );
   assertEquals(await main(["--from", "x", "--apply"], h.deps), 0);
   assertEquals(h.calls.apply.length, 0);
   assertEquals(last(h.lines).skipped, { details_failure: 1 });
@@ -195,6 +210,31 @@ Deno.test("--from without --apply only reports would_link", async () => {
   assertEquals(JSON.parse(h.lines[0]).action, "would_link");
   assertEquals(h.calls.insert, 0);
   assertEquals(h.calls.apply.length, 0);
+});
+
+Deno.test("--from skips an author mismatch without applying", async () => {
+  const h = harness({
+    fetchEditionDetails: (id) =>
+      Promise.resolve({
+        simania_id: id,
+        title: "ויקיפדיה",
+        author: "Dan O'Sullivan",
+      }),
+    hardcoverBooks: (ids) => {
+      h.calls.books.push(ids);
+      return Promise.resolve(ids.map((id) => ({
+        id,
+        title: "Spare",
+        cached_contributors: [
+          { author: { name: "Prince Harry" } },
+          { author: { name: "J.R. Moehringer" } },
+        ],
+      })));
+    },
+  }, proposalLine(3191, 77));
+  assertEquals(await main(["--from", "x", "--apply"], h.deps), 0);
+  assertEquals(h.calls.apply.length, 0);
+  assertEquals(last(h.lines).skipped, { author_mismatch: 1 });
 });
 
 Deno.test("--from with --limit is a usage error", async () => {
