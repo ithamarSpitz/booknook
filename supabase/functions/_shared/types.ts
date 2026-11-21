@@ -18,7 +18,16 @@ export type ResolveStatus =
   | "original_title"
   | "nli_author"
   | "omnibus"
-  | "series";
+  | "series"
+  | "dictionary";
+
+export interface AuthorNameRow {
+  author_id: string;
+  lang: "en" | "he";
+  name: string;
+  name_key: string;
+  source: "link" | "wikidata";
+}
 
 export interface ProfileRow {
   id: string;
