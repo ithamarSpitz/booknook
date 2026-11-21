@@ -71,6 +71,16 @@ Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared
 - **Book pick.** The books at the target's number in that series, minus compilations and books with no author whose Dice with an anchor work's `original_authors` is above 0.45. The book with the most `users_read_count` wins only with at least 5 readers and at least 3 times the readers of every other book whose title has Dice below 0.8 with its title. Otherwise `no_book` or `ambiguous_book`.
 - **Status.** `--apply` links through the `repair:links` upsert with `resolve_status = 'series'`, only where `work_id` is still null. The default run is a read-only dry run.
 
+### Rematch cached works (`npm run rematch:cached`)
+
+`scripts/rematch-cached.ts` is an operator tool. It retries cached works that have no linked Hebrew edition, because `refresh:all` only handles books in current use.
+
+- **Candidates.** Forward: the `defaultHebrewHint` followed by the browser's `matchHebrewBook`. Reverse, only when forward finds nothing: the author's Hebrew names (from existing links, kept when `nameSoundScore >= 0.8`, else `wikidataHebrewAuthors`), then the author's Simania books, then a match of their original titles (`wikidataOriginals` plus `nliOriginal`) against the work's title with `similarity >= 0.72`.
+- **Confirmation.** A candidate is accepted only when `resolveMatch` on that Hebrew edition returns the same work (same Hardcover id or `sameBook`). A candidate linked to another work is skipped, and a provider failure skips the work.
+- **Dry run vs `--apply`.** The default run is a read-only dry run. `--apply` links each accepted edition with the `resolveMatch` status, creating the edition row if needed.
+- **Batched helpers.** `wikidataHebrewAuthors` maps many English author names to their Hebrew labels in one request, and `wikidataOriginals` maps many Hebrew titles to original titles in one request. A non-OK or non-JSON response throws `ProviderError`.
+- **Initials.** `nameSoundScore` ignores single-letter initials, so "J. R. R. Tolkien" and "Tolkien" compare on the remaining name parts.
+
 ## Normalization
 
 `utils.ts normalize` and `similarity` are authoritative: NFKD, Latin diacritics removed, lower case, a leading English article removed, everything that is not a letter or digit turned into a space. `similarity` is word-set Dice overlap. Display text is never changed. `stripHebrewPoints` runs first in `normalize`: it removes Hebrew points and cantillation marks (U+0591-U+05C7, except maqaf U+05BE, which becomes a space). `nameSoundScore` applies it to Hebrew names too. It exists in the browser (`public/js/simania.js`, `public/js/names.js`) and on the server (`_shared/utils.ts`, `_shared/names.ts`). Hebrew final-letter folding is not implemented; do not add it unless a task asks.
