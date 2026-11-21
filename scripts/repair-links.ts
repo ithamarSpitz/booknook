@@ -172,6 +172,7 @@ export async function applyRepair(
   sql: Sql,
   plan: RepairPlan,
   now: Date,
+  status: "original_title" | "series" = "original_title",
 ): Promise<RepairResult> {
   return await sql.begin(async (tx) => {
     const proposal = plan.kind === "relink" ? plan.proposal : plan;
@@ -210,7 +211,7 @@ export async function applyRepair(
         update public.editions
         set
           work_id = ${workId},
-          resolve_status = 'original_title',
+          resolve_status = ${status},
           resolved_at = ${now}
         where simania_id = ${plan.simania_id}
           and work_id = ${plan.work_id}
@@ -220,7 +221,7 @@ export async function applyRepair(
         update public.editions
         set
           work_id = ${workId},
-          resolve_status = 'original_title',
+          resolve_status = ${status},
           resolved_at = ${now}
         where simania_id = ${plan.simania_id}
           and work_id is null
