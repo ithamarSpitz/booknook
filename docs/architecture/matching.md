@@ -50,6 +50,10 @@ Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared
    Box-set hint rule: unless the recommendation's English title has a box word (Trilogy, Collection, Box Set, Boxed Set, Omnibus), `localizeRecommendations` strips Hebrew box words from the hint title with `stripHebrewBoxWords` before matching. `matchHebrewBook` drops Simania results that contain a Hebrew box word (`hasHebrewBoxWord`, whole words מארז, טרילוגיית, טרילוגיה, ערכת, סט) unless the searched title itself has one.
 
    NLI `alternate` hint: when Wikidata supplies the Hebrew title, `recommendations` also asks NLI. If NLI answers with a title that differs after normalization, the hint carries it as `alternate`; an NLI failure leaves the hint unchanged. The browser tries `alternate` only when the main hint title found no Simania book (`match` returned null), using the same author hint and, under the same box-word rule, with box words stripped. A verified match links with source `nli`.
+
+   Duplicate works (`sameBook`): `link-edition` accepts an edition that is linked to a duplicate work of the same book, so a `sameBook` match is not rejected.
+
+   Hardcover Hebrew edition (`hardcoverHebrewEdition`): when no other hint is found, the `recommendations` hint falls back to a Hebrew Hardcover edition of the book, with source and status `hardcover`.
 3. Before calling any provider, check `editions` for a row whose `work_id` is already this work. Reuse it.
 
 `tests/web/match-replay.test.mjs` replays captured Simania result sets and guards the matcher picks that equal the production links.
