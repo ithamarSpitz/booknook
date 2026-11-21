@@ -129,6 +129,36 @@ function stripBoxWords(title: string): string {
   return title.replace(BOX_WORDS, " ").replace(/\s+/g, " ").trim();
 }
 
+const COMPANION_PHRASES = [
+  "The Art of",
+  "The World of",
+  "Companion",
+  "Summary",
+  "Study Guide",
+  "Reader's Guide",
+  "Analysis",
+  "Coloring Book",
+  "Workbook",
+  "Untold History",
+];
+const COMPANION_WORDS = new RegExp(
+  `\\b(?:${COMPANION_PHRASES.map((p) => p.replace(/ /g, "\\s+")).join("|")})\\b`,
+  "i",
+);
+
+function dropUnwanted(
+  books: HardcoverBook[],
+  queryTitle: string,
+  boxTitle: boolean,
+): HardcoverBook[] {
+  const queryHasBox = hasBoxWord(queryTitle);
+  const queryHasCompanion = COMPANION_WORDS.test(queryTitle);
+  return books.filter((book) =>
+    !(!boxTitle && !queryHasBox && hasBoxWord(book.title)) &&
+    !(!queryHasCompanion && COMPANION_WORDS.test(book.title))
+  );
+}
+
 async function searchHardcoverDetails(
   query: string,
 ): Promise<{ books: HardcoverBook[]; alternatives: Map<number, string[]> }> {
@@ -159,7 +189,11 @@ export async function findHardcoverBook(
     requireAuthor: boolean,
   ) =>
     rankHardcoverBooks(
-      boxTitle ? found.books.filter((book) => hasBoxWord(book.title)) : found.books,
+      dropUnwanted(
+        boxTitle ? found.books.filter((book) => hasBoxWord(book.title)) : found.books,
+        originalTitle,
+        boxTitle,
+      ),
       authorHint,
       soundAuthor,
       (book) => {
