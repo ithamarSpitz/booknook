@@ -12,6 +12,15 @@ Before any provider lookup, `matchTitle` (`_shared/catalog.ts`) strips trailing 
 4. Nothing accepted: `resolve_status = 'not_found'`, but only when every provider answered. If any provider request failed, keep `pending` so a later request retries.
 5. Record which step succeeded in `resolve_status` (`wikidata`, `nli`, `fuzzy`).
 
+`findHardcoverBook` takes two options besides `requireAuthor` (`_shared/hardcover.ts`):
+
+- `retryWithAuthor`: when the title-only search yields no accepted match and the author hint contains a Latin letter, search again with `<title> <author>` and rank that result list. Title Dice there is the best of the full Hardcover title, the part before the first `:`, and the book's `alternative_titles`, and the retry requires an author boost.
+- `soundAuthor`: a Hebrew author name. A candidate whose authors have `nameSoundScore(soundAuthor, authors) >= 0.6` gets the same author boost as a similar English author hint.
+
+`ensureResolved` (`_shared/catalog.ts`) passes `retryWithAuthor: true` on the Wikidata and NLI paths. On the NLI path it adds `soundAuthor` (the edition's Hebrew author) only when no English author hint was found. The final fuzzy path uses `requireAuthor` only.
+
+Series-prefix NLI retry: when the NLI lookup of the full title finds nothing and the edition has a `series` such that the title starts with `<series> - ` (hyphen or en dash), `ensureResolved` repeats `nliOriginal` with the rest of the title. It does not retry when the rest is empty or is only a volume label (`כרך`, `ספר` or `חלק` plus one word).
+
 Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared/fallback-match.ts`) against the Simania edition author. A rejected match is discarded and resolution falls through to the next path. A rejection is not a provider failure, so it does not keep the edition `pending`.
 
 ## Hardcover → Hebrew edition (localize)
@@ -23,6 +32,8 @@ Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared
 `tests/web/match-replay.test.mjs` replays captured Simania result sets and guards the matcher picks that equal the production links.
 
 4. Fallback, only when steps 1-2 and the author path missed: `hebrew-candidates` lists the author's Hebrew editions from NLI (searched by Latin authority name) with the rule that ties each one to this work. The browser accepts one only with Simania title and author agreement, or with matching character names, and only as a single clear winner. It links with `resolve_status = 'nli_author'` and never relinks. See `docs/contract.md`, "Catalog fallback for English-only books".
+
+5. Omnibus, only when step 2 found no title match (`localizeRecommendations`). `matchOmnibus(hintTitle, results)` (`public/js/simania.js`, pure) looks at a Simania search for the hint title (6 results). A result counts when its `subtitle` splits on ` | ` into at least 2 parts and some part has `similarity >= 0.9` with the hint title. It returns the result only when exactly one result counts, otherwise null. The browser also requires author agreement: `similarity(hebrew_author, result author) >= 0.6` when the recommendation has a Hebrew author, otherwise `nameSoundScore(result author, English authors) >= 0.8`. A search failure leaves the card unchanged and the author path continues. The link gets `resolve_status = 'omnibus'`. `npm run report:omnibus` lists these links.
 
 ## Normalization
 
