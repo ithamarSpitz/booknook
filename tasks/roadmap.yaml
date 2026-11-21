@@ -1383,3 +1383,20 @@ sprints:
         - S33-T2
         - S33-T3
         - S33-T4
+  S34-search-only-ranking:
+    name: Hardcover matching ranks from search documents; details only for a new work
+    tasks:
+      S34-T1:
+        file: tasks/sprint-34-search-only-ranking/01-contract.md
+        stage: 1
+        depends_on: []
+      S34-T2:
+        file: tasks/sprint-34-search-only-ranking/02-search-only.md
+        stage: 2
+        depends_on:
+        - S34-T1
+      S34-T3:
+        file: tasks/sprint-34-search-only-ranking/03-docs.md
+        stage: 3
+        depends_on:
+        - S34-T2
