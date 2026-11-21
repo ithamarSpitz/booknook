@@ -5,7 +5,7 @@ All tables live in `public`. Timestamps are `timestamptz default now()`. The con
 ## Enums
 
 - `shelf_kind`: `reading`, `read`, `want`, `stopped`, `custom`
-- `resolve_status`: `pending`, `wikidata`, `nli`, `fuzzy`, `llm`, `not_found`
+- `resolve_status`: `pending`, `wikidata`, `nli`, `fuzzy`, `llm`, `not_found`, `dictionary`
 
 ## profiles
 
@@ -33,6 +33,27 @@ RLS: select and update where `id = auth.uid()`; clients may update only `display
 | refreshed_at | timestamptz | |
 
 RLS: select for `authenticated`. No client writes.
+
+## authors
+
+One row represents one person. `wikidata_checked_at` records a successful Wikidata lookup that found no name; that negative result is retried after 30 days. RLS is enabled with no policies, so the table is server-only.
+
+| column | type | note |
+|---|---|---|
+| id | uuid PK | author identity shared by all spellings |
+| wikidata_checked_at | timestamptz, nullable | last successful Wikidata lookup with no name |
+
+## author_names
+
+Each row is one spelling of an author name. RLS is enabled with no policies, so the table is server-only.
+
+| column | type | note |
+|---|---|---|
+| author_id | uuid references authors on delete cascade | |
+| lang | text | `en` or `he` |
+| name | text | display spelling, stored unchanged |
+| name_key | text | normalized lookup key; unique within `lang` |
+| source | text | `link` or `wikidata` |
 
 ## editions
 

@@ -43,6 +43,12 @@ Series-prefix NLI retry: when the NLI lookup of the full title finds nothing and
 
 Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared/fallback-match.ts`) against the Simania edition author. A rejected match is discarded and resolution falls through to the next path. A rejection is not a provider failure, so it does not keep the edition `pending`.
 
+### Author-name lookups
+
+Author translation in both directions goes through the server-only `authors` and `author_names` tables. `hebrewNames` resolves English names to Hebrew spellings for recommendation hints, and `englishNames` resolves Hebrew names to English spellings for the resolver's author hint. Each reads stored names first and asks Wikidata only when the requested name is absent. A successful Wikidata name is stored; a successful lookup with no name records `wikidata_checked_at` and is retried after 30 days. Provider failures are not stored.
+
+`recordPair` records the Hebrew edition author with the work's first English author only when `nameSoundScore(he, [en]) >= 0.8`. It joins either name to an existing author and merges two author rows when the pair connects them. Successful `link-edition` and operator `applyRepair` calls record pairs, while `npm run authors:seed` populates the tables from existing linked editions.
+
 ## Hardcover → Hebrew edition (localize)
 
 1. Wikidata Hebrew label for the Hardcover title and author (`wikidataHebrew`), then NLI (`nliHebrew`).
@@ -75,12 +81,13 @@ Each wikidata, nli or fuzzy match is checked with `authorGuardRejects` (`_shared
 
 `scripts/rematch-cached.ts` is an operator tool. It retries cached works that have no linked Hebrew edition, because `refresh:all` only handles books in current use.
 
-- **Candidates.** Forward: the `defaultHebrewHint` followed by the browser's `matchHebrewBook`. Reverse, only when forward finds nothing: the author's Hebrew names (from existing links, kept when `nameSoundScore >= 0.8`, else `wikidataHebrewAuthors`), then the author's Simania books, then a match of their original titles (`wikidataOriginals` plus `nliOriginal`) against the work's title with `similarity >= 0.72`.
+- **Candidates.** Forward: the `defaultHebrewHint` followed by the browser's `matchHebrewBook`. Reverse, only when forward finds nothing: the author's Hebrew names read directly from `author_names` and combined with the startup-batched Wikidata names, then the author's Simania books, then a match of their original titles (`wikidataOriginals` plus `nliOriginal`) against the work's title with `similarity >= 0.72`.
 - **Confirmation.** A candidate is accepted only when `resolveMatch` on that Hebrew edition returns the same work (same Hardcover id or `sameBook`). A candidate linked to another work is skipped, and a provider failure skips the work.
 - **Dry run vs `--apply`.** The default run is a read-only dry run. `--apply` links each accepted edition with the `resolveMatch` status, creating the edition row if needed. The dry run's proposal lines include `book_id`, and `--from <file> --apply` links them with one Hardcover request per 50 proposals, without searching again.
 - **Startup retry.** A failed author batch at startup is retried twice, 30 seconds apart.
 - **Batched helpers.** `wikidataHebrewAuthors` maps many English author names to their Hebrew labels in one request, and `wikidataOriginals` maps many Hebrew titles to original titles in one request. A non-OK or non-JSON response throws `ProviderError`.
 - **Initials.** `nameSoundScore` ignores single-letter initials, so "J. R. R. Tolkien" and "Tolkien" compare on the remaining name parts.
+- **Dictionary last resort.** Only after every other step produced no proposal and no provider failed, `pickByDictionary` scores the author's unlinked Hebrew books from the reverse step with English Wiktionary glosses. It proposes the unique best candidate only at a score of at least `0.5`, with `via: "dictionary"` and `resolve_status = 'dictionary'`. A Wiktionary failure is a provider failure, not a negative result.
 
 ## Normalization
 
