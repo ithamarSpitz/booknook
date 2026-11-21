@@ -1184,3 +1184,51 @@ sprints:
         stage: 4
         depends_on:
         - S29-T3
+  S30-hc-retry-omnibus:
+    name: Hardcover title+author retry and Hebrew author sound, NLI series prefix, omnibus
+      volume links with report, requeue by ID
+    tasks:
+      S30-T1:
+        file: tasks/sprint-30-hc-retry-omnibus/01-contract.md
+        stage: 1
+        depends_on: []
+      S30-T2:
+        file: tasks/sprint-30-hc-retry-omnibus/02-hardcover-retry.md
+        stage: 2
+        depends_on:
+        - S30-T1
+      S30-T3:
+        file: tasks/sprint-30-hc-retry-omnibus/03-resolver-wiring.md
+        stage: 3
+        depends_on:
+        - S30-T2
+      S30-T4:
+        file: tasks/sprint-30-hc-retry-omnibus/04-omnibus-status.md
+        stage: 2
+        depends_on:
+        - S30-T1
+      S30-T5:
+        file: tasks/sprint-30-hc-retry-omnibus/05-omnibus-browser.md
+        stage: 2
+        depends_on:
+        - S30-T1
+      S30-T6:
+        file: tasks/sprint-30-hc-retry-omnibus/06-requeue-any.md
+        stage: 2
+        depends_on:
+        - S30-T1
+      S30-T7:
+        file: tasks/sprint-30-hc-retry-omnibus/07-report-omnibus.md
+        stage: 2
+        depends_on:
+        - S30-T1
+      S30-T8:
+        file: tasks/sprint-30-hc-retry-omnibus/08-docs.md
+        stage: 4
+        depends_on:
+        - S30-T2
+        - S30-T3
+        - S30-T4
+        - S30-T5
+        - S30-T6
+        - S30-T7
