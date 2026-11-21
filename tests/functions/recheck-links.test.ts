@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1.0.14";
 import type { Sql } from "npm:postgres@3.4.5";
 import { main, type RunDeps } from "../../scripts/recheck-links.ts";
+import { findHardcoverBook } from "../../supabase/functions/_shared/hardcover.ts";
 
 interface Query {
   text: string;
@@ -81,6 +82,7 @@ function harness(
         work_id: "new",
       });
     },
+    hardcoverBooks: () => Promise.reject(new Error("unexpected hardcoverBooks")),
     checkHardcoverBudget: () => Promise.resolve(true),
     now: () => new Date("2026-11-21T00:00:00Z"),
     sleep: (ms) => {
@@ -274,4 +276,88 @@ Deno.test("with no failures sleep is never called", async () => {
   assertEquals(await main([], h.deps), 0);
   assertEquals(h.sleeps.length, 0);
   assertEquals(JSON.parse(h.logs.at(-1)!).retried, 0);
+});
+
+async function searchDocumentBook() {
+  const originalFetch = globalThis.fetch;
+  const originalKey = Deno.env.get("HARDCOVER_API_KEY");
+  Deno.env.set("HARDCOVER_API_KEY", "test-key");
+  globalThis.fetch = () =>
+    Promise.resolve(
+      new Response(JSON.stringify({
+        data: {
+          search: {
+            ids: [488917],
+            results: {
+              hits: [{
+                document: {
+                  id: "488917",
+                  title: "The Rebel",
+                  contributions: [{ author: { name: "Albert Camus" } }],
+                },
+              }],
+            },
+          },
+        },
+      })),
+    );
+  try {
+    const book = await findHardcoverBook("The Rebel", "Albert Camus");
+    assert(book);
+    return book;
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) Deno.env.delete("HARDCOVER_API_KEY");
+    else Deno.env.set("HARDCOVER_API_KEY", originalKey);
+  }
+}
+
+Deno.test("--apply fetches details before relinking a search-document book", async () => {
+  const book = await searchDocumentBook();
+  const fake = fakeSql([RELINK]);
+  const h = harness(fake, {
+    16301: { found: { book, status: "wikidata" }, failed: false },
+  });
+  const calls: number[][] = [];
+  h.deps.hardcoverBooks = (ids) => {
+    calls.push(ids);
+    return Promise.resolve([
+      { id: 488917, title: "The Rebel", cached_similar_book_ids: [7] },
+    ]);
+  };
+  assertEquals(await main(["--apply"], h.deps), 0);
+  assertEquals(calls, [[488917]]);
+  const plan = h.repairs[0].plan as {
+    book: { cached_similar_book_ids: number[] };
+    proposal: { book: { cached_similar_book_ids: number[] } };
+  };
+  assertEquals(plan.book.cached_similar_book_ids, [7]);
+  assertEquals(plan.proposal.book.cached_similar_book_ids, [7]);
+});
+
+Deno.test("--apply skips a relink when the details fetch fails", async () => {
+  const book = await searchDocumentBook();
+  const fake = fakeSql([RELINK]);
+  const h = harness(fake, {
+    16301: { found: { book, status: "wikidata" }, failed: false },
+  });
+  h.deps.hardcoverBooks = () => Promise.reject(new Error("boom"));
+  assertEquals(await main(["--apply"], h.deps), 0);
+  assertEquals(h.repairs.length, 0);
+  const lines = h.logs.map((l) => JSON.parse(l));
+  assert(lines.some((l) => l.simania_id === 16301 && l.skipped === "details_failure"));
+  assertEquals(lines.at(-1), { relinked: 0, unlinked: 0, skipped: 1 });
+});
+
+Deno.test("--apply does not fetch details for a plain book", async () => {
+  const fake = fakeSql([RELINK]);
+  const h = harness(fake, { 16301: rebel });
+  let called = 0;
+  h.deps.hardcoverBooks = () => {
+    called++;
+    return Promise.resolve([]);
+  };
+  assertEquals(await main(["--apply"], h.deps), 0);
+  assertEquals(called, 0);
+  assertEquals(h.repairs.length, 1);
 });

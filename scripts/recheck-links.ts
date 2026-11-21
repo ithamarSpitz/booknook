@@ -5,6 +5,11 @@ import {
   matchTitle,
   resolveMatch,
 } from "../supabase/functions/_shared/catalog.ts";
+import {
+  type HardcoverBook,
+  hardcoverBooks,
+  isSearchDocumentBook,
+} from "../supabase/functions/_shared/hardcover.ts";
 import type { EditionRow } from "../supabase/functions/_shared/types.ts";
 import { checkHardcoverBudget } from "./lib/hardcover-budget.ts";
 import { loadOperatorEnv, openProdDb } from "./lib/prod-db.ts";
@@ -138,6 +143,7 @@ export interface RunDeps {
     now: Date,
     status: RecheckStatus,
   ) => Promise<RepairResult>;
+  hardcoverBooks: (ids: number[]) => Promise<HardcoverBook[]>;
   checkHardcoverBudget: typeof checkHardcoverBudget;
   now: () => Date;
   sleep: (ms: number) => Promise<void>;
@@ -150,6 +156,7 @@ const runDefaults: RunDeps = {
   openProdDb,
   resolveMatch: (db, edition) => resolveMatch(db, edition),
   applyRepair: applyRepair as unknown as RunDeps["applyRepair"],
+  hardcoverBooks,
   checkHardcoverBudget,
   now: () => new Date(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -315,6 +322,24 @@ export async function main(
         : change.simania_id;
       try {
         if (change.kind === "relink") {
+          if (isSearchDocumentBook(change.plan.book)) {
+            let detailed: HardcoverBook | undefined;
+            try {
+              detailed = (await deps.hardcoverBooks([change.plan.book.id]))[0];
+            } catch {
+              detailed = undefined;
+            }
+            if (!detailed) {
+              skipped++;
+              deps.log(JSON.stringify({
+                simania_id: id,
+                skipped: "details_failure",
+              }));
+              continue;
+            }
+            change.plan.book = detailed;
+            change.plan.proposal.book = detailed;
+          }
           const result = await deps.applyRepair(
             sql,
             change.plan,
