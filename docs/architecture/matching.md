@@ -26,6 +26,11 @@ Every Hardcover match, in the first search and the author retry, also scores the
 
 With `boxTitle`, `findHardcoverBook` keeps only candidates whose title has a box word (Trilogy, Collection, Box Set, Boxed Set, Omnibus), removes those words from the query and from the candidate titles before scoring, and requires an author boost.
 
+### Series and companion guards
+
+- Wikidata bridge: `isWrittenWork` (`_shared/bridges.ts`) rejects an entity whose `P31` includes any `REJECT_TYPES` id, including Q1667921 (novel series), even if it has an author (`P50`) claim or a work type. A series entity therefore never supplies a bridge title.
+- Hardcover ranking: before ranking, `findHardcoverBook` calls `dropUnwanted` (`_shared/hardcover.ts`) on the candidates. It drops a book whose title has a box word (Trilogy, Collection, Box Set, Boxed Set, Omnibus) unless the call has `boxTitle` or the query title has one. It drops a Companion book, whose title has one of the phrases `The Art of`, `The World of`, `Companion`, `Summary`, `Study Guide`, `Reader's Guide`, `Analysis`, `Coloring Book`, `Workbook` or `Untold History` as a whole phrase, unless the query title has one too.
+
 ### `resolveMatch`
 
 `resolveMatch(db, edition, overrides)` (`_shared/catalog.ts`) runs the Wikidata → NLI → fuzzy decision described above. It never writes, and it ignores `resolve_status`, so it also evaluates an already linked edition. It returns `{ found: { book, status } | null, failed }`, where `failed` is true when any provider request failed. `ensureResolved` calls it and then writes the work and status. `npm run recheck:links` calls it directly.
