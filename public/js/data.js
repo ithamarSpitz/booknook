@@ -338,7 +338,22 @@ export async function loadGenreShelves(client) {
     .order("shelf_position")
     .order("position");
   if (error) return [];
-  const rows = data ?? [];
+  let rows = data ?? [];
+  try {
+    const { data: shelved, error: shelvedError } = await client
+      .from("shelf_books")
+      .select("editions(work_id)");
+    if (!shelvedError) {
+      const shelvedWorkIds = new Set();
+      for (const book of shelved ?? []) {
+        const workId = book?.editions?.work_id;
+        if (workId != null) shelvedWorkIds.add(workId);
+      }
+      if (shelvedWorkIds.size) rows = rows.filter((row) => !shelvedWorkIds.has(row.work_id));
+    }
+  } catch {
+    // Shelved-work filtering is best effort; stored genre shelves remain usable.
+  }
   let preferences = [];
   try {
     const { data: prefs, error: prefsError } = await client

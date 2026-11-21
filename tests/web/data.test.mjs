@@ -363,6 +363,14 @@ describe("data.js client", () => {
       from(table) {
         calls.push(["from", table]);
         if (table === "genre_preferences") return prefsQuery;
+        if (table === "shelf_books") {
+          return {
+            select(columns) {
+              calls.push(["select", columns]);
+              return Promise.resolve({ data: [], error: null });
+            },
+          };
+        }
         return table === "genre_recommendations" ? genreQuery : editionsQuery;
       },
     };
@@ -381,6 +389,8 @@ describe("data.js client", () => {
       editions (title, author, cover_url)`],
       ["order", "shelf_position"],
       ["order", "position"],
+      ["from", "shelf_books"],
+      ["select", "editions(work_id)"],
       ["from", "genre_preferences"],
       ["select", "genre_key, label, state, pin_order"],
       ["from", "editions"],
@@ -425,6 +435,59 @@ describe("data.js client", () => {
     assert.equal(shelves[0].books[0].title, "Title");
     assert.deepEqual(shelves[0].books[0].because, [7]);
     assert.deepEqual(shelves[0].books[0].because_titles, []);
+  });
+
+  describe("loadGenreShelves skips shelved works", () => {
+    const genreRow = (workId, position) => ({
+      genre_key: "fantasy",
+      genre: "Fantasy",
+      shelf_position: 0,
+      position,
+      work_id: workId,
+      simania_id: null,
+      because: [],
+      works: { hardcover_id: position, original_title: `T-${workId}`, original_authors: [], hardcover_cover_url: null },
+      editions: null,
+    });
+    const makeClient = (shelfResult) => {
+      const genreQuery = {
+        select() { return this; },
+        order(column) {
+          return column === "position"
+            ? Promise.resolve({ data: [genreRow("w1", 0), genreRow("w2", 1)], error: null })
+            : this;
+        },
+      };
+      return {
+        from: (table) => {
+          if (table === "genre_recommendations") return genreQuery;
+          if (table === "shelf_books") return { select: async () => shelfResult };
+          return { select: async () => ({ data: [], error: null }) };
+        },
+      };
+    };
+    const titles = (shelves) => shelves.flatMap((s) => s.books.map((b) => b.title));
+
+    it("drops genre rows whose work is on a shelf", async () => {
+      const shelves = await loadGenreShelves(
+        makeClient({ data: [{ editions: { work_id: "w2" } }], error: null }),
+      );
+      assert.deepEqual(titles(shelves), ["T-w1"]);
+    });
+
+    it("removes nothing for a shelved edition without a work", async () => {
+      const shelves = await loadGenreShelves(
+        makeClient({ data: [{ editions: { work_id: null } }, { editions: null }], error: null }),
+      );
+      assert.deepEqual(titles(shelves), ["T-w1", "T-w2"]);
+    });
+
+    it("keeps all rows when the shelf read fails", async () => {
+      const shelves = await loadGenreShelves(
+        makeClient({ data: null, error: new Error("denied") }),
+      );
+      assert.deepEqual(titles(shelves), ["T-w1", "T-w2"]);
+    });
   });
 
   it("loadGenreShelves returns an empty optional section on query error", async () => {
