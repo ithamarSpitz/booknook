@@ -14,13 +14,24 @@ export function notFoundEditions(
   sql: Sql,
   simaniaId: number | null = null,
 ): Promise<NotFoundEdition[]> {
+  if (simaniaId !== null) {
+    // An explicit id also selects editions no reader row references.
+    return sql<NotFoundEdition[]>`
+      select e.simania_id, e.title, e.author
+      from public.editions as e
+      where e.simania_id > 0
+        and e.resolve_status = 'not_found'
+        and e.work_id is null
+        and e.simania_id = ${simaniaId}
+      order by e.simania_id
+    `;
+  }
   return sql<NotFoundEdition[]>`
     select e.simania_id, e.title, e.author
     from public.editions as e
     where e.simania_id > 0
       and e.resolve_status = 'not_found'
       and e.work_id is null
-      and (${simaniaId}::integer is null or e.simania_id = ${simaniaId})
       and (
         exists (select 1 from public.shelf_books as sb where sb.simania_id = e.simania_id)
         or exists (select 1 from public.recommendations as r where r.simania_id = e.simania_id)

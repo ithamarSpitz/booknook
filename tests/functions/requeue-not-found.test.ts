@@ -78,8 +78,29 @@ Deno.test("--simania limits the select to that id", async () => {
   const fake = fakeSql();
   const h = harness(fake);
   assertEquals(await main(["--simania", "32249"], h.deps), 0);
-  assertEquals(fake.queries[0].values, [32249, 32249]);
+  assertEquals(fake.queries[0].values, [32249]);
   assertEquals(h.logs.map((l) => JSON.parse(l)), [ROWS[0], { total: 1 }]);
+});
+
+Deno.test("--simania selects unreferenced editions too", async () => {
+  const fake = fakeSql();
+  const h = harness(fake);
+  assertEquals(await main(["--simania", "145387"], h.deps), 0);
+  const q = fake.queries[0];
+  for (const t of ["shelf_books", "recommendations", "genre_recommendations"]) {
+    assert(!q.text.includes(t));
+  }
+  assertEquals(q.values, [145387]);
+});
+
+Deno.test("without --simania the select keeps the reference conditions", async () => {
+  const fake = fakeSql();
+  const h = harness(fake);
+  assertEquals(await main([], h.deps), 0);
+  const q = fake.queries[0];
+  for (const t of ["shelf_books", "recommendations", "genre_recommendations"]) {
+    assert(q.text.includes(t));
+  }
 });
 
 Deno.test("bad arguments exit 2 and open no database", async () => {
