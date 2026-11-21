@@ -10,6 +10,7 @@ import {
   authors,
   type HardcoverBook,
   hardcoverBooks,
+  hardcoverHebrewEdition,
 } from "../_shared/hardcover.ts";
 import {
   nliHebrew,
@@ -82,7 +83,8 @@ export async function defaultHebrewHint(
   bridges: {
     wikidataHebrew: typeof wikidataHebrew;
     nliHebrew: typeof nliHebrew;
-  } = { wikidataHebrew, nliHebrew },
+    hardcoverHebrewEdition: typeof hardcoverHebrewEdition;
+  } = { wikidataHebrew, nliHebrew, hardcoverHebrewEdition },
 ): Promise<HebrewHint | null> {
   const author = authors(book)[0] ?? "";
   const wikidata = await bridges.wikidataHebrew(book.title, author);
@@ -103,9 +105,13 @@ export async function defaultHebrewHint(
     return hint;
   }
   const nli = await bridges.nliHebrew(book.title, author);
-  return nli
-    ? { source: "nli", title: nli.title, author: nli.author || null }
-    : null;
+  if (nli) return { source: "nli", title: nli.title, author: nli.author || null };
+  try {
+    const title = await bridges.hardcoverHebrewEdition(book.id);
+    return title ? { source: "hardcover", title, author: null } : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function hebrewAuthorFor(

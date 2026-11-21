@@ -291,6 +291,14 @@ export async function hardcoverBooks(ids: number[]): Promise<HardcoverBook[]> {
   return data.books ?? [];
 }
 
+/** Title of the most-used Hebrew-language edition of a Hardcover book, or null. */
+export async function hardcoverHebrewEdition(bookId: number): Promise<string | null> {
+  const data = await graphql<{ editions?: Array<{ title?: string | null }> }>(
+    `query { editions(where:{book_id:{_eq:${Number(bookId)}}, language:{code2:{_eq:"he"}}}, order_by:[{users_count:desc},{id:asc}], limit:1) { title } }`,
+  );
+  return data.editions?.[0]?.title?.trim() || null;
+}
+
 /** Search Hardcover's Book index and return provider IDs in relevance order. */
 export async function searchHardcoverBooks(query: string): Promise<number[]> {
   const safe = query.replace(/[\\"]/g, " ").trim();

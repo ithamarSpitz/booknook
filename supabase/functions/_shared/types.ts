@@ -186,7 +186,7 @@ export interface RecommendationCard {
 }
 
 export interface HebrewHint {
-  source: "wikidata" | "nli";
+  source: "wikidata" | "nli" | "hardcover";
   title: string;
   author: string | null;
   alternate?: string | null;
