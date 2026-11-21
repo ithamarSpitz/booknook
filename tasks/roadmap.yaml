@@ -1478,3 +1478,20 @@ sprints:
         - S37-T3
         - S37-T4
         - S37-T5
+  S38-rematch-from-file:
+    name: rematch:cached applies a saved dry run; retry the author batch
+    tasks:
+      S38-T1:
+        file: tasks/sprint-38-rematch-from-file/01-contract.md
+        stage: 1
+        depends_on: []
+      S38-T2:
+        file: tasks/sprint-38-rematch-from-file/02-from-file.md
+        stage: 2
+        depends_on:
+        - S38-T1
+      S38-T3:
+        file: tasks/sprint-38-rematch-from-file/03-docs.md
+        stage: 3
+        depends_on:
+        - S38-T2
