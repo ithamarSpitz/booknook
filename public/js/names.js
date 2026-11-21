@@ -213,6 +213,21 @@ function firstNameMatches(hebrewName, latinWords) {
   });
 }
 
+/**
+ * Latin name without single-letter initial tokens ("J.K." splits too).
+ * @param {string} name
+ * @returns {string | null}
+ */
+function withoutInitials(name) {
+  const tokens = (name ?? "").split(/[\s.]+/u).filter(Boolean);
+  const kept = tokens.filter((token) =>
+    !/^[A-Za-z]$/.test(token.normalize("NFKD").replace(/\p{M}/gu, ""))
+  );
+  return kept.length === 0 || kept.length === tokens.length
+    ? null
+    : kept.join(" ");
+}
+
 /** @param {string} hebrewName @param {string[]} latinNames @returns {number} */
 export function nameSoundScore(hebrewName, latinNames) {
   hebrewName = stripHebrewPoints(hebrewName);
@@ -231,7 +246,14 @@ export function nameSoundScore(hebrewName, latinNames) {
   // single-token description hits strict avoids short-name false positives.
   const allowOmittedH = fullName;
   let best = 0;
-  for (const latin of latinNames) {
+  /** @type {string[]} */
+  const candidates = [];
+  for (const name of latinNames) {
+    candidates.push(name);
+    const stripped = withoutInitials(name);
+    if (stripped !== null) candidates.push(stripped);
+  }
+  for (const latin of candidates) {
     let latinBest = 0;
     const latinKeys = [
       soundKey(latinSkeleton(latin)),
