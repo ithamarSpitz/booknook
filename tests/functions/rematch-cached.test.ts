@@ -24,7 +24,9 @@ function harness(over: Partial<RunDeps> = {}, works = [work(325603)]) {
   const deps: Partial<RunDeps> = {
     loadOperatorEnv: (() => ({})) as unknown as RunDeps["loadOperatorEnv"],
     openProdDb: (() =>
-      Promise.resolve({ end: () => Promise.resolve() })) as unknown as RunDeps[
+      Promise.resolve({
+        end: () => Promise.resolve(),
+      })) as unknown as RunDeps[
         "openProdDb"
       ],
     checkHardcoverBudget: () => Promise.resolve(true),
@@ -126,12 +128,17 @@ Deno.test("wikidata author failure exits 3 without processing works", async () =
   });
   const code = await main([], h.deps);
   assertEquals(code, 3);
-  assertEquals(h.lines.map((l) => JSON.parse(l)), [{ error: "wikidata_authors" }]);
+  assertEquals(h.lines.map((l) => JSON.parse(l)), [{
+    error: "wikidata_authors",
+  }]);
 });
 
 Deno.test("budget below the minimum at the 50-work check exits 4", async () => {
   const works = Array.from({ length: 60 }, (_, i) => work(1000 + i));
-  const h = harness({ hardcoverDailyRemaining: () => Promise.resolve(10) }, works);
+  const h = harness(
+    { hardcoverDailyRemaining: () => Promise.resolve(10) },
+    works,
+  );
   const code = await main([], h.deps);
   assertEquals(code, 4);
   assertEquals(h.lines.length, 51);
@@ -165,6 +172,35 @@ Deno.test("rejected and failed candidates are skipped with a reason", async () =
   assertEquals(last(failedRun.lines).skipped, { provider_failure: 1 });
 });
 
+Deno.test("author mismatch skips without resolving", async () => {
+  let resolved = 0;
+  const h = harness({
+    fetchEditionDetails: (id) =>
+      Promise.resolve({
+        simania_id: id,
+        title: "ויקיפדיה",
+        author: "Dan O'Sullivan",
+      }),
+    resolveMatch: () => {
+      resolved++;
+      return Promise.resolve({
+        found: null,
+        failed: false,
+      }) as unknown as ReturnType<
+        RunDeps["resolveMatch"]
+      >;
+    },
+  }, [{
+    id: "spare",
+    hardcover_id: 325603,
+    original_title: "Spare",
+    original_authors: ["Prince Harry", "J.R. Moehringer"],
+  }]);
+  assertEquals(await main([], h.deps), 0);
+  assertEquals(resolved, 0);
+  assertEquals(last(h.lines).skipped, { author_mismatch: 1 });
+});
+
 Deno.test("dictionary fallback proposes the author's book for the current work", async () => {
   const h = harness({
     hebrewHint: () => Promise.resolve(null),
@@ -172,7 +208,8 @@ Deno.test("dictionary fallback proposes the author's book for the current work",
       Promise.resolve(new Map([["Stephen King", ["סטיבן קינג"]]])),
     searchBooks: () =>
       Promise.resolve([{ id: 3191, title: "רזה", author: "סטיבן קינג" }]),
-    wiktionaryGlosses: (word) => Promise.resolve(word === "רזה" ? ["thin, lean"] : []),
+    wiktionaryGlosses: (word) =>
+      Promise.resolve(word === "רזה" ? ["thin, lean"] : []),
   });
   assertEquals(await main([], h.deps), 0);
   assertEquals(JSON.parse(h.lines[0]).proposal, {
@@ -204,7 +241,8 @@ Deno.test("apply links a dictionary proposal with dictionary status", async () =
       Promise.resolve(new Map([["Stephen King", ["סטיבן קינג"]]])),
     searchBooks: () =>
       Promise.resolve([{ id: 3191, title: "רזה", author: "סטיבן קינג" }]),
-    wiktionaryGlosses: (word) => Promise.resolve(word === "רזה" ? ["thin"] : []),
+    wiktionaryGlosses: (word) =>
+      Promise.resolve(word === "רזה" ? ["thin"] : []),
   });
   assertEquals(await main(["--apply"], h.deps), 0);
   assertEquals(h.calls.apply, ["dictionary"]);

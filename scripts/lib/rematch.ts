@@ -1,4 +1,7 @@
-import { authors, type HardcoverBook } from "../../supabase/functions/_shared/hardcover.ts";
+import {
+  authors,
+  type HardcoverBook,
+} from "../../supabase/functions/_shared/hardcover.ts";
 import { nameSoundScore } from "../../supabase/functions/_shared/names.ts";
 import type { ResolveMatchResult } from "../../supabase/functions/_shared/catalog.ts";
 import type { SimaniaBook } from "../../supabase/functions/_shared/simania.ts";
@@ -41,6 +44,28 @@ const PAGE = 50;
 const MAX_OFFSET = 250;
 const MAX_BOOKS = 60;
 
+export function authorVariants(name: string): string[] {
+  const collapse = (value: string) => value.trim().replace(/\s+/gu, " ");
+  const source = String(name ?? "");
+  const variants = [
+    collapse(source.replace(/\([^)]*\)/gu, " ")),
+    collapse(source.replace(/\S+\s*\(([^)]*)\)/gu, "$1")),
+  ];
+  return [...new Set(variants.filter(Boolean))];
+}
+
+export function authorAgreesWithWork(
+  hebrewAuthor: string,
+  englishAuthors: string[],
+  knownHebrewNames: string[],
+): boolean {
+  if (!String(hebrewAuthor ?? "").trim()) return false;
+  return authorVariants(hebrewAuthor).some((variant) =>
+    nameSoundScore(variant, englishAuthors) >= 0.7 ||
+    knownHebrewNames.some((name) => similarity(variant, name) >= 0.6)
+  );
+}
+
 export function authorNamesFromLinks(
   pairs: { he: string; en: string }[],
 ): Map<string, string[]> {
@@ -75,13 +100,17 @@ function bookId(book: SimaniaBook): number | null {
 
 function searchQuery(name: string): string {
   const words = name.trim().split(/\s+/u);
-  return words.length <= 1 ? name.trim() : `${words[0]} ${words[words.length - 1]}`;
+  return words.length <= 1
+    ? name.trim()
+    : `${words[0]} ${words[words.length - 1]}`;
 }
 
 export async function findCandidates(
   work: RematchWork,
   deps: RematchDeps,
-): Promise<{ candidates: Candidate[]; authorBooks: AuthorBook[]; failed: boolean }> {
+): Promise<
+  { candidates: Candidate[]; authorBooks: AuthorBook[]; failed: boolean }
+> {
   const candidates: Candidate[] = [];
   const authorBooks: AuthorBook[] = [];
   try {
@@ -92,7 +121,9 @@ export async function findCandidates(
         candidates.push({ simania_id: id, via: "forward" });
       }
     }
-    if (candidates.length > 0) return { candidates, authorBooks, failed: false };
+    if (candidates.length > 0) {
+      return { candidates, authorBooks, failed: false };
+    }
 
     const names = await deps.hebrewNames(work);
     const seen = new Set<number>();
@@ -130,6 +161,7 @@ export async function findCandidates(
 export async function confirmCandidate(
   work: RematchWork,
   edition: EditionRow,
+  authorAgrees: boolean,
   deps: { resolveMatch(edition: EditionRow): Promise<ResolveMatchResult> },
 ): Promise<{
   accepted: boolean;
@@ -137,6 +169,9 @@ export async function confirmCandidate(
   book: HardcoverBook | null;
   failed: boolean;
 }> {
+  if (!authorAgrees) {
+    return { accepted: false, status: null, book: null, failed: false };
+  }
   const result = await deps.resolveMatch(edition);
   if (!result.found) {
     return { accepted: false, status: null, book: null, failed: result.failed };

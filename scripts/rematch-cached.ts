@@ -5,11 +5,12 @@ import {
 } from "../supabase/functions/_shared/catalog.ts";
 import {
   nliOriginal,
-  wiktionaryGlosses,
   wikidataHebrewAuthors,
   wikidataOriginals,
+  wiktionaryGlosses,
 } from "../supabase/functions/_shared/bridges.ts";
 import {
+  authors,
   type HardcoverBook,
   hardcoverBooks,
   isSearchDocumentBook,
@@ -18,7 +19,10 @@ import {
   fetchEditionDetails,
   searchBooks,
 } from "../supabase/functions/_shared/simania.ts";
-import { type AuthorStore, nameKey } from "../supabase/functions/_shared/authors.ts";
+import {
+  type AuthorStore,
+  nameKey,
+} from "../supabase/functions/_shared/authors.ts";
 import { sqlAuthorStore } from "./lib/author-store.ts";
 import { defaultHebrewHint } from "../supabase/functions/recommendations/index.ts";
 import type { EditionRow } from "../supabase/functions/_shared/types.ts";
@@ -29,6 +33,7 @@ import {
 } from "./lib/hardcover-budget.ts";
 import { loadOperatorEnv, openProdDb } from "./lib/prod-db.ts";
 import {
+  authorAgreesWithWork,
   confirmCandidate,
   findCandidates,
   type RematchDeps,
@@ -54,7 +59,11 @@ export interface RunDeps {
   openProdDb: typeof openProdDb;
   loadWorks: (
     sql: Sql,
-    options: { hardcoverId: number | null; offset: number; limit: number | null },
+    options: {
+      hardcoverId: number | null;
+      offset: number;
+      limit: number | null;
+    },
   ) => Promise<RematchWork[]>;
   authorStore: (sql: Sql) => AuthorStore;
   loadLinkedSimaniaIds: (sql: Sql) => Promise<Set<number>>;
@@ -197,8 +206,7 @@ function parseArgs(args: string[]): CliOptions | null {
       const value = args[++i];
       if (value === undefined || value === "") return null;
       options.from = value;
-    }
-    else if (
+    } else if (
       arg === "--hardcover-id" || arg === "--offset" || arg === "--limit" ||
       arg === "--min-hardcover"
     ) {
@@ -307,6 +315,22 @@ async function runFromFile(
   };
   let linked = 0;
   let failed = false;
+  const store = deps.authorStore(sql);
+
+  const knownHebrewNames = async (englishAuthors: string[]) => {
+    const names: string[] = [];
+    for (const author of englishAuthors) {
+      const key = nameKey(author);
+      if (!key) continue;
+      const found = await store.find("en", key);
+      for (const row of found?.names ?? []) {
+        if (row.lang === "he" && !names.includes(row.name)) {
+          names.push(row.name);
+        }
+      }
+    }
+    return names;
+  };
 
   for (const item of saved) {
     const { simania_id, book_id } = item;
@@ -325,6 +349,16 @@ async function runFromFile(
       if (!edition) {
         edition = toEditionRow(await deps.fetchEditionDetails(simania_id));
       }
+      const englishAuthors = authors(book);
+      const authorAgrees = authorAgreesWithWork(
+        edition.author ?? "",
+        englishAuthors,
+        await knownHebrewNames(englishAuthors),
+      );
+      if (!authorAgrees) {
+        skip(simania_id, book_id, "author_mismatch");
+        continue;
+      }
       if (options.apply) {
         if (!existed) await deps.insertEdition(sql, edition);
         const plan = {
@@ -337,7 +371,12 @@ async function runFromFile(
           book,
           reason: "ok",
         } as unknown as LinkRepairPlan;
-        const result = await deps.applyRepair(sql, plan, deps.now(), item.status);
+        const result = await deps.applyRepair(
+          sql,
+          plan,
+          deps.now(),
+          item.status,
+        );
         if (result.status !== "linked") {
           skip(simania_id, book_id, "not_linked");
           continue;
@@ -392,6 +431,21 @@ export async function main(
     const linkedSimaniaIds = await deps.loadLinkedSimaniaIds(sql);
     const store = deps.authorStore(sql);
 
+    const knownHebrewNames = async (englishAuthors: string[]) => {
+      const names: string[] = [];
+      for (const author of englishAuthors) {
+        const key = nameKey(author);
+        if (!key) continue;
+        const found = await store.find("en", key);
+        for (const row of found?.names ?? []) {
+          if (row.lang === "he" && !names.includes(row.name)) {
+            names.push(row.name);
+          }
+        }
+      }
+      return names;
+    };
+
     const firstAuthor = (work: RematchWork) =>
       (work.original_authors ?? [])[0]?.trim() ?? "";
     const THIRTY_DAYS = 30 * 86_400_000;
@@ -408,14 +462,16 @@ export async function main(
       const stale = checked !== null &&
         deps.now().getTime() - checked > THIRTY_DAYS;
       const hasHebrew = found?.names.some((row) => row.lang === "he") ?? false;
-      if (!found || stale || (checked === null && !hasHebrew)) unknown.push(name);
+      if (!found || stale || (checked === null && !hasHebrew)) {
+        unknown.push(name);
+      }
     }
     // Answers of this run; with --apply they are also stored.
     const wikidataNames = new Map<string, string[]>();
     if (unknown.length > 0) {
       let answers = new Map<string, string[]>();
       const attempts = 3;
-      for (let attempt = 1; ; attempt++) {
+      for (let attempt = 1;; attempt++) {
         try {
           answers = await deps.wikidataHebrewAuthors(unknown);
           break;
@@ -434,8 +490,14 @@ export async function main(
         const found = known.get(name) ?? null;
         const authorId = found?.author_id ?? await store.create();
         await store.addNames(authorId, [
-          ...(found ? [] : [{ lang: "en" as const, name, source: "wikidata" as const }]),
-          ...answer.map((he) => ({ lang: "he" as const, name: he, source: "wikidata" as const })),
+          ...(found
+            ? []
+            : [{ lang: "en" as const, name, source: "wikidata" as const }]),
+          ...answer.map((he) => ({
+            lang: "he" as const,
+            name: he,
+            source: "wikidata" as const,
+          })),
         ]);
         await store.markWikidataChecked(authorId, deps.now());
       }
@@ -477,7 +539,9 @@ export async function main(
           const found = await store.find("en", nameKey(name));
           const stored = (found?.names ?? [])
             .filter((row) => row.lang === "he")
-            .sort((x, y) => Number(x.source === "wikidata") - Number(y.source === "wikidata"))
+            .sort((x, y) =>
+              Number(x.source === "wikidata") - Number(y.source === "wikidata")
+            )
             .map((row) => row.name);
           return [...new Set([...stored, ...(wikidataNames.get(name) ?? [])])];
         })();
@@ -500,13 +564,18 @@ export async function main(
     // Deliberately sequential: one provider request at a time.
     for (const work of works) {
       processed++;
-      const base = { hardcover_id: work.hardcover_id, title: work.original_title };
-      const { candidates, authorBooks, failed: searchFailed } = await findCandidates(
-        work,
-        rematchDeps,
-      );
+      const base = {
+        hardcover_id: work.hardcover_id,
+        title: work.original_title,
+      };
+      const { candidates, authorBooks, failed: searchFailed } =
+        await findCandidates(
+          work,
+          rematchDeps,
+        );
       let anyFailed = searchFailed;
       let rejected = false;
+      let authorMismatch = false;
       let linkedElsewhere = false;
       let proposal: Proposal | null = null;
 
@@ -525,10 +594,16 @@ export async function main(
               await deps.fetchEditionDetails(candidate.simania_id),
             );
           }
-          const result = await confirmCandidate(work, edition, {
+          const authorAgrees = authorAgreesWithWork(
+            edition.author ?? "",
+            work.original_authors ?? [],
+            await knownHebrewNames(work.original_authors ?? []),
+          );
+          const result = await confirmCandidate(work, edition, authorAgrees, {
             resolveMatch: (e) => deps.resolveMatch(db, e),
           });
-          if (result.failed) anyFailed = true;
+          if (!authorAgrees) authorMismatch = true;
+          else if (result.failed) anyFailed = true;
           else if (!result.accepted || !result.book || !result.status) {
             rejected = true;
           } else {
@@ -549,6 +624,8 @@ export async function main(
 
       const reasonBeforeDictionary = anyFailed
         ? "provider_failure"
+        : authorMismatch
+        ? "author_mismatch"
         : rejected
         ? "rejected"
         : linkedElsewhere
@@ -557,7 +634,8 @@ export async function main(
       if (
         !proposal && !anyFailed && authorBooks.length > 0 &&
         (reasonBeforeDictionary === "no_candidate" ||
-          reasonBeforeDictionary === "rejected")
+          reasonBeforeDictionary === "rejected" ||
+          reasonBeforeDictionary === "author_mismatch")
       ) {
         try {
           const picked = await pickByDictionary(
@@ -576,20 +654,32 @@ export async function main(
                   await deps.fetchEditionDetails(picked.simania_id),
                 );
               }
-              proposal = {
-                work,
-                edition,
-                existed,
-                via: "dictionary",
-                status: "dictionary",
-                book: {
-                  id: work.hardcover_id,
-                  title: work.original_title,
-                  cached_contributors: (work.original_authors ?? []).map((name) => ({
-                    author: { name },
-                  })),
-                },
-              };
+              if (
+                !authorAgreesWithWork(
+                  edition.author ?? "",
+                  work.original_authors ?? [],
+                  await knownHebrewNames(work.original_authors ?? []),
+                )
+              ) {
+                authorMismatch = true;
+              } else {
+                proposal = {
+                  work,
+                  edition,
+                  existed,
+                  via: "dictionary",
+                  status: "dictionary",
+                  book: {
+                    id: work.hardcover_id,
+                    title: work.original_title,
+                    cached_contributors: (work.original_authors ?? []).map((
+                      name,
+                    ) => ({
+                      author: { name },
+                    })),
+                  },
+                };
+              }
             }
           }
         } catch {
@@ -598,7 +688,9 @@ export async function main(
       }
 
       if (!proposal) {
-        const reason = anyFailed
+        const reason = authorMismatch
+          ? "author_mismatch"
+          : anyFailed
           ? "provider_failure"
           : rejected
           ? "rejected"
@@ -624,7 +716,9 @@ export async function main(
           try {
             let book = proposal.book;
             let detailsOk = true;
-            if (proposal.via === "dictionary" || deps.isSearchDocumentBook(book)) {
+            if (
+              proposal.via === "dictionary" || deps.isSearchDocumentBook(book)
+            ) {
               let detailed: HardcoverBook | undefined;
               try {
                 detailed = (await deps.hardcoverBooks([book.id]))[0];
@@ -636,9 +730,13 @@ export async function main(
             }
             if (!detailsOk) {
               skip("details_failure");
-              deps.log(JSON.stringify({ simania_id: id, skipped: "details_failure" }));
+              deps.log(
+                JSON.stringify({ simania_id: id, skipped: "details_failure" }),
+              );
             } else {
-              if (!proposal.existed) await deps.insertEdition(sql, proposal.edition);
+              if (!proposal.existed) {
+                await deps.insertEdition(sql, proposal.edition);
+              }
               const plan = {
                 kind: "link",
                 simania_id: id,
