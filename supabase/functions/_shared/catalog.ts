@@ -3,7 +3,13 @@ import {
   wikidataEnglishAuthor,
   wikidataOriginal,
 } from "./bridges.ts";
-import { authors, findHardcoverBook, type HardcoverBook } from "./hardcover.ts";
+import {
+  authors,
+  findHardcoverBook,
+  type HardcoverBook,
+  hardcoverBooks,
+  isSearchDocumentBook,
+} from "./hardcover.ts";
 import { type ChunkQueryResult, selectInChunks } from "./chunked.ts";
 import { authorGuardRejects } from "./fallback-match.ts";
 import {
@@ -34,6 +40,7 @@ export interface CatalogProviders {
   nliOriginal: typeof nliOriginal;
   wikidataEnglishAuthor: typeof wikidataEnglishAuthor;
   findHardcoverBook: typeof findHardcoverBook;
+  hardcoverBooks: typeof hardcoverBooks;
   now: () => Date;
 }
 
@@ -44,6 +51,7 @@ const providers: CatalogProviders = {
   nliOriginal,
   wikidataEnglishAuthor,
   findHardcoverBook,
+  hardcoverBooks,
   now: () => new Date(),
 };
 
@@ -557,9 +565,19 @@ export async function ensureResolved(
   ) return edition;
 
   const resolved = await resolveMatch(db, edition, overrides);
-  const match = resolved.found?.book ?? null;
+  let match = resolved.found?.book ?? null;
   let status: ResolveStatus = resolved.found?.status ?? "not_found";
   const failures = { count: resolved.failed ? 1 : 0 };
+
+  // Only a book built from search documents lacks details; stubs and detail-built books keep theirs.
+  if (match && match.cached_similar_book_ids === undefined && isSearchDocumentBook(match)) {
+    try {
+      match = (await api.hardcoverBooks([match.id]))[0] ?? null;
+    } catch {
+      match = null;
+    }
+    if (!match) failures.count += 1;
+  }
 
   let workId: string | null = null;
   if (match) {
