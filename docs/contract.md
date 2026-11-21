@@ -707,6 +707,18 @@ Request `LinkEditionRequest`: `{"work_id":"78e9c71d-d6f2-4ea4-bcbb-42e4ec9300cf"
 - `--apply` links each accepted edition with the `resolveMatch` status. It creates the edition row from Simania details when it doesn't exist, and fetches Hardcover details first for search-document books (S35).
 - Measured on prod 2026-11-21: 2,826 cached works, 2,297 with no linked Hebrew edition. Most were matched before later fixes and never retried, because `refresh:all` only handles books in current use. Of 300 random English-only works checked independently, 48 have Hebrew translations, and the current hint and match steps find 37 of them.
 
+**Rematch apply from a dry run (S38).** A saved dry run can be applied without repeating the searches and confirmations.
+- A `rematch:cached` proposal line also has `book_id`, the Hardcover id of the confirmed book.
+- At startup, a failed `wikidataHebrewAuthors` is retried up to 2 more times, 30 seconds apart, before exit 3.
+- `rematch:cached -- --from <file> [--apply]` links the proposals in a saved dry-run output without searching or confirming again:
+  - It reads the JSON lines that have `proposal.book_id` and ignores all other lines.
+  - An edition that is linked to a work by now is skipped as `linked_elsewhere`.
+  - The Hardcover books are fetched with `hardcoverBooks` in chunks of at most 50 ids, so one request covers 50 proposals. A missing book is skipped as `details_failure`.
+  - A missing edition row is created from Simania details, as in S37.
+  - The link uses the saved `status`.
+  - Without `--apply`, it only prints what it would link.
+  - `--from` can't be combined with `--hardcover-id`, `--offset`, or `--limit`.
+
 ## View models
 
 ### `BookCard`
