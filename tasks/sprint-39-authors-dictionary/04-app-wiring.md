@@ -15,6 +15,12 @@ allowed_paths:
   - tests/functions/recommendations-logic.test.ts
   - tests/functions/resolve-match.test.ts
   - tests/functions/link-edition-handler.test.ts
+  - tests/functions/recommendations-handler.test.ts
+  - tests/functions/author-hint.test.ts
+  - tests/functions/resolver-s30.test.ts
+  - tests/functions/box-sets.test.ts
+  - tests/functions/prefix-weak.test.ts
+  - tests/functions/add-book-catalog.test.ts
 context:
   - contract
   - architecture.matching
@@ -52,7 +58,7 @@ New `tests/functions/authors-wiring.test.ts`, plus updates only where existing t
 4. `resolveMatch` uses the table's English name as the hint when `englishAuthorHint` is null.
 5. A successful `link-edition` records the pair, and a failing `recordPair` still returns success.
 
-All existing tests pass.
+All existing tests pass. Existing tests that expect the old behavior (the linked-editions author lookup in `hebrewAuthorFor`, or a direct `wikidataEnglishAuthor` call in `resolveMatch`) must be updated to the new behavior, keeping what they check otherwise: the case, the inputs, and the expected Hebrew or English name, now provided through the authors-table stub. Measured: attempt 2 was blocked by 4 such tests in `tests/functions/recommendations-handler.test.ts`. Don't delete tests.
 
 # Acceptance criteria
 
