@@ -49,6 +49,7 @@ function harness(over: Partial<RunDeps> = {}, works = [work(325603)]) {
     hebrewHint: () => Promise.resolve({ title: "רזה" }),
     matchHebrewBook: () => Promise.resolve({ id: 3191, title: "רזה" }),
     searchBooks: () => Promise.resolve([]),
+    hebrewAuthorBySound: () => Promise.resolve(null),
     fetchEditionDetails: (id) =>
       Promise.resolve({ simania_id: id, title: "רזה", author: "סטיבן קינג" }),
     resolveMatch: () =>
