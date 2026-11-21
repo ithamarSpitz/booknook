@@ -1,3 +1,4 @@
+import { memoryAuthorStore } from "../../scripts/lib/link-proposal.ts";
 import { assertEquals } from "jsr:@std/assert@1";
 import { main, type RunDeps } from "../../scripts/rematch-cached.ts";
 import type { RematchWork } from "../../scripts/lib/rematch.ts";
@@ -45,7 +46,7 @@ function harness(over: Partial<RunDeps> = {}, file = "") {
     checkHardcoverBudget: () => Promise.resolve(true),
     hardcoverDailyRemaining: () => Promise.resolve(5000),
     loadWorks: () => Promise.resolve([work]),
-    loadLinkPairs: () => Promise.resolve([]),
+    authorStore: () => memoryAuthorStore(),
     loadLinkedSimaniaIds: () => Promise.resolve(new Set<number>()),
     loadEdition: () => Promise.resolve(null),
     insertEdition: () => {

@@ -1,6 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import {
   type LinkProposal,
+  memoryAuthorStore,
   type ProposalDeps,
   proposeLink,
 } from "../../scripts/lib/link-proposal.ts";
@@ -42,7 +43,8 @@ function dependencies(options: {
       Promise.resolve(
         originalTitle === null ? "<html></html>" : pageTitle(originalTitle),
       ),
-    wikidataEnglishAuthor: () => Promise.resolve(options.englishAuthor ?? null),
+    store: memoryAuthorStore(),
+    wikidataEnglishAuthorStrict: () => Promise.resolve(options.englishAuthor ?? null),
     searchIds: () => Promise.resolve(candidates.map(({ id }) => id)),
     books: () => Promise.resolve(candidates),
   };
@@ -178,7 +180,7 @@ Deno.test("proposeLink uses Educated's page author and accepts its subtitle", as
     originalTitle: "Educated / Tara Westover",
     candidates,
   });
-  deps.wikidataEnglishAuthor = () => {
+  deps.wikidataEnglishAuthorStrict = () => {
     wikidataCalls++;
     return Promise.resolve("Wrong Author");
   };
@@ -217,7 +219,7 @@ Deno.test("proposeLink calls Wikidata when the page has no author", async () => 
     originalTitle: "Under the Dome",
     candidates: [book(384966, "Under the Dome", "Stephen King")],
   });
-  deps.wikidataEnglishAuthor = () => {
+  deps.wikidataEnglishAuthorStrict = () => {
     wikidataCalls++;
     return Promise.resolve("Stephen King");
   };
@@ -230,4 +232,28 @@ Deno.test("proposeLink calls Wikidata when the page has no author", async () => 
   assertEquals(result.book?.id, 384966);
   assertEquals(result.english_author, "Stephen King");
   assertEquals(wikidataCalls, 1);
+});
+
+Deno.test("proposeLink uses the store's English name without calling Wikidata", async () => {
+  let wikidataCalls = 0;
+  const deps = dependencies({
+    originalTitle: "Under the Dome",
+    candidates: [book(384966, "Under the Dome", "Stephen King")],
+  });
+  const id = await deps.store.create();
+  await deps.store.addNames(id, [
+    { lang: "he", name: "סטיבן קינג", source: "link" },
+    { lang: "en", name: "Stephen King", source: "link" },
+  ]);
+  deps.wikidataEnglishAuthorStrict = () => {
+    wikidataCalls++;
+    return Promise.resolve("Wrong");
+  };
+  const result = await proposeLink(
+    { simania_id: 905132, title: "מתחת לכיפה", author: "סטיבן קינג" },
+    deps,
+  );
+  assertEquals(result.english_author, "Stephen King");
+  assertEquals(result.reason, "ok");
+  assertEquals(wikidataCalls, 0);
 });

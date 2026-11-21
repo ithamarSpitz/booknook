@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { main, type RunDeps } from "../../scripts/rematch-cached.ts";
+import { memoryAuthorStore } from "../../scripts/lib/link-proposal.ts";
 import type { RematchWork } from "../../scripts/lib/rematch.ts";
 import type { HardcoverBook } from "../../supabase/functions/_shared/hardcover.ts";
 
@@ -29,7 +30,7 @@ function harness(over: Partial<RunDeps> = {}, works = [work(325603)]) {
     checkHardcoverBudget: () => Promise.resolve(true),
     hardcoverDailyRemaining: () => Promise.resolve(5000),
     loadWorks: () => Promise.resolve(works),
-    loadLinkPairs: () => Promise.resolve([]),
+    authorStore: () => memoryAuthorStore(),
     loadLinkedSimaniaIds: () => Promise.resolve(new Set<number>()),
     loadEdition: () => Promise.resolve(null),
     insertEdition: () => {
@@ -167,4 +168,50 @@ Deno.test("unknown argument prints usage and exits 2", async () => {
   const h = harness();
   assertEquals(await main(["--nope"], h.deps), 2);
   assert(h.errors[0].startsWith("Usage: rematch:cached"));
+});
+
+Deno.test("Wikidata is asked only for unknown authors, and stored only with --apply", async () => {
+  const known = (store: ReturnType<typeof memoryAuthorStore>) =>
+    (async () => {
+      const id = await store.create();
+      await store.addNames(id, [
+        { lang: "en", name: "Stephen King", source: "link" },
+        { lang: "he", name: "סטיבן קינג", source: "link" },
+      ]);
+    })();
+  for (const apply of [false, true]) {
+    const store = memoryAuthorStore();
+    await known(store);
+    const asked: string[][] = [];
+    const works = [work(1), { ...work(2), original_authors: ["Neil Gaiman"] }];
+    const h = harness({
+      authorStore: () => store,
+      wikidataHebrewAuthors: (names) => {
+        asked.push(names);
+        return Promise.resolve(new Map([["Neil Gaiman", ["ניל גיימן"]]]));
+      },
+    }, works);
+    assertEquals(await main(apply ? ["--apply"] : [], h.deps), 0);
+    assertEquals(asked, [["Neil Gaiman"]]);
+    const stored = await store.find("en", "neil gaiman");
+    if (apply) {
+      assertEquals(stored?.names.map((n) => [n.lang, n.name, n.source]), [
+        ["en", "Neil Gaiman", "wikidata"],
+        ["he", "ניל גיימן", "wikidata"],
+      ]);
+      assert(stored?.wikidata_checked_at);
+    } else assertEquals(stored, null);
+  }
+});
+
+Deno.test("three failed Wikidata batches still exit 3 with the table in use", async () => {
+  let calls = 0;
+  const h = harness({
+    wikidataHebrewAuthors: () => {
+      calls++;
+      return Promise.reject(new Error("429"));
+    },
+  });
+  assertEquals(await main([], h.deps), 3);
+  assertEquals(calls, 3);
 });

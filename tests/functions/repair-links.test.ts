@@ -310,3 +310,24 @@ Deno.test("dry run opens read-only and never applies a repair", async () => {
     evidence: { english_author: "English Author" },
   });
 });
+
+Deno.test("applyRepair records the edition author with the book's first author", async () => {
+  const fake = fakeTransactionalSql([{ simania_id: 1 }]);
+  const pairs: string[][] = [];
+  const plan = { ...repairPlan(), author: "מחבר אנגלי" };
+  const result = await applyRepair(fake.sql, plan, new Date(), "original_title", {
+    recordPair: (_store, he, en) => {
+      pairs.push([he, en]);
+      return Promise.resolve();
+    },
+  });
+  assertEquals(result.status, "linked");
+  assertEquals(pairs, [["מחבר אנגלי", "English Author"]]);
+
+  const skipped = fakeTransactionalSql([]);
+  await applyRepair(skipped.sql, plan, new Date(), "original_title", {
+    recordPair: () => {
+      throw new Error("must not record a skipped link");
+    },
+  });
+});

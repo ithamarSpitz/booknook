@@ -17,7 +17,8 @@ import {
   fetchEditionDetails,
   searchBooks,
 } from "../supabase/functions/_shared/simania.ts";
-import { normalize } from "../supabase/functions/_shared/utils.ts";
+import { type AuthorStore, nameKey } from "../supabase/functions/_shared/authors.ts";
+import { sqlAuthorStore } from "./lib/author-store.ts";
 import { defaultHebrewHint } from "../supabase/functions/recommendations/index.ts";
 import type { EditionRow } from "../supabase/functions/_shared/types.ts";
 import { matchHebrewBook, simaniaIdOf } from "../public/js/simania.js";
@@ -27,7 +28,6 @@ import {
 } from "./lib/hardcover-budget.ts";
 import { loadOperatorEnv, openProdDb } from "./lib/prod-db.ts";
 import {
-  authorNamesFromLinks,
   confirmCandidate,
   findCandidates,
   type RematchDeps,
@@ -54,7 +54,7 @@ export interface RunDeps {
     sql: Sql,
     options: { hardcoverId: number | null; offset: number; limit: number | null },
   ) => Promise<RematchWork[]>;
-  loadLinkPairs: (sql: Sql) => Promise<{ he: string; en: string }[]>;
+  authorStore: (sql: Sql) => AuthorStore;
   loadLinkedSimaniaIds: (sql: Sql) => Promise<Set<number>>;
   loadEdition: (sql: Sql, simaniaId: number) => Promise<EditionRow | null>;
   insertEdition: (sql: Sql, edition: EditionRow) => Promise<void>;
@@ -115,14 +115,7 @@ const runDefaults: RunDeps = {
   loadOperatorEnv,
   openProdDb,
   loadWorks,
-  loadLinkPairs: async (sql) =>
-    await sql<{ he: string; en: string }[]>`
-      select e.author as he, w.original_authors[1] as en
-      from public.editions as e
-      inner join public.works as w on w.id = e.work_id
-      where e.simania_id > 0 and e.author is not null
-        and w.original_authors[1] is not null
-    `,
+  authorStore: (sql) => sqlAuthorStore(sql),
   loadLinkedSimaniaIds: async (sql) => {
     const rows = await sql<{ simania_id: number }[]>`
       select simania_id from public.editions
@@ -391,24 +384,35 @@ export async function main(
   try {
     if (options.from !== null) return await runFromFile(deps, sql, options);
     const works = await deps.loadWorks(sql, options);
-    const linkNames = authorNamesFromLinks(await deps.loadLinkPairs(sql));
     const linkedSimaniaIds = await deps.loadLinkedSimaniaIds(sql);
+    const store = deps.authorStore(sql);
 
     const firstAuthor = (work: RematchWork) =>
       (work.original_authors ?? [])[0]?.trim() ?? "";
-    const missing = [
-      ...new Set(
-        works.map(firstAuthor).filter((name) =>
-          name && !linkNames.has(normalize(name))
-        ),
-      ),
-    ];
-    let wikidataNames = new Map<string, string[]>();
-    if (missing.length > 0) {
+    const THIRTY_DAYS = 30 * 86_400_000;
+    const unknown: string[] = [];
+    const known = new Map<string, Awaited<ReturnType<AuthorStore["find"]>>>();
+    for (const name of new Set(works.map(firstAuthor).filter(Boolean))) {
+      const key = nameKey(name);
+      if (!key) continue;
+      const found = await store.find("en", key);
+      known.set(name, found);
+      const checked = found?.wikidata_checked_at
+        ? new Date(found.wikidata_checked_at).getTime()
+        : null;
+      const stale = checked !== null &&
+        deps.now().getTime() - checked > THIRTY_DAYS;
+      const hasHebrew = found?.names.some((row) => row.lang === "he") ?? false;
+      if (!found || stale || (checked === null && !hasHebrew)) unknown.push(name);
+    }
+    // Answers of this run; with --apply they are also stored.
+    const wikidataNames = new Map<string, string[]>();
+    if (unknown.length > 0) {
+      let answers = new Map<string, string[]>();
       const attempts = 3;
       for (let attempt = 1; ; attempt++) {
         try {
-          wikidataNames = await deps.wikidataHebrewAuthors(missing);
+          answers = await deps.wikidataHebrewAuthors(unknown);
           break;
         } catch {
           if (attempt >= attempts) {
@@ -417,6 +421,18 @@ export async function main(
           }
           await deps.sleep(30000);
         }
+      }
+      for (const name of unknown) {
+        const answer = answers.get(name) ?? [];
+        wikidataNames.set(name, answer);
+        if (!options.apply) continue;
+        const found = known.get(name) ?? null;
+        const authorId = found?.author_id ?? await store.create();
+        await store.addNames(authorId, [
+          ...(found ? [] : [{ lang: "en" as const, name, source: "wikidata" as const }]),
+          ...answer.map((he) => ({ lang: "he" as const, name: he, source: "wikidata" as const })),
+        ]);
+        await store.markWikidataChecked(authorId, deps.now());
       }
     }
 
@@ -452,9 +468,14 @@ export async function main(
       hebrewNames: (work) => {
         const name = firstAuthor(work);
         if (!name) return Promise.resolve([]);
-        return Promise.resolve(
-          linkNames.get(normalize(name)) ?? wikidataNames.get(name) ?? [],
-        );
+        return (async () => {
+          const found = await store.find("en", nameKey(name));
+          const stored = (found?.names ?? [])
+            .filter((row) => row.lang === "he")
+            .sort((x, y) => Number(x.source === "wikidata") - Number(y.source === "wikidata"))
+            .map((row) => row.name);
+          return [...new Set([...stored, ...(wikidataNames.get(name) ?? [])])];
+        })();
       },
       searchBooks: deps.searchBooks,
       originals,

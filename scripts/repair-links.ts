@@ -3,6 +3,8 @@ import {
   authors,
   type HardcoverBook,
 } from "../supabase/functions/_shared/hardcover.ts";
+import { recordPair } from "../supabase/functions/_shared/authors.ts";
+import { sqlAuthorStore } from "./lib/author-store.ts";
 import { type LinkProposal, proposeLink } from "./lib/link-proposal.ts";
 import { nameSoundScore } from "./lib/names.ts";
 import {
@@ -173,6 +175,7 @@ export async function applyRepair(
   plan: RepairPlan,
   now: Date,
   status: "original_title" | "series" = "original_title",
+  hooks: { recordPair?: typeof recordPair } = {},
 ): Promise<RepairResult> {
   return await sql.begin(async (tx) => {
     const proposal = plan.kind === "relink" ? plan.proposal : plan;
@@ -227,6 +230,22 @@ export async function applyRepair(
           and work_id is null
         returning simania_id
       `;
+
+    if (editions.length > 0) {
+      const txSql = tx as unknown as Sql;
+      const store = sqlAuthorStore(txSql);
+      // `postgres` has no nested `begin` inside a transaction; merge on `tx`.
+      store.merge = async (keepId, dropId) => {
+        if (keepId === dropId) return;
+        await txSql`update public.author_names set author_id = ${keepId} where author_id = ${dropId}`;
+        await txSql`delete from public.authors where id = ${dropId}`;
+      };
+      await (hooks.recordPair ?? recordPair)(
+        store,
+        plan.author ?? "",
+        authors(proposal.book)[0] ?? "",
+      );
+    }
 
     return {
       simania_id: plan.simania_id,
