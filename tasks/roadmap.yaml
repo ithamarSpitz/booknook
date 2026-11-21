@@ -1400,3 +1400,15 @@ sprints:
         stage: 3
         depends_on:
         - S34-T2
+  S35-recheck-details:
+    name: recheck:links --apply fetches full book details before a relink
+    tasks:
+      S35-T1:
+        file: tasks/sprint-35-recheck-details/01-contract.md
+        stage: 1
+        depends_on: []
+      S35-T2:
+        file: tasks/sprint-35-recheck-details/02-recheck-details.md
+        stage: 2
+        depends_on:
+        - S35-T1
