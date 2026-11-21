@@ -197,6 +197,9 @@ export function recommendationFromApiCard(card) {
         source: c.hebrew_hint.source === "nli" ? "nli" : "wikidata",
         title: String(c.hebrew_hint.title ?? ""),
         author: c.hebrew_hint.author != null ? String(c.hebrew_hint.author) : null,
+        ...(typeof c.hebrew_hint.alternate === "string" && c.hebrew_hint.alternate.trim()
+          ? { alternate: c.hebrew_hint.alternate }
+          : {}),
       }
       : null,
     hebrew_author: simaniaId == null && c.hebrew_author != null ? String(c.hebrew_author) : null,
@@ -440,6 +443,23 @@ export async function localizeRecommendations(items, deps) {
           simaniaId = verified.simania_id;
           source = verified.resolve_status;
           chosenSimaniaAuthor = String(book.author ?? "");
+        }
+      }
+      if (!book && hint.alternate && deps.isCurrent()) {
+        let alternate = String(hint.alternate);
+        if (!ENGLISH_BOX_RE.test(String(rec.title ?? ""))) {
+          alternate = stripHebrewBoxWords(alternate) || alternate;
+        }
+        if (alternate && alternate !== hint.title) {
+          const altBook = await match(alternate, hint.author ?? "");
+          if (altBook && deps.isCurrent()) {
+            const verified = await verifyTitleMatch(rec, altBook, deps);
+            if (verified) {
+              simaniaId = verified.simania_id;
+              source = "nli";
+              chosenSimaniaAuthor = String(altBook.author ?? "");
+            }
+          }
         }
       }
       if (!book && simaniaId == null && deps.isCurrent()) {
