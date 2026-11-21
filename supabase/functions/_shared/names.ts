@@ -222,6 +222,17 @@ function firstNameMatches(hebrewName: string, latinWords: string[]): boolean {
   });
 }
 
+/** Latin name without single-letter initial tokens ("J.K." splits too). */
+function withoutInitials(name: string): string | null {
+  const tokens = (name ?? "").split(/[\s.]+/u).filter(Boolean);
+  const kept = tokens.filter((token) =>
+    !/^[A-Za-z]$/.test(token.normalize("NFKD").replace(/\p{M}/gu, ""))
+  );
+  return kept.length === 0 || kept.length === tokens.length
+    ? null
+    : kept.join(" ");
+}
+
 /**
  * Deterministic 0..1 score that a Hebrew-script name and a Latin-script name
  * are the same person; the maximum over `latinNames`. Empty input gives 0.
@@ -246,7 +257,13 @@ export function nameSoundScore(
   // single-token description hits strict avoids short-name false positives.
   const allowOmittedH = fullName;
   let best = 0;
-  for (const latin of latinNames) {
+  const candidates: string[] = [];
+  for (const name of latinNames) {
+    candidates.push(name);
+    const stripped = withoutInitials(name);
+    if (stripped !== null) candidates.push(stripped);
+  }
+  for (const latin of candidates) {
     let latinBest = 0;
     const latinKeys = [
       soundKey(latinSkeleton(latin)),
