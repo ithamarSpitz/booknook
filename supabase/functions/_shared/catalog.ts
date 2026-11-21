@@ -390,22 +390,20 @@ function guardRejects(edition: EditionRow, match: HardcoverBook): boolean {
   return authorGuardRejects(edition.author, authors(match), "");
 }
 
-export async function ensureResolved(
+export type ResolveMatchResult = {
+  found: { book: HardcoverBook; status: "wikidata" | "nli" | "fuzzy" } | null;
+  failed: boolean;
+};
+
+/** Wikidata -> NLI -> fuzzy decision. Never writes; ignores resolve_status. */
+export async function resolveMatch(
   db: CatalogDb,
   edition: EditionRow,
   overrides: Partial<CatalogProviders> = {},
-): Promise<EditionRow> {
-  if (edition.simania_id < 0) return edition;
+): Promise<ResolveMatchResult> {
   const api = { ...providers, ...overrides };
-  const now = api.now();
-  if (
-    edition.resolve_status !== "pending" &&
-    !(edition.resolve_status === "not_found" &&
-      stale(edition.resolved_at, 14, now))
-  ) return edition;
-
   let match: HardcoverBook | null = null;
-  let status: ResolveStatus = "not_found";
+  let status: "wikidata" | "nli" | "fuzzy" = "fuzzy";
   let wikidataTitle = "";
   // A provider error is not evidence that the book is missing. If nothing matched
   // and any request failed, stay pending so the next request retries.
@@ -471,6 +469,31 @@ export async function ensureResolved(
     if (match && guardRejects(edition, match)) match = null;
     if (match) status = "fuzzy";
   }
+
+  return {
+    found: match ? { book: match, status } : null,
+    failed: failures.count > 0,
+  };
+}
+
+export async function ensureResolved(
+  db: CatalogDb,
+  edition: EditionRow,
+  overrides: Partial<CatalogProviders> = {},
+): Promise<EditionRow> {
+  if (edition.simania_id < 0) return edition;
+  const api = { ...providers, ...overrides };
+  const now = api.now();
+  if (
+    edition.resolve_status !== "pending" &&
+    !(edition.resolve_status === "not_found" &&
+      stale(edition.resolved_at, 14, now))
+  ) return edition;
+
+  const resolved = await resolveMatch(db, edition, overrides);
+  const match = resolved.found?.book ?? null;
+  let status: ResolveStatus = resolved.found?.status ?? "not_found";
+  const failures = { count: resolved.failed ? 1 : 0 };
 
   let workId: string | null = null;
   if (match) {
