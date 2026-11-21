@@ -187,6 +187,23 @@ export async function matchHebrewBook(title, author = "", fetchImpl = fetch) {
   return best && best.titleScore >= 0.45 ? best.book : null;
 }
 
+/**
+ * Omnibus volume: the single result whose subtitle (parts joined by " | ")
+ * holds a part equal to the hint title. Pure; makes no requests.
+ */
+export function matchOmnibus(hintTitle, results) {
+  const hits = [];
+  for (const result of Array.isArray(results) ? results : []) {
+    const parts = String(result?.subtitle ?? "")
+      .split(" | ")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (parts.length < 2) continue;
+    if (parts.some((part) => similarity(part, hintTitle) >= 0.9)) hits.push(result);
+  }
+  return hits.length === 1 ? hits[0] : null;
+}
+
 /** Numeric Simania ID of a search result, or null. */
 export function simaniaIdOf(book) {
   const id = Number(book?.id ?? book?.bookId);

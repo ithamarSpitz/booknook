@@ -3,6 +3,7 @@ import { promptRating, shouldPromptRating } from "./my-rating.js";
 import {
   fetchSimaniaPayload,
   matchHebrewBook,
+  matchOmnibus,
   searchBooks,
   searchByAuthor,
   similarity,
@@ -422,7 +423,7 @@ export async function localizeRecommendations(items, deps) {
     const hint = rec.hebrew_hint;
     let simaniaId = null;
     let chosenSimaniaAuthor = "";
-    /** @type {"wikidata"|"nli"|"nli_author"|null} */
+    /** @type {"wikidata"|"nli"|"nli_author"|"omnibus"|null} */
     let source = null;
     if (hint?.title) {
       const book = await match(hint.title, hint.author ?? "");
@@ -432,6 +433,30 @@ export async function localizeRecommendations(items, deps) {
           simaniaId = verified.simania_id;
           source = verified.resolve_status;
           chosenSimaniaAuthor = String(book.author ?? "");
+        }
+      }
+      if (!book && simaniaId == null && deps.isCurrent()) {
+        try {
+          const results = await (deps.searchBooks ?? searchBooks)(hint.title, 6);
+          const omnibus = matchOmnibus(hint.title, results);
+          const omnibusId = omnibus ? simaniaIdOf(omnibus) : null;
+          if (omnibusId != null && deps.isCurrent()) {
+            const bookAuthor = String(omnibus.author ?? "");
+            const englishAuthors = String(rec.author ?? "")
+              .split(",")
+              .map((author) => author.trim())
+              .filter(Boolean);
+            const agrees = rec.hebrew_author
+              ? similarity(rec.hebrew_author, bookAuthor) >= 0.6
+              : nameSoundScore(bookAuthor, englishAuthors) >= 0.8;
+            if (agrees) {
+              simaniaId = omnibusId;
+              source = "omnibus";
+              chosenSimaniaAuthor = bookAuthor;
+            }
+          }
+        } catch {
+          // Search failure leaves the card unchanged; the author path continues.
         }
       }
     }
