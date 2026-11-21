@@ -53,7 +53,7 @@ const EDITION_LABEL = /מהדורה|מהדורת|עטיפת|כריכה|הדפס�
 
 /** Simania display title with trailing edition labels removed for provider matching. */
 export function matchTitle(title: string): string {
-  const trimmed = title.trim();
+  const trimmed = title.replace(/\s+/g, " ").trim();
   let result = trimmed;
   for (;;) {
     let next = result.replace(/\s*\[[^\]]*\]$/, "");
