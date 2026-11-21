@@ -731,6 +731,19 @@ Request `LinkEditionRequest`: `{"work_id":"78e9c71d-d6f2-4ea4-bcbb-42e4ec9300cf"
 
 **Rematch author agreement (S40).** A `rematch:cached` proposal also requires the Hebrew edition's author to agree with the work's authors. For some spelling variant `v` of the edition author, either `nameSoundScore(v, original_authors) >= 0.7`, or `similarity(v, h) >= 0.6` for an authors-table Hebrew name `h` of one of the work's authors. The variants are the name with every `(...)` group removed, and the name with every `word (alt)` replaced by `alt`. This rule applies in normal runs and in `--from` mode. A failure is skipped as `author_mismatch` and is never linked.
 
+**Author name comparison (S41).** `sameAuthor(hebrewName, englishName)` in `supabase/functions/_shared/author-sound.ts` is true when the two names are the same person by sound: the surname and first name must both match; when both names spell out middle names, every English middle name must be present; and English initials before the surname (for example, `A.D. Miller`) require initials on the Hebrew side. The exact scoring is defined in S41-T2. It is a pure function with no network calls. **Rematch author agreement (S40).** also passes when `sameAuthor` is true for some edition-author variant and some English author.
+
+**Author by sound (S41).** When an English author has no Hebrew name in the authors table and Wikidata has none, the operator scripts (`rematch:cached`) may look it up on Simania by sound. Generate likely Hebrew spellings of the name, search Simania with them, and keep only book authors for which `sameAuthor` is true. The spelling used on the most books wins. A found name is stored in `author_names` with source `sound`, and `authors.sound_checked_at` records the check; it is rechecked after 30 days. Edge Functions never run this lookup because of its cost (up to 26 Simania searches); they read the stored names like any other.
+
+**Dictionary contradictions (S41).** A dictionary pick (`pickByDictionary`) requires all of the following, and the best score must still be unique:
+- **English side >= 0.67:** the share of English content words covered by the Hebrew title's glosses (today's score).
+- **Hebrew side >= 0.67:** the share of Hebrew content words whose glosses cover some English content word.
+- **No contradicted Hebrew word.** A Hebrew word is contradicted when it has glosses but none of them covers an English content word. A word with no glosses is unknown, not contradicted.
+
+Measured on 2026-11-21:
+- **Name comparison and sound lookup:** 99 authors with known Hebrew spellings, 80 found with 0 wrong people. Without the first-name rule, Veronica Roth matched `בריאן רוט` and Liane Moriarty matched `ג׳קלין מוריארטי`.
+- **Dictionary:** on 22 real pairs, today's rule accepted all 9 wrong ones (`מאדים הירוק` for *Red Mars*, Princess Diaries sequels for *The Princess Diaries*). The new rule accepts 5 of the 13 right ones and 0 wrong.
+
 **Dictionary last resort (S39).** Applies only in `rematch:cached`, and only for a work where every other step gave no proposal and no provider failed.
 - **Scoring.** The candidates are the author's unlinked Hebrew books that the reverse step listed. Each candidate title is scored by Wiktionary glosses of its Hebrew words (`en.wiktionary.org/api/rest_v1/page/definition/<word>`, Hebrew sections only). Each word is also tried without a leading `ה ו ב ל מ ש כ` and without a plural suffix. The score is the share of the English title's content words that appear in the glosses.
 - **Accepting.** A book is proposed only when its score is `>= 0.5` and strictly higher than every other candidate's. It gets `via` `dictionary` and the new `resolve_status` `dictionary`, linked to the work itself.
