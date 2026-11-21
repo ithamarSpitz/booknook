@@ -115,3 +115,20 @@ Deno.test("sameBook is false for different authors", () => {
     false,
   );
 });
+
+Deno.test("link-edition accepts source hardcover", async () => {
+  const { handler } = setup(jekyll);
+  const response = await handler(
+    new Request("http://local/link-edition", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer test" },
+      body: JSON.stringify({
+        work_id: "work-a",
+        simania_id: 32314,
+        source: "hardcover",
+        simania,
+      }),
+    }),
+  );
+  assertEquals(response.status, 200);
+});
