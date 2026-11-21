@@ -21,7 +21,7 @@ import type {
   ShelfRow,
   WorkRow,
 } from "./types.ts";
-import { HttpError, normalize } from "./utils.ts";
+import { HttpError, normalize, similarity } from "./utils.ts";
 
 export interface CatalogDb {
   from(table: string): any;
@@ -417,6 +417,14 @@ function guardRejects(edition: EditionRow, match: HardcoverBook): boolean {
   return authorGuardRejects(edition.author, authors(match), "");
 }
 
+/** True when only the part of bookTitle before its first colon matches the bridge title. */
+export function isPrefixOnlyMatch(bridgeTitle: string, bookTitle: string): boolean {
+  const colon = bookTitle.indexOf(":");
+  if (colon < 0) return false;
+  return similarity(bridgeTitle, bookTitle) < 0.9 &&
+    similarity(bridgeTitle, bookTitle.slice(0, colon)) >= 0.9;
+}
+
 export type ResolveMatchResult = {
   found: { book: HardcoverBook; status: "wikidata" | "nli" | "fuzzy" } | null;
   failed: boolean;
@@ -432,6 +440,7 @@ export async function resolveMatch(
   let match: HardcoverBook | null = null;
   let status: "wikidata" | "nli" | "fuzzy" = "fuzzy";
   let wikidataTitle = "";
+  let weakWikidata = false;
   // A provider error is not evidence that the book is missing. If nothing matched
   // and any request failed, stay pending so the next request retries.
   const failures = { count: 0 };
@@ -471,12 +480,15 @@ export async function resolveMatch(
       match = await matchBridge(bridge.title, bridge.author, { retryWithAuthor: true });
     }
     if (match && guardRejects(edition, match)) match = null;
-    if (match) status = "wikidata";
+    if (match) {
+      status = "wikidata";
+      weakWikidata = !!bridge && isPrefixOnlyMatch(bridge.title, match.title);
+    }
   } catch {
     failures.count += 1;
   }
 
-  if (!match) {
+  if (!match || weakWikidata) {
     try {
       let nli = await api.nliOriginal(
         titleForMatch,
@@ -500,9 +512,15 @@ export async function resolveMatch(
         const nliOptions = hint === null
           ? { retryWithAuthor: true, soundAuthor: edition.author ?? "" }
           : { retryWithAuthor: true };
-        match = await matchBridge(bridge.title, hint ?? bridge.author, nliOptions);
-        if (match && guardRejects(edition, match)) match = null;
-        if (match) status = "nli";
+        let found = await matchBridge(bridge.title, hint ?? bridge.author, nliOptions);
+        if (found && guardRejects(edition, found)) found = null;
+        if (found && weakWikidata && isPrefixOnlyMatch(bridge.title, found.title)) {
+          found = null;
+        }
+        if (found) {
+          match = found;
+          status = "nli";
+        }
       }
     } catch {
       failures.count += 1;
