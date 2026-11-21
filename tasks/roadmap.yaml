@@ -1329,3 +1329,27 @@ sprints:
         stage: 3
         depends_on:
         - S31-T2
+  S32-series-companion-guards:
+    name: Wikidata bridge skips series entities; Hardcover match drops box-set and companion
+      books for single books
+    tasks:
+      S32-T1:
+        file: tasks/sprint-32-series-companion-guards/01-contract.md
+        stage: 1
+        depends_on: []
+      S32-T2:
+        file: tasks/sprint-32-series-companion-guards/02-wikidata-series.md
+        stage: 2
+        depends_on:
+        - S32-T1
+      S32-T3:
+        file: tasks/sprint-32-series-companion-guards/03-hardcover-guards.md
+        stage: 2
+        depends_on:
+        - S32-T1
+      S32-T4:
+        file: tasks/sprint-32-series-companion-guards/04-docs.md
+        stage: 3
+        depends_on:
+        - S32-T2
+        - S32-T3
