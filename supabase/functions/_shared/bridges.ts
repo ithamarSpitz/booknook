@@ -212,6 +212,85 @@ async function wikidataEnglishAuthorLookup(hebrewName: string): Promise<string |
   return null;
 }
 
+type SparqlRow = Record<string, { value?: string } | undefined>;
+
+function sparqlLiteral(value: string, language: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"@${language}`;
+}
+
+async function wikidataSparqlChunks(
+  inputs: string[],
+  language: string,
+  buildQuery: (values: string) => string,
+): Promise<Array<{ input: string; rows: SparqlRow[] }>> {
+  const unique = [...new Set(inputs.map((input) => input.trim()).filter(Boolean))];
+  const results: Array<{ input: string; rows: SparqlRow[] }> = [];
+  for (let start = 0; start < unique.length; start += 100) {
+    const chunk = unique.slice(start, start + 100);
+    const query = buildQuery(chunk.map((input) => sparqlLiteral(input, language)).join(" "));
+    const response = await providerFetch("https://query.wikidata.org/sparql", {
+      method: "POST",
+      headers: { accept: "application/sparql-results+json", "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ query }).toString(),
+    });
+    let bindings: SparqlRow[];
+    try {
+      const body = await response.json() as { results?: { bindings?: unknown } };
+      if (!Array.isArray(body?.results?.bindings)) throw new Error("no bindings");
+      bindings = body.results.bindings as SparqlRow[];
+    } catch {
+      throw new ProviderError("query.wikidata.org returned an invalid response");
+    }
+    const key = language === "en" ? "name" : "he";
+    for (const input of chunk) {
+      results.push({ input, rows: bindings.filter((row) => row[key]?.value === input) });
+    }
+  }
+  return results;
+}
+
+function addDistinct(map: Map<string, string[]>, key: string, value: string): void {
+  const values = map.get(key) ?? [];
+  if (!values.includes(value)) values.push(value);
+  map.set(key, values);
+}
+
+export async function wikidataHebrewAuthors(names: string[]): Promise<Map<string, string[]>> {
+  const found = new Map<string, string[]>();
+  const chunks = await wikidataSparqlChunks(names, "en", (values) =>
+    `SELECT ?name ?he WHERE {
+  VALUES ?name { ${values} }
+  ?item rdfs:label|skos:altLabel ?name .
+  ?item wdt:P31 wd:Q5 .
+  ?item rdfs:label ?he FILTER(lang(?he) = "he")
+}`);
+  for (const { input, rows } of chunks) {
+    for (const row of rows) if (row.he?.value) addDistinct(found, input, row.he.value);
+  }
+  return found;
+}
+
+export async function wikidataOriginals(hebrewTitles: string[]): Promise<Map<string, string[]>> {
+  const found = new Map<string, string[]>();
+  const chunks = await wikidataSparqlChunks(hebrewTitles, "he", (values) =>
+    `SELECT ?he ?type ?en WHERE {
+  VALUES ?he { ${values} }
+  ?x rdfs:label ?he .
+  OPTIONAL { ?x wdt:P629 ?w }
+  BIND(COALESCE(?w, ?x) AS ?item)
+  OPTIONAL { ?item wdt:P31 ?type }
+  OPTIONAL { ?item rdfs:label ?en FILTER(lang(?en) = "en") }
+}`);
+  for (const { input, rows } of chunks) {
+    for (const row of rows) {
+      const en = row.en?.value;
+      const type = row.type?.value?.split("/").pop() ?? "";
+      if (en && WORK_TYPES.has(type)) addDistinct(found, input, en);
+    }
+  }
+  return found;
+}
+
 type NliOriginal = { title: string; versoAuthor?: string };
 type NliRecord = {
   title: string;
