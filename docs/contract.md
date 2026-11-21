@@ -719,6 +719,22 @@ Request `LinkEditionRequest`: `{"work_id":"78e9c71d-d6f2-4ea4-bcbb-42e4ec9300cf"
   - Without `--apply`, it only prints what it would link.
   - `--from` can't be combined with `--hardcover-id`, `--offset`, or `--limit`.
 
+**Authors table (S39).** One table of author names, so every author lookup reads it before asking Wikidata.
+- **Storage.** `authors` holds one row per person. `author_names` holds each spelling: `lang` (`en` or `he`), `name`, a `name_key` that is unique per `lang`, and `source` (`link` or `wikidata`). Both tables are server-only (RLS on, no policies).
+- **Linked pairs.** A linked edition gives the pair (edition `author`, the work's first original author). The pair is stored only when `nameSoundScore(he, [en]) >= 0.8`. Names that meet an existing author join it, and two authors that one pair connects are merged.
+- **Lookups.** English→Hebrew (recommendation hints) and Hebrew→English (the resolve author hint) read the table first, and call Wikidata only for a name the table doesn't have.
+  - A Wikidata answer is stored with `source` `wikidata`. A successful "no name" answer is stored as `wikidata_checked_at` on the author, and is retried after 30 days.
+  - A Wikidata failure is never stored.
+- **Writing to the table.** A successful `link-edition` records its pair, and so does the operator `applyRepair`. `npm run authors:seed` fills the table from the existing links.
+- `rematch:cached` takes its Hebrew names from the table.
+- Measured on prod 2026-11-21: `hebrewAuthorFor` took the first linked edition's `author` for an English author without checking it. In 3 of 333 linked English authors that was another person: a translator (`גדעון טיקוצקי` for Antoine de Saint-Exupéry) or a co-author (`הולי ג'קסון` for Alice Feeney, `טרי פראצ'ט` for Neil Gaiman). A Wikidata error was cached as "no Hebrew name", and Wikidata rate-limits per client (HTTP 429), so books were missed for that reason alone.
+
+**Dictionary last resort (S39).** Applies only in `rematch:cached`, and only for a work where every other step gave no proposal and no provider failed.
+- **Scoring.** The candidates are the author's unlinked Hebrew books that the reverse step listed. Each candidate title is scored by Wiktionary glosses of its Hebrew words (`en.wiktionary.org/api/rest_v1/page/definition/<word>`, Hebrew sections only). Each word is also tried without a leading `ה ו ב ל מ ש כ` and without a plural suffix. The score is the share of the English title's content words that appear in the glosses.
+- **Accepting.** A book is proposed only when its score is `>= 0.5` and strictly higher than every other candidate's. It gets `via` `dictionary` and the new `resolve_status` `dictionary`, linked to the work itself.
+- A Wiktionary failure counts as a provider failure.
+- Measured on prod 2026-11-21: tested on 10 English-only works with known Hebrew editions that no bridge finds, each work's title ranked against that author's unlinked Hebrew books. 5 were linked correctly (`עשב` Grass, `רזה` Thinner, `נערי ניקל` The Nickel Boys, `נערת הקפיץ` The Windup Girl, `האזור המת` The Dead Zone), 0 wrong, 5 got no link.
+
 ## View models
 
 ### `BookCard`
