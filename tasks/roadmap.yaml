@@ -1353,3 +1353,33 @@ sprints:
         depends_on:
         - S32-T2
         - S32-T3
+  S33-spaces-prefix-retry:
+    name: Collapse title whitespace; prefix-only Wikidata matches are weak; recheck retries
+      provider failures
+    tasks:
+      S33-T1:
+        file: tasks/sprint-33-spaces-prefix-retry/01-contract.md
+        stage: 1
+        depends_on: []
+      S33-T2:
+        file: tasks/sprint-33-spaces-prefix-retry/02-collapse-spaces.md
+        stage: 2
+        depends_on:
+        - S33-T1
+      S33-T3:
+        file: tasks/sprint-33-spaces-prefix-retry/03-prefix-weak.md
+        stage: 3
+        depends_on:
+        - S33-T2
+      S33-T4:
+        file: tasks/sprint-33-spaces-prefix-retry/04-recheck-retry.md
+        stage: 2
+        depends_on:
+        - S33-T1
+      S33-T5:
+        file: tasks/sprint-33-spaces-prefix-retry/05-docs.md
+        stage: 4
+        depends_on:
+        - S33-T2
+        - S33-T3
+        - S33-T4
