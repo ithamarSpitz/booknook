@@ -90,6 +90,8 @@ Author translation in both directions goes through the server-only `authors` and
 - **Initials.** `nameSoundScore` ignores single-letter initials, so "J. R. R. Tolkien" and "Tolkien" compare on the remaining name parts.
 - **Dictionary last resort.** Only after every other step produced no proposal and no provider failed, `pickByDictionary` scores the author's unlinked Hebrew books from the reverse step with English Wiktionary glosses. It proposes the unique best candidate only at a score of at least `0.5`, with `via: "dictionary"` and `resolve_status = 'dictionary'`. A Wiktionary failure is a provider failure, not a negative result.
 
+The operator-only sound lookup uses `_shared/author-sound.ts` (`sameAuthor`, `hebrewAuthorBySound`); only operator scripts run it. Names it discovers are stored with source `sound`, while `authors.sound_checked_at` records checks and allows rechecking after 30 days. Its dictionary rule requires both sides to score at least `0.67` and no word to be `contradicted`.
+
 ## Normalization
 
 `utils.ts normalize` and `similarity` are authoritative: NFKD, Latin diacritics removed, lower case, a leading English article removed, everything that is not a letter or digit turned into a space. `similarity` is word-set Dice overlap. Display text is never changed. `stripHebrewPoints` runs first in `normalize`: it removes Hebrew points and cantillation marks (U+0591-U+05C7, except maqaf U+05BE, which becomes a space). `nameSoundScore` applies it to Hebrew names too. It exists in the browser (`public/js/simania.js`, `public/js/names.js`) and on the server (`_shared/utils.ts`, `_shared/names.ts`). Hebrew final-letter folding is not implemented; do not add it unless a task asks.
