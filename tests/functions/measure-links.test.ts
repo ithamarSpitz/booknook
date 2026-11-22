@@ -1,10 +1,62 @@
 import { assertEquals } from "jsr:@std/assert@1.0.14";
 import {
+  decideHebrewEdition,
   decideMissedTranslation,
   decideWrongLink,
   type MeasureProviders,
   sampleLinkedWorks,
 } from "../../scripts/measure-links.ts";
+
+const HEBREW_EDITION = {
+  simania_id: 101,
+  title: "התלקחות",
+  author: "סוזן קולינס",
+};
+
+function hebrewProviders(options: {
+  nli?: string | null;
+  wikidata?: string | null;
+  translator?: string | null;
+}) {
+  return {
+    nliOriginal: () =>
+      Promise.resolve(options.nli ? { title: options.nli } : null),
+    wikidataOriginal: () =>
+      Promise.resolve(
+        options.wikidata ? { title: options.wikidata } : null,
+      ),
+    bookDetails: () =>
+      Promise.resolve({ translator: options.translator ?? null }),
+  };
+}
+
+Deno.test("Hebrew edition decision covers all four kinds", async () => {
+  assertEquals(
+    await decideHebrewEdition(
+      HEBREW_EDITION,
+      hebrewProviders({ nli: "Catching Fire" }),
+    ),
+    "translation_with_original",
+  );
+  assertEquals(
+    await decideHebrewEdition(
+      HEBREW_EDITION,
+      hebrewProviders({ translator: "יעל אכמון" }),
+    ),
+    "translated_no_original",
+  );
+
+  const failing = hebrewProviders({});
+  failing.nliOriginal = () => Promise.reject(new Error("NLI unavailable"));
+  assertEquals(
+    await decideHebrewEdition(HEBREW_EDITION, failing),
+    "provider_failure",
+  );
+  assertEquals(
+    await decideHebrewEdition(HEBREW_EDITION, hebrewProviders({})),
+    "no_evidence",
+  );
+});
 
 const WORK = {
   original_title: "Catching Fire",

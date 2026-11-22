@@ -55,6 +55,29 @@ export interface WrongLinkDecision {
   nliTitle: string | null;
 }
 
+export interface UnlinkedHebrewEdition {
+  simania_id: number;
+  title: string;
+  author: string | null;
+}
+
+export interface HebrewMeasureProviders {
+  nliOriginal: (
+    hebrewTitle: string,
+    hebrewAuthor: string,
+  ) => Promise<{ title: string } | null>;
+  wikidataOriginal: (
+    hebrewTitle: string,
+  ) => Promise<{ title: string } | null>;
+  bookDetails: (simaniaId: number) => Promise<SimaniaBookDetails | null>;
+}
+
+export type HebrewEditionKind =
+  | "translation_with_original"
+  | "translated_no_original"
+  | "provider_failure"
+  | "no_evidence";
+
 const HEBREW = /[\u0590-\u05ff]/;
 
 function simaniaId(book: SimaniaBook): number | null {
@@ -116,6 +139,46 @@ export async function decideWrongLink(
   } catch {
     return { result: "unknown", nliTitle: null };
   }
+}
+
+/** Independently classify one unlinked cached Hebrew edition. */
+export async function decideHebrewEdition(
+  edition: UnlinkedHebrewEdition,
+  providers: HebrewMeasureProviders,
+): Promise<HebrewEditionKind> {
+  let original: string | null = null;
+  let wikidataTitle: string | null = null;
+  let translator = "";
+  let failed = false;
+  try {
+    original = (await providers.nliOriginal(
+      edition.title,
+      edition.author ?? "",
+    ))?.title ?? null;
+  } catch {
+    failed = true;
+  }
+  try {
+    wikidataTitle = (await providers.wikidataOriginal(edition.title))?.title ??
+      null;
+  } catch {
+    failed = true;
+  }
+  try {
+    translator = String(
+      (await providers.bookDetails(edition.simania_id))?.translator ?? "",
+    ).trim();
+  } catch {
+    failed = true;
+  }
+
+  original ??= wikidataTitle;
+  const latinOriginal = original && /[A-Za-z]/.test(original) &&
+    !HEBREW.test(original);
+  if (latinOriginal) return "translation_with_original";
+  if (translator) return "translated_no_original";
+  if (failed) return "provider_failure";
+  return "no_evidence";
 }
 
 function authorQuery(author: string): string {
@@ -209,6 +272,26 @@ async function loadLinkedSimaniaIds(sql: Sql): Promise<Set<number>> {
   return new Set(rows.map((row) => Number(row.simania_id)));
 }
 
+function loadUnlinkedHebrewEditions(
+  sql: Sql,
+): Promise<UnlinkedHebrewEdition[]> {
+  return sql<UnlinkedHebrewEdition[]>`
+    select simania_id, title, author
+    from public.editions
+    where simania_id > 0 and work_id is null
+    order by simania_id
+  `;
+}
+
+async function countLinkedHebrewEditions(sql: Sql): Promise<number> {
+  const [row] = await sql<{ count: string }[]>`
+    select count(*)::text as count
+    from public.editions
+    where simania_id > 0 and work_id is not null
+  `;
+  return Number(row?.count ?? 0);
+}
+
 function isWikimedia(input: RequestInfo | URL): boolean {
   const url = String(input instanceof Request ? input.url : input);
   return /(?:wikidata|wiktionary|wikipedia)\.org/.test(url);
@@ -246,6 +329,7 @@ export interface RunDeps {
   openProdDb: typeof openProdDb;
   providers: MeasureProviders;
   wrongLinkProviders: WrongLinkProviders;
+  hebrewProviders: HebrewMeasureProviders;
   log: (message: string) => void;
   error: (message: string) => void;
 }
@@ -259,18 +343,36 @@ const runDefaults: RunDeps = {
     wikidataOriginal,
   },
   wrongLinkProviders: { bookDetails, nliOriginal },
+  hebrewProviders: { bookDetails, nliOriginal, wikidataOriginal },
   log: console.log,
   error: console.error,
 };
 
-function wrongSampleSize(args: string[]): number | null | undefined {
-  if (args.length === 0) return undefined;
-  if (
-    args.length !== 2 || args[0] !== "--wrong" ||
-    !/^[1-9]\d*$/.test(args[1])
-  ) return null;
-  const value = Number(args[1]);
-  return Number.isSafeInteger(value) ? value : null;
+interface MeasureArgs {
+  wrong: number | undefined;
+  hebrew: boolean;
+}
+
+function parseArgs(args: string[]): MeasureArgs | null {
+  let wrong: number | undefined;
+  let hebrew = false;
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === "--hebrew" && !hebrew) {
+      hebrew = true;
+      continue;
+    }
+    if (
+      args[index] === "--wrong" && wrong === undefined &&
+      /^[1-9]\d*$/.test(args[index + 1] ?? "")
+    ) {
+      const value = Number(args[++index]);
+      if (!Number.isSafeInteger(value)) return null;
+      wrong = value;
+      continue;
+    }
+    return null;
+  }
+  return { wrong, hebrew };
 }
 
 export async function main(
@@ -281,10 +383,12 @@ export async function main(
   const suppliedOverrides = Array.isArray(argsOrOverrides)
     ? overrides
     : argsOrOverrides;
-  const requestedWrong = wrongSampleSize(args);
+  const requested = parseArgs(args);
   const deps = { ...runDefaults, ...suppliedOverrides };
-  if (requestedWrong === null) {
-    deps.error("Usage: measure-links.ts [--wrong <positive integer>]");
+  if (requested === null) {
+    deps.error(
+      "Usage: measure-links.ts [--hebrew] [--wrong <positive integer>]",
+    );
     return 2;
   }
   const originalFetch = globalThis.fetch;
@@ -310,9 +414,9 @@ export async function main(
       if (decision.failed) failed++;
     }
     let wrongSample: Record<string, unknown> | undefined;
-    if (requestedWrong !== undefined) {
+    if (requested.wrong !== undefined) {
       const linkedWorks = works.filter((work) => work.simania_id !== null);
-      const sample = sampleLinkedWorks(linkedWorks, requestedWrong);
+      const sample = sampleLinkedWorks(linkedWorks, requested.wrong);
       let agree = 0;
       let differ = 0;
       let unknown = 0;
@@ -333,6 +437,28 @@ export async function main(
         differ_titles: differTitles,
       };
     }
+    let hebrew: Record<string, number> | undefined;
+    if (requested.hebrew) {
+      const [editions, linkedEditions] = await Promise.all([
+        loadUnlinkedHebrewEditions(sql),
+        countLinkedHebrewEditions(sql),
+      ]);
+      const counts: Record<HebrewEditionKind, number> = {
+        translation_with_original: 0,
+        translated_no_original: 0,
+        no_evidence: 0,
+        provider_failure: 0,
+      };
+      // Deliberately sequential: Wikimedia calls share the global throttle.
+      for (const edition of editions) {
+        counts[await decideHebrewEdition(edition, deps.hebrewProviders)]++;
+      }
+      hebrew = {
+        unlinked_editions: editions.length,
+        ...counts,
+        linked_editions: linkedEditions,
+      };
+    }
     deps.log(JSON.stringify({
       in_use_works: works.length,
       unlinked_in_use: unlinked.length,
@@ -343,6 +469,7 @@ export async function main(
       missed_titles: missedTitles,
       ...(failed > 0 ? { failed } : {}),
       ...(wrongSample ? { wrong_sample: wrongSample } : {}),
+      ...(hebrew ? { hebrew } : {}),
     }));
     return 0;
   } finally {
