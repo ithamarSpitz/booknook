@@ -10,7 +10,9 @@ import {
   type SimaniaBook,
   type SimaniaBookDetails,
 } from "../supabase/functions/_shared/simania.ts";
+import { sameAuthor } from "../supabase/functions/_shared/author-sound.ts";
 import { similarity } from "../supabase/functions/_shared/utils.ts";
+import { authorAgreesWithWork } from "./lib/rematch.ts";
 import { openProdDb } from "./lib/prod-db.ts";
 
 export interface InUseWork {
@@ -40,6 +42,29 @@ export interface MeasureProviders {
 export interface WorkDecision {
   missed: boolean;
   failed: boolean;
+}
+
+export interface WikidataWorkEntity {
+  id: string;
+  hebrewLabel: string | null;
+}
+
+export type UnlinkedWorkClass =
+  | "missed"
+  | "hebrew_label_unconfirmed"
+  | "no_evidence"
+  | "failed";
+
+export interface UnlinkedWorkDecision {
+  class: UnlinkedWorkClass;
+  via?: "existing" | "wikidata_he";
+  hebrewLabel?: string;
+}
+
+export interface UnlinkedEvidenceProviders extends MeasureProviders {
+  wikidataWork: (
+    work: Pick<InUseWork, "original_title" | "original_authors">,
+  ) => Promise<WikidataWorkEntity | null>;
 }
 
 export interface WrongLinkProviders {
@@ -79,6 +104,126 @@ export type HebrewEditionKind =
   | "no_evidence";
 
 const HEBREW = /[\u0590-\u05ff]/;
+const WIKIDATA_API = "https://www.wikidata.org/w/api.php";
+
+type WikidataEntity = {
+  labels?: Record<string, { value?: string }>;
+  descriptions?: Record<string, { value?: string }>;
+  claims?: Record<
+    string,
+    Array<{ mainsnak?: { datavalue?: { value?: { id?: string } } } }>
+  >;
+};
+
+async function wikidataJson(
+  params: Record<string, string>,
+  fetchImpl: typeof fetch,
+): Promise<Record<string, unknown>> {
+  const url = new URL(WIKIDATA_API);
+  for (
+    const [key, value] of Object.entries({
+      ...params,
+      format: "json",
+      origin: "*",
+    })
+  ) url.searchParams.set(key, value);
+  const response = await fetchImpl(url);
+  if (!response.ok) {
+    throw new Error(`Wikidata returned HTTP ${response.status}.`);
+  }
+  const value = await response.json();
+  if (!value || typeof value !== "object" || "error" in value) {
+    throw new Error("Wikidata returned an invalid response.");
+  }
+  return value as Record<string, unknown>;
+}
+
+function normalizedWords(value: string): string[] {
+  return value.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()
+    .match(/[a-z0-9]+/g) ?? [];
+}
+
+function authorEvidenceAgrees(evidence: string, authors: string[]): boolean {
+  const words = new Set(normalizedWords(evidence));
+  return authors.some((author) => {
+    if (sameAuthor(evidence, author)) return true;
+    const surname = normalizedWords(author).at(-1);
+    return Boolean(surname && words.has(surname));
+  });
+}
+
+/** Find the first title-search entity supported by description or P50 author. */
+export async function findWikidataWork(
+  work: Pick<InUseWork, "original_title" | "original_authors">,
+  fetchImpl: typeof fetch = fetch,
+): Promise<WikidataWorkEntity | null> {
+  const searchBody = await wikidataJson({
+    action: "wbsearchentities",
+    search: work.original_title,
+    language: "en",
+    uselang: "en",
+    type: "item",
+    limit: "10",
+  }, fetchImpl);
+  const search = Array.isArray(searchBody.search)
+    ? searchBody.search as Array<{ id?: unknown }>
+    : [];
+  const ids = search.map((item) => String(item.id ?? "")).filter(Boolean);
+  if (!ids.length) return null;
+
+  const entityBody = await wikidataJson({
+    action: "wbgetentities",
+    ids: ids.join("|"),
+    props: "labels|descriptions|claims",
+    languages: "he|en",
+  }, fetchImpl);
+  const entities = (entityBody.entities ?? {}) as Record<
+    string,
+    WikidataEntity
+  >;
+  const authorIds = [
+    ...new Set(
+      ids.flatMap((id) =>
+        (entities[id]?.claims?.P50 ?? []).map((claim) =>
+          claim.mainsnak?.datavalue?.value?.id ?? ""
+        ).filter(Boolean)
+      ),
+    ),
+  ];
+  let authorEntities: Record<string, WikidataEntity> = {};
+  if (authorIds.length) {
+    const authorBody = await wikidataJson({
+      action: "wbgetentities",
+      ids: authorIds.join("|"),
+      props: "labels|descriptions|claims",
+      languages: "en",
+    }, fetchImpl);
+    authorEntities = (authorBody.entities ?? {}) as Record<
+      string,
+      WikidataEntity
+    >;
+  }
+
+  const authors = work.original_authors ?? [];
+  for (const id of ids) {
+    const entity = entities[id];
+    if (!entity) continue;
+    const description = entity.descriptions?.en?.value ?? "";
+    const p50Labels = (entity.claims?.P50 ?? []).map((claim) => {
+      const authorId = claim.mainsnak?.datavalue?.value?.id ?? "";
+      return authorEntities[authorId]?.labels?.en?.value ?? "";
+    });
+    if (
+      !authorEvidenceAgrees(description, authors) &&
+      !p50Labels.some((label) => authorEvidenceAgrees(label, authors))
+    ) continue;
+    return {
+      id,
+      hebrewLabel: entity.labels?.he?.value?.trim() || null,
+    };
+  }
+  return null;
+}
 
 function simaniaId(book: SimaniaBook): number | null {
   const value = Number(book.id ?? book.bookId);
@@ -237,6 +382,46 @@ export async function decideMissedTranslation(
   }
 }
 
+function apostropheVariants(title: string): string[] {
+  const ascii = title.replace(/[׳’]/g, "'");
+  return [...new Set([ascii, ascii.replace(/'/g, "׳")])];
+}
+
+/** Give one checked unlinked work exactly one S44 class. */
+export async function classifyUnlinkedWork(
+  work: Pick<InUseWork, "original_title" | "original_authors">,
+  linkedSimaniaIds: ReadonlySet<number>,
+  providers: UnlinkedEvidenceProviders,
+): Promise<UnlinkedWorkDecision> {
+  const existing = await decideMissedTranslation(
+    work,
+    linkedSimaniaIds,
+    providers,
+  );
+  if (existing.missed) return { class: "missed", via: "existing" };
+  if (existing.failed) return { class: "failed" };
+
+  try {
+    const entity = await providers.wikidataWork(work);
+    const hebrewLabel = entity?.hebrewLabel?.trim() ?? "";
+    if (!entity || !hebrewLabel) return { class: "no_evidence" };
+
+    const books: SimaniaBook[] = [];
+    for (const query of apostropheVariants(hebrewLabel)) {
+      books.push(...await providers.searchBooks(query, 50, 0));
+    }
+    const authors = work.original_authors ?? [];
+    const confirmed = books.some((book) =>
+      authorAgreesWithWork(String(book.author ?? ""), authors, [])
+    );
+    return confirmed
+      ? { class: "missed", via: "wikidata_he", hebrewLabel }
+      : { class: "hebrew_label_unconfirmed", hebrewLabel };
+  } catch {
+    return { class: "failed" };
+  }
+}
+
 export function loadInUseWorks(sql: Sql): Promise<InUseWork[]> {
   return sql<InUseWork[]>`
     with used as (
@@ -346,7 +531,7 @@ export interface RunDeps {
   loadInUseWorks: typeof loadInUseWorks;
   loadAllWorks: typeof loadAllWorks;
   loadLinkedSimaniaIds: typeof loadLinkedSimaniaIds;
-  providers: MeasureProviders;
+  providers: UnlinkedEvidenceProviders;
   wrongLinkProviders: WrongLinkProviders;
   hebrewProviders: HebrewMeasureProviders;
   log: (message: string) => void;
@@ -363,6 +548,7 @@ const runDefaults: RunDeps = {
     searchBooks,
     nliOriginal,
     wikidataOriginal,
+    wikidataWork: findWikidataWork,
   },
   wrongLinkProviders: { bookDetails, nliOriginal },
   hebrewProviders: { bookDetails, nliOriginal, wikidataOriginal },
@@ -445,16 +631,23 @@ export async function main(
       ? unlinked
       : sampleLinkedWorks(unlinked, requested.sample);
     const missedTitles: string[] = [];
-    let failed = 0;
+    const hebrewLabelTitles: string[] = [];
+    const classCounts: Record<UnlinkedWorkClass, number> = {
+      missed: 0,
+      hebrew_label_unconfirmed: 0,
+      no_evidence: 0,
+      failed: 0,
+    };
     // Deliberately sequential: providers and the Wikimedia throttle get one work at a time.
     for (const work of checkedUnlinked) {
-      const decision = await decideMissedTranslation(
+      const decision = await classifyUnlinkedWork(
         work,
         linked,
         deps.providers,
       );
-      if (decision.missed) missedTitles.push(work.original_title);
-      if (decision.failed) failed++;
+      classCounts[decision.class]++;
+      if (decision.class === "missed") missedTitles.push(work.original_title);
+      if (decision.hebrewLabel) hebrewLabelTitles.push(decision.hebrewLabel);
     }
     let wrongSample: Record<string, unknown> | undefined;
     if (requested.wrong !== undefined) {
@@ -502,34 +695,52 @@ export async function main(
         linked_editions: linkedEditions,
       };
     }
+    const sampled = checkedUnlinked.length;
+    const scaled = (count: number) =>
+      requested.sample !== undefined && sampled
+        ? Math.round(count * unlinked.length / sampled)
+        : count;
+    const counts = {
+      missed: scaled(classCounts.missed),
+      hebrew_label_unconfirmed: scaled(classCounts.hebrew_label_unconfirmed),
+      no_evidence: scaled(classCounts.no_evidence),
+      failed: scaled(classCounts.failed),
+    };
+    const missedRateLow = works.length
+      ? Number((counts.missed / works.length).toFixed(4))
+      : 0;
+    const missedRateHigh = works.length
+      ? Number((
+        (counts.missed + counts.hebrew_label_unconfirmed + counts.failed) /
+        works.length
+      ).toFixed(4))
+      : 0;
+    const classification = {
+      ...counts,
+      missed_rate_low: missedRateLow,
+      missed_rate_high: missedRateHigh,
+      hebrew_label_titles: hebrewLabelTitles,
+    };
     const measurement = requested.all
       ? (() => {
-        const sampled = checkedUnlinked.length;
-        const missedEstimate = sampled
-          ? Math.round(missedTitles.length * unlinked.length / sampled)
-          : 0;
         return {
           all_works: works.length,
           unlinked: unlinked.length,
           sampled,
           missed_in_sample: missedTitles.length,
-          failed,
-          missed_estimate: missedEstimate,
-          missed_rate: works.length
-            ? Number((missedEstimate / works.length).toFixed(4))
-            : 0,
+          failed_in_sample: classCounts.failed,
+          missed_estimate: counts.missed,
+          missed_rate: missedRateLow,
           missed_titles: missedTitles,
+          ...classification,
         };
       })()
       : {
         in_use_works: works.length,
         unlinked_in_use: unlinked.length,
-        missed: missedTitles.length,
-        missed_rate: works.length
-          ? Number((missedTitles.length / works.length).toFixed(4))
-          : 0,
+        missed_rate: missedRateLow,
         missed_titles: missedTitles,
-        ...(failed > 0 ? { failed } : {}),
+        ...classification,
       };
     deps.log(JSON.stringify({
       ...measurement,
