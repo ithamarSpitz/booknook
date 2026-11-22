@@ -15,6 +15,16 @@ const STOP_WORDS = new Set([
   "with",
   "by",
 ]);
+const HEBREW_STOP_WORDS = new Set([
+  "של",
+  "על",
+  "את",
+  "עם",
+  "אל",
+  "גם",
+  "כי",
+  "או",
+]);
 const glossCaches = new WeakMap<Glosses, Map<string, Promise<string[]>>>();
 
 export function wordForms(word: string): string[] {
@@ -66,28 +76,65 @@ function covered(word: string, joined: string): boolean {
     new RegExp(`\\b${regexEscape(stem)}[a-z]*`, "i").test(joined);
 }
 
+function englishContentWords(title: string): string[] {
+  return (title.toLowerCase().match(/[a-z]+/g) ?? [])
+    .filter((word) => !STOP_WORDS.has(word));
+}
+
+async function firstGlosses(
+  word: string,
+  glosses: Glosses,
+): Promise<string[]> {
+  for (const form of wordForms(word)) {
+    const answer = await cachedGlosses(glosses, form);
+    if (answer.length > 0) return answer;
+  }
+  return [];
+}
+
 export async function dictionaryScore(
   hebrewTitle: string,
   englishTitle: string,
   glosses: Glosses,
 ): Promise<number> {
-  const content = (englishTitle.toLowerCase().match(/[a-z]+/g) ?? [])
-    .filter((word) => !STOP_WORDS.has(word));
+  const content = englishContentWords(englishTitle);
   if (content.length === 0) return 0;
 
   const definitions: string[] = [];
   for (const word of hebrewTitle.match(/[\u0590-\u05ff]+/gu) ?? []) {
-    for (const form of wordForms(word)) {
-      const answer = await cachedGlosses(glosses, form);
-      if (answer.length > 0) {
-        definitions.push(...answer);
-        break;
-      }
-    }
+    definitions.push(...await firstGlosses(word, glosses));
   }
   const joined = definitions.join(" ").toLowerCase();
   return content.filter((word) => covered(word, joined)).length /
     content.length;
+}
+
+export async function dictionaryVerdict(
+  hebrewTitle: string,
+  englishTitle: string,
+  glosses: Glosses,
+): Promise<{ english: number; hebrew: number; contradicted: number }> {
+  const english = await dictionaryScore(hebrewTitle, englishTitle, glosses);
+  const englishWords = englishContentWords(englishTitle);
+  const hebrewWords = (hebrewTitle.match(/[\u0590-\u05ff']+/gu) ?? [])
+    .filter((word) => !HEBREW_STOP_WORDS.has(word));
+  let hits = 0;
+  let contradicted = 0;
+  for (const word of hebrewWords) {
+    const answers = await firstGlosses(word, glosses);
+    if (answers.length === 0) continue;
+    const joined = answers.join(" ").toLowerCase();
+    if (englishWords.some((englishWord) => covered(englishWord, joined))) {
+      hits++;
+    } else {
+      contradicted++;
+    }
+  }
+  return {
+    english,
+    hebrew: hebrewWords.length === 0 ? 0 : hits / hebrewWords.length,
+    contradicted,
+  };
 }
 
 export async function pickByDictionary(
@@ -97,17 +144,24 @@ export async function pickByDictionary(
 ): Promise<DictionaryCandidate | null> {
   const scored: Array<{ candidate: DictionaryCandidate; score: number }> = [];
   for (const candidate of candidates) {
-    scored.push({
-      candidate,
-      score: await dictionaryScore(candidate.title, englishTitle, glosses),
-    });
+    const verdict = await dictionaryVerdict(
+      candidate.title,
+      englishTitle,
+      glosses,
+    );
+    if (
+      verdict.english >= 0.67 && verdict.hebrew >= 0.67 &&
+      verdict.contradicted === 0
+    ) {
+      scored.push({
+        candidate,
+        score: verdict.english + verdict.hebrew,
+      });
+    }
   }
   scored.sort((a, b) => b.score - a.score);
   const best = scored[0];
-  if (
-    !best || best.score < 0.5 ||
-    scored.some((item, i) => i > 0 && item.score === best.score)
-  ) {
+  if (!best || scored.some((item, i) => i > 0 && item.score === best.score)) {
     return null;
   }
   return best.candidate;
