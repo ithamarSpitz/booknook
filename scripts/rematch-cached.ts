@@ -47,6 +47,7 @@ import {
   type RematchWork,
 } from "./lib/rematch.ts";
 import { pickByDictionary } from "./lib/dictionary.ts";
+import { nliEnglishMismatch } from "./lib/nli-english-mismatch.ts";
 import { serviceCatalogDb } from "./recheck-links.ts";
 import {
   applyRepair,
@@ -334,6 +335,7 @@ interface SavedProposal {
   simania_id: number;
   book_id: number;
   status: RematchStatus;
+  work_title: string | null;
 }
 
 function parseSavedProposals(text: string): SavedProposal[] {
@@ -346,17 +348,45 @@ function parseSavedProposals(text: string): SavedProposal[] {
     } catch {
       continue;
     }
-    const proposal = (value as { proposal?: Record<string, unknown> } | null)
-      ?.proposal;
+    const savedLine = value as {
+      title?: unknown;
+      proposal?: Record<string, unknown>;
+    } | null;
+    const proposal = savedLine?.proposal;
     if (!proposal || typeof proposal !== "object") continue;
     const { simania_id, book_id, status } = proposal;
     if (
       typeof simania_id === "number" && typeof book_id === "number" &&
       (status === "wikidata" || status === "nli" || status === "fuzzy" ||
         status === "dictionary")
-    ) found.push({ simania_id, book_id, status });
+    ) {
+      found.push({
+        simania_id,
+        book_id,
+        status,
+        work_title: typeof savedLine?.title === "string"
+          ? savedLine.title
+          : null,
+      });
+    }
   }
   return found;
+}
+
+async function proposalHasEnglishMismatch(
+  deps: RunDeps,
+  edition: EditionRow,
+  workTitle: string,
+): Promise<boolean> {
+  try {
+    const original = await deps.nliOriginal(
+      edition.title,
+      edition.author ?? "",
+    );
+    return original !== null && nliEnglishMismatch(workTitle, original.title);
+  } catch {
+    return false;
+  }
 }
 
 async function runFromFile(
@@ -426,6 +456,17 @@ async function runFromFile(
       );
       if (!authorAgrees) {
         skip(simania_id, book_id, "author_mismatch");
+        continue;
+      }
+      if (
+        options.apply &&
+        await proposalHasEnglishMismatch(
+          deps,
+          edition,
+          item.work_title ?? book.title,
+        )
+      ) {
+        skip(simania_id, book_id, "nli_english_mismatch");
         continue;
       }
       if (options.apply) {
@@ -554,6 +595,14 @@ export async function main(
             );
             if (!authorAgrees) {
               skip(edition, "author_mismatch");
+            } else if (
+              await proposalHasEnglishMismatch(
+                deps,
+                edition,
+                result.found.book.title,
+              )
+            ) {
+              skip(edition, "nli_english_mismatch");
             } else {
               proposals++;
               deps.log(JSON.stringify({
@@ -962,7 +1011,21 @@ export async function main(
         }
       }
 
-      if (!proposal) {
+      if (
+        proposal &&
+        await proposalHasEnglishMismatch(
+          deps,
+          proposal.edition,
+          proposal.work.original_title,
+        )
+      ) {
+        skip("nli_english_mismatch");
+        deps.log(JSON.stringify({
+          ...base,
+          skipped: "nli_english_mismatch",
+        }));
+        proposal = null;
+      } else if (!proposal) {
         const reason = authorMismatch
           ? "author_mismatch"
           : anyFailed
@@ -978,7 +1041,8 @@ export async function main(
           skipped: reason,
           ...(reason === "provider_failure" ? { failures } : {}),
         }));
-      } else {
+      }
+      if (proposal) {
         proposals++;
         deps.log(JSON.stringify({
           ...base,

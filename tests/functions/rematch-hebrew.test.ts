@@ -50,6 +50,7 @@ function harness(
     hardcoverDailyRemaining: () => Promise.resolve(5000),
     loadUnlinkedEditions: () => Promise.resolve(editions),
     authorStore: () => memoryAuthorStore(),
+    nliOriginal: () => Promise.resolve(null),
     resolveMatch: () =>
       Promise.resolve({
         found: { book: kingBook, status: "wikidata" },
@@ -88,6 +89,26 @@ Deno.test("--hebrew proposes an agreeing resolved edition without linking", asyn
     },
   });
   assertEquals(h.applyCalls, 0);
+});
+
+Deno.test("--hebrew skips an NLI English mismatch", async () => {
+  const h = harness([edition(3191)], {
+    nliOriginal: () => Promise.resolve({ title: "Battle of Corrin" }),
+    resolveMatch: () =>
+      Promise.resolve({
+        found: {
+          book: { ...kingBook, title: "Dune: The Graphic Novel, Book 1" },
+          status: "wikidata",
+        },
+        failed: false,
+      }) as unknown as ReturnType<RunDeps["resolveMatch"]>,
+  });
+  assertEquals(await main(["--hebrew"], h.deps), 0);
+  assertEquals(JSON.parse(h.lines[0]), {
+    simania_id: 3191,
+    skipped: "nli_english_mismatch",
+  });
+  assertEquals(JSON.parse(h.lines.at(-1)!).proposals, 0);
 });
 
 Deno.test("--hebrew skips a resolved edition whose author disagrees", async () => {
