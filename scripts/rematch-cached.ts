@@ -1,10 +1,14 @@
 import type { Sql } from "npm:postgres@3.4.5";
 import {
   type CatalogDb,
+  type FailureProvider,
+  type ProviderFailure,
   resolveMatch,
 } from "../supabase/functions/_shared/catalog.ts";
 import {
+  nliHebrew,
   nliOriginal,
+  wikidataHebrew,
   wikidataHebrewAuthors,
   wikidataOriginals,
   wiktionaryGlosses,
@@ -13,6 +17,7 @@ import {
   authors,
   type HardcoverBook,
   hardcoverBooks,
+  hardcoverHebrewEdition,
   isSearchDocumentBook,
 } from "../supabase/functions/_shared/hardcover.ts";
 import {
@@ -53,6 +58,37 @@ const USAGE =
   "Usage: rematch:cached [--apply] [--hebrew] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--min-hardcover <n>] [--force-hardcover]";
 
 const BUDGET_CHECK_EVERY = 50;
+
+function failureDetail(
+  provider: FailureProvider,
+  error: unknown,
+): ProviderFailure {
+  return {
+    provider,
+    error: String((error as Error)?.message ?? error).slice(0, 200),
+  };
+}
+
+class ProviderCallError extends Error {
+  constructor(
+    readonly provider: FailureProvider,
+    readonly original: unknown,
+  ) {
+    super(String((original as Error)?.message ?? original));
+    this.name = "ProviderCallError";
+  }
+}
+
+async function identifyProvider<T>(
+  provider: FailureProvider,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw new ProviderCallError(provider, error);
+  }
+}
 
 export type RematchStatus = "wikidata" | "nli" | "fuzzy" | "dictionary";
 
@@ -170,7 +206,21 @@ const runDefaults: RunDeps = {
   wikidataOriginals,
   nliOriginal,
   wiktionaryGlosses,
-  hebrewHint: (book) => defaultHebrewHint(book),
+  hebrewHint: (book) =>
+    defaultHebrewHint(book, {
+      wikidataHebrew: (title, author) =>
+        identifyProvider(
+          "wikidata",
+          () => wikidataHebrew(title, author),
+        ),
+      nliHebrew: (title, author) =>
+        identifyProvider("nli", () => nliHebrew(title, author)),
+      hardcoverHebrewEdition: (bookId) =>
+        identifyProvider(
+          "hardcover",
+          () => hardcoverHebrewEdition(bookId),
+        ),
+    }),
   matchHebrewBook: (title, author) => matchHebrewBook(title, author),
   searchBooks,
   hebrewAuthorBySound: (englishName) =>
@@ -471,11 +521,16 @@ export async function main(
       };
       const db = serviceCatalogDb(sql);
       const skipped: Record<string, number> = {};
-      const skip = (edition: EditionRow, reason: string) => {
+      const skip = (
+        edition: EditionRow,
+        reason: string,
+        failures: ProviderFailure[] = [],
+      ) => {
         skipped[reason] = (skipped[reason] ?? 0) + 1;
         deps.log(JSON.stringify({
           simania_id: edition.simania_id,
           skipped: reason,
+          ...(reason === "provider_failure" ? { failures } : {}),
         }));
       };
       let processed = 0;
@@ -487,7 +542,7 @@ export async function main(
         try {
           const result = await deps.resolveMatch(db, edition);
           if (result.failed) {
-            skip(edition, "provider_failure");
+            skip(edition, "provider_failure", result.failures ?? []);
           } else if (!result.found) {
             skip(edition, "no_candidate");
           } else {
@@ -514,8 +569,8 @@ export async function main(
               }));
             }
           }
-        } catch {
-          skip(edition, "provider_failure");
+        } catch (error) {
+          skip(edition, "provider_failure", [failureDetail("db", error)]);
         }
 
         if (processed % BUDGET_CHECK_EVERY === 0) {
@@ -546,6 +601,10 @@ export async function main(
     const works = await deps.loadWorks(sql, options);
     const linkedSimaniaIds = await deps.loadLinkedSimaniaIds(sql);
     const store = deps.authorStore(sql);
+    let currentFailures: ProviderFailure[] | null = null;
+    const rememberFailure = (provider: FailureProvider, error: unknown) => {
+      currentFailures?.push(failureDetail(provider, error));
+    };
     const soundStore: AuthorStore = options.apply ? store : {
       ...store,
       create: () => Promise.resolve(crypto.randomUUID()),
@@ -632,10 +691,21 @@ export async function main(
       let cached = originalsCache.get(title);
       if (!cached) {
         cached = (async () => {
-          const found = new Set<string>(
-            (await deps.wikidataOriginals([title])).get(title) ?? [],
-          );
-          const nli = await deps.nliOriginal(title, name);
+          let wikidata: Map<string, string[]>;
+          try {
+            wikidata = await deps.wikidataOriginals([title]);
+          } catch (error) {
+            rememberFailure("wikidata", error);
+            throw error;
+          }
+          const found = new Set<string>(wikidata.get(title) ?? []);
+          let nli: Awaited<ReturnType<RunDeps["nliOriginal"]>>;
+          try {
+            nli = await deps.nliOriginal(title, name);
+          } catch (error) {
+            rememberFailure("nli", error);
+            throw error;
+          }
           if (nli?.title) found.add(nli.title);
           return [...found];
         })();
@@ -646,21 +716,41 @@ export async function main(
     };
 
     const rematchDeps: RematchDeps = {
-      hebrewHint: (work) =>
-        deps.hebrewHint({
-          id: work.hardcover_id,
-          title: work.original_title,
-          cached_contributors: (work.original_authors ?? []).map((name) => ({
-            author: { name },
-          })),
-        }),
-      matchHebrewBook: async (title, author) =>
-        simaniaIdOf(await deps.matchHebrewBook(title, author)) ?? null,
+      hebrewHint: async (work) => {
+        try {
+          return await deps.hebrewHint({
+            id: work.hardcover_id,
+            title: work.original_title,
+            cached_contributors: (work.original_authors ?? []).map((name) => ({
+              author: { name },
+            })),
+          });
+        } catch (error) {
+          if (error instanceof ProviderCallError) {
+            rememberFailure(error.provider, error.original);
+          }
+          throw error;
+        }
+      },
+      matchHebrewBook: async (title, author) => {
+        try {
+          return simaniaIdOf(await deps.matchHebrewBook(title, author)) ?? null;
+        } catch (error) {
+          rememberFailure("simania", error);
+          throw error;
+        }
+      },
       hebrewNames: (work) => {
         const name = firstAuthor(work);
         if (!name) return Promise.resolve([]);
         return (async () => {
-          const found = await store.find("en", nameKey(name));
+          let found: Awaited<ReturnType<AuthorStore["find"]>>;
+          try {
+            found = await store.find("en", nameKey(name));
+          } catch (error) {
+            rememberFailure("db", error);
+            throw error;
+          }
           const stored = (found?.names ?? [])
             .filter((row) => row.lang === "he")
             .sort((x, y) =>
@@ -671,15 +761,27 @@ export async function main(
             ...new Set([...stored, ...(wikidataNames.get(name) ?? [])]),
           ];
           if (knownNames.length > 0) return knownNames;
-          return await soundNames(
-            soundStore,
-            name,
-            (englishName) => deps.hebrewAuthorBySound(englishName),
-            deps.now,
-          );
+          try {
+            return await soundNames(
+              soundStore,
+              name,
+              (englishName) => deps.hebrewAuthorBySound(englishName),
+              deps.now,
+            );
+          } catch (error) {
+            rememberFailure("sound", error);
+            throw error;
+          }
         })();
       },
-      searchBooks: deps.searchBooks,
+      searchBooks: async (query, limit, offset) => {
+        try {
+          return await deps.searchBooks(query, limit, offset);
+        } catch (error) {
+          rememberFailure("simania", error);
+          throw error;
+        }
+      },
       originals,
       linkedSimaniaIds,
     };
@@ -701,39 +803,78 @@ export async function main(
         hardcover_id: work.hardcover_id,
         title: work.original_title,
       };
+      const failures: ProviderFailure[] = [];
+      currentFailures = failures;
       const { candidates, authorBooks, failed: searchFailed } =
         await findCandidates(
           work,
           rematchDeps,
         );
+      currentFailures = null;
       let anyFailed = searchFailed;
       let rejected = false;
       let authorMismatch = false;
       let linkedElsewhere = false;
       let proposal: Proposal | null = null;
 
-      for (const candidate of candidates) {
+      const candidateEdition = async (
+        simaniaId: number,
+      ): Promise<{ edition: EditionRow; existed: boolean } | null> => {
         let edition: EditionRow | null;
-        let existed = true;
         try {
-          edition = await deps.loadEdition(sql, candidate.simania_id);
-          if (edition?.work_id) {
-            linkedElsewhere = true;
-            continue;
+          edition = await deps.loadEdition(sql, simaniaId);
+        } catch (error) {
+          anyFailed = true;
+          failures.push(failureDetail("db", error));
+          return null;
+        }
+        if (edition?.work_id) {
+          linkedElsewhere = true;
+          return null;
+        }
+        const existed = edition !== null;
+        if (!edition) {
+          try {
+            edition = toEditionRow(await deps.fetchEditionDetails(simaniaId));
+          } catch (error) {
+            anyFailed = true;
+            failures.push(failureDetail("simania", error));
+            return null;
           }
-          if (!edition) {
-            existed = false;
-            edition = toEditionRow(
-              await deps.fetchEditionDetails(candidate.simania_id),
-            );
-          }
-          const authorAgrees = authorAgreesWithWork(
-            edition.author ?? "",
-            work.original_authors ?? [],
-            await knownHebrewNames(work.original_authors ?? []),
-          );
+        }
+        return { edition, existed };
+      };
+
+      const agreementNames = async (
+        englishAuthors: string[],
+      ): Promise<string[] | null> => {
+        try {
+          return await knownHebrewNames(englishAuthors);
+        } catch (error) {
+          anyFailed = true;
+          failures.push(failureDetail("db", error));
+          return null;
+        }
+      };
+
+      for (const candidate of candidates) {
+        const loaded = await candidateEdition(candidate.simania_id);
+        if (!loaded) continue;
+        const { edition, existed } = loaded;
+        const knownNames = await agreementNames(work.original_authors ?? []);
+        if (!knownNames) continue;
+        const authorAgrees = authorAgreesWithWork(
+          edition.author ?? "",
+          work.original_authors ?? [],
+          knownNames,
+        );
+        try {
           const result = await confirmCandidate(work, edition, authorAgrees, {
-            resolveMatch: (e) => deps.resolveMatch(db, e),
+            resolveMatch: async (e) => {
+              const resolved = await deps.resolveMatch(db, e);
+              failures.push(...(resolved.failures ?? []));
+              return resolved;
+            },
           });
           if (!authorAgrees) authorMismatch = true;
           else if (result.failed) anyFailed = true;
@@ -750,8 +891,9 @@ export async function main(
             };
             break;
           }
-        } catch {
+        } catch (error) {
           anyFailed = true;
+          failures.push(failureDetail("db", error));
         }
       }
 
@@ -770,53 +912,53 @@ export async function main(
           reasonBeforeDictionary === "rejected" ||
           reasonBeforeDictionary === "author_mismatch")
       ) {
+        let picked: Awaited<ReturnType<typeof pickByDictionary>> = null;
         try {
-          const picked = await pickByDictionary(
+          picked = await pickByDictionary(
             work.original_title,
             authorBooks,
             deps.wiktionaryGlosses,
           );
-          if (picked) {
-            let edition = await deps.loadEdition(sql, picked.simania_id);
-            if (edition?.work_id) {
-              linkedElsewhere = true;
+        } catch (error) {
+          anyFailed = true;
+          failures.push(failureDetail("wiktionary", error));
+        }
+        if (picked) {
+          const loaded = await candidateEdition(picked.simania_id);
+          if (loaded) {
+            const { edition, existed } = loaded;
+            const knownNames = await agreementNames(
+              work.original_authors ?? [],
+            );
+            if (knownNames === null) {
+              // The failed database lookup is already recorded.
+            } else if (
+              !authorAgreesWithWork(
+                edition.author ?? "",
+                work.original_authors ?? [],
+                knownNames,
+              )
+            ) {
+              authorMismatch = true;
             } else {
-              const existed = edition !== null;
-              if (!edition) {
-                edition = toEditionRow(
-                  await deps.fetchEditionDetails(picked.simania_id),
-                );
-              }
-              if (
-                !authorAgreesWithWork(
-                  edition.author ?? "",
-                  work.original_authors ?? [],
-                  await knownHebrewNames(work.original_authors ?? []),
-                )
-              ) {
-                authorMismatch = true;
-              } else {
-                proposal = {
-                  work,
-                  edition,
-                  existed,
-                  via: "dictionary",
-                  status: "dictionary",
-                  book: {
-                    id: work.hardcover_id,
-                    title: work.original_title,
-                    cached_contributors: (work.original_authors ?? []).map((
-                      name,
-                    ) => ({
-                      author: { name },
-                    })),
-                  },
-                };
-              }
+              proposal = {
+                work,
+                edition,
+                existed,
+                via: "dictionary",
+                status: "dictionary",
+                book: {
+                  id: work.hardcover_id,
+                  title: work.original_title,
+                  cached_contributors: (work.original_authors ?? []).map((
+                    name,
+                  ) => ({
+                    author: { name },
+                  })),
+                },
+              };
             }
           }
-        } catch {
-          anyFailed = true;
         }
       }
 
@@ -831,7 +973,11 @@ export async function main(
           ? "linked_elsewhere"
           : "no_candidate";
         skip(reason);
-        deps.log(JSON.stringify({ ...base, skipped: reason }));
+        deps.log(JSON.stringify({
+          ...base,
+          skipped: reason,
+          ...(reason === "provider_failure" ? { failures } : {}),
+        }));
       } else {
         proposals++;
         deps.log(JSON.stringify({
