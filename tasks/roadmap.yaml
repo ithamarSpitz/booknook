@@ -1663,3 +1663,8 @@ sprints:
         stage: 2
         depends_on:
         - S44-T1
+      S44-T3:
+        file: tasks/sprint-44-measure-all/S44-T3.md
+        stage: 2
+        depends_on:
+        - S44-T1
