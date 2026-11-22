@@ -93,6 +93,12 @@ Author translation in both directions goes through the server-only `authors` and
 
 The operator-only sound lookup uses `_shared/author-sound.ts` (`sameAuthor`, `hebrewAuthorBySound`); only operator scripts run it. Names it discovers are stored with source `sound`, while `authors.sound_checked_at` records checks and allows rechecking after 30 days. Its dictionary rule requires both sides to score at least `0.67` and no word to be `contradicted`.
 
+Every `rematch:cached` skip line with `"skipped":"provider_failure"` includes `failures`, with one entry per failed call containing the provider name and an error message truncated to 200 characters.
+
+Before printing a proposal, and again before linking one with `--from ... --apply`, `rematch:cached` applies the NLI English-original guard and skips an established mismatch as `nli_english_mismatch`; an absent or failed NLI result does not reject the proposal.
+
+`npm run measure:links` is a read-only measurement of missed translations among in-use works and makes no Hardcover requests; `--wrong <n>` additionally samples `n` linked in-use works and reports each NLI comparison as `agree`, `differ` or `unknown`.
+
 ## Normalization
 
 `utils.ts normalize` and `similarity` are authoritative: NFKD, Latin diacritics removed, lower case, a leading English article removed, everything that is not a letter or digit turned into a space. `similarity` is word-set Dice overlap. Display text is never changed. `stripHebrewPoints` runs first in `normalize`: it removes Hebrew points and cantillation marks (U+0591-U+05C7, except maqaf U+05BE, which becomes a space). `nameSoundScore` applies it to Hebrew names too. It exists in the browser (`public/js/simania.js`, `public/js/names.js`) and on the server (`_shared/utils.ts`, `_shared/names.ts`). Hebrew final-letter folding is not implemented; do not add it unless a task asks.
