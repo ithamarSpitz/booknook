@@ -85,6 +85,7 @@ Author translation in both directions goes through the server-only `authors` and
 - **Confirmation.** A candidate is accepted only when `resolveMatch` on that Hebrew edition returns the same work (same Hardcover id or `sameBook`). A candidate linked to another work is skipped, and a provider failure skips the work.
 - Every proposal requires author agreement between the Hebrew edition's author and the work's authors through `authorAgreesWithWork`, and `--from` checks that agreement again.
 - **Dry run vs `--apply`.** The default run is a read-only dry run. `--apply` links each accepted edition with the `resolveMatch` status, creating the edition row if needed. The dry run's proposal lines include `book_id`, and `--from <file> --apply` links them with one Hardcover request per 50 proposals, without searching again.
+- `--hebrew` is a dry run over Hebrew editions without a work, using the current resolver and author agreement. Apply its proposals with `--from <file> --apply`.
 - **Startup retry.** A failed author batch at startup is retried twice, 30 seconds apart.
 - **Batched helpers.** `wikidataHebrewAuthors` maps many English author names to their Hebrew labels in one request, and `wikidataOriginals` maps many Hebrew titles to original titles in one request. A non-OK or non-JSON response throws `ProviderError`.
 - **Initials.** `nameSoundScore` ignores single-letter initials, so "J. R. R. Tolkien" and "Tolkien" compare on the remaining name parts.
