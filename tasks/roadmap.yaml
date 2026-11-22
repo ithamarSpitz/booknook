@@ -1590,3 +1590,20 @@ sprints:
         stage: 7
         depends_on:
         - S41-T6
+  S42-rematch-hebrew:
+    name: rematch:cached --hebrew dry run for Hebrew editions without a work
+    tasks:
+      S42-T1:
+        file: tasks/sprint-42-rematch-hebrew/01-contract.md
+        stage: 1
+        depends_on: []
+      S42-T2:
+        file: tasks/sprint-42-rematch-hebrew/02-hebrew-mode.md
+        stage: 2
+        depends_on:
+        - S42-T1
+      S42-T3:
+        file: tasks/sprint-42-rematch-hebrew/03-docs.md
+        stage: 3
+        depends_on:
+        - S42-T2
