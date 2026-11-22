@@ -1668,3 +1668,31 @@ sprints:
         stage: 2
         depends_on:
         - S44-T1
+  S45-explain-hebrew:
+    name: Hebrew direction - dictionary study, --explain, dictionary step
+    tasks:
+      S45-T1:
+        file: tasks/sprint-45-explain-hebrew/01-study.md
+        stage: 1
+        depends_on: []
+      S45-T2:
+        file: tasks/sprint-45-explain-hebrew/02-contract.md
+        stage: 2
+        depends_on:
+        - S45-T1
+      S45-T3:
+        file: tasks/sprint-45-explain-hebrew/03-explain.md
+        stage: 3
+        depends_on:
+        - S45-T2
+      S45-T4:
+        file: tasks/sprint-45-explain-hebrew/04-dictionary.md
+        stage: 4
+        depends_on:
+        - S45-T3
+      S45-T5:
+        file: tasks/sprint-45-explain-hebrew/05-docs.md
+        stage: 5
+        depends_on:
+        - S45-T3
+        - S45-T4
