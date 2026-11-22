@@ -1651,3 +1651,15 @@ sprints:
         stage: 4
         depends_on:
         - S43-T5
+  S44-measure-all:
+    name: measure:links over all cached works (--all --sample)
+    tasks:
+      S44-T1:
+        file: tasks/sprint-44-measure-all/01-measure-all.md
+        stage: 1
+        depends_on: []
+      S44-T2:
+        file: tasks/sprint-44-measure-all/02-docs.md
+        stage: 2
+        depends_on:
+        - S44-T1
