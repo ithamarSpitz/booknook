@@ -50,7 +50,7 @@ import {
 } from "./repair-links.ts";
 
 const USAGE =
-  "Usage: rematch:cached [--apply] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--min-hardcover <n>] [--force-hardcover]";
+  "Usage: rematch:cached [--apply] [--hebrew] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--min-hardcover <n>] [--force-hardcover]";
 
 const BUDGET_CHECK_EVERY = 50;
 
@@ -67,6 +67,7 @@ export interface RunDeps {
       limit: number | null;
     },
   ) => Promise<RematchWork[]>;
+  loadUnlinkedEditions: (sql: Sql) => Promise<EditionRow[]>;
   authorStore: (sql: Sql) => AuthorStore;
   loadLinkedSimaniaIds: (sql: Sql) => Promise<Set<number>>;
   loadEdition: (sql: Sql, simaniaId: number) => Promise<EditionRow | null>;
@@ -130,6 +131,12 @@ const runDefaults: RunDeps = {
   loadOperatorEnv,
   openProdDb,
   loadWorks,
+  loadUnlinkedEditions: (sql) =>
+    sql<EditionRow[]>`
+      select * from public.editions
+      where simania_id > 0 and work_id is null
+      order by simania_id
+    `,
   authorStore: (sql) => sqlAuthorStore(sql),
   loadLinkedSimaniaIds: async (sql) => {
     const rows = await sql<{ simania_id: number }[]>`
@@ -184,6 +191,7 @@ const runDefaults: RunDeps = {
 
 interface CliOptions {
   apply: boolean;
+  hebrew: boolean;
   hardcoverId: number | null;
   offset: number;
   limit: number | null;
@@ -195,6 +203,7 @@ interface CliOptions {
 function parseArgs(args: string[]): CliOptions | null {
   const options: CliOptions = {
     apply: false,
+    hebrew: false,
     hardcoverId: null,
     offset: 0,
     limit: null,
@@ -206,6 +215,7 @@ function parseArgs(args: string[]): CliOptions | null {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--apply") options.apply = true;
+    else if (arg === "--hebrew") options.hebrew = true;
     else if (arg === "--force-hardcover") options.forceHardcover = true;
     else if (arg === "--from") {
       const value = args[++i];
@@ -230,6 +240,10 @@ function parseArgs(args: string[]): CliOptions | null {
     } else return null;
   }
   if (options.from !== null && usedOthers) return null;
+  if (
+    options.hebrew &&
+    (options.apply || options.from !== null || options.hardcoverId !== null)
+  ) return null;
   return options;
 }
 
@@ -434,6 +448,101 @@ export async function main(
   const sql = await deps.openProdDb({ readOnly: !options.apply });
   try {
     if (options.from !== null) return await runFromFile(deps, sql, options);
+    if (options.hebrew) {
+      const loaded = await deps.loadUnlinkedEditions(sql);
+      const editions = loaded.slice(
+        options.offset,
+        options.limit === null ? undefined : options.offset + options.limit,
+      );
+      const store = deps.authorStore(sql);
+      const knownHebrewNames = async (englishAuthors: string[]) => {
+        const names: string[] = [];
+        for (const author of englishAuthors) {
+          const key = nameKey(author);
+          if (!key) continue;
+          const found = await store.find("en", key);
+          for (const row of found?.names ?? []) {
+            if (row.lang === "he" && !names.includes(row.name)) {
+              names.push(row.name);
+            }
+          }
+        }
+        return names;
+      };
+      const db = serviceCatalogDb(sql);
+      const skipped: Record<string, number> = {};
+      const skip = (edition: EditionRow, reason: string) => {
+        skipped[reason] = (skipped[reason] ?? 0) + 1;
+        deps.log(JSON.stringify({
+          simania_id: edition.simania_id,
+          skipped: reason,
+        }));
+      };
+      let processed = 0;
+      let proposals = 0;
+
+      // Deliberately sequential: one provider request at a time.
+      for (const edition of editions) {
+        processed++;
+        try {
+          const result = await deps.resolveMatch(db, edition);
+          if (result.failed) {
+            skip(edition, "provider_failure");
+          } else if (!result.found) {
+            skip(edition, "no_candidate");
+          } else {
+            const bookAuthors = authors(result.found.book);
+            const authorAgrees = authorAgreesWithWork(
+              edition.author ?? "",
+              bookAuthors,
+              await knownHebrewNames(bookAuthors),
+            );
+            if (!authorAgrees) {
+              skip(edition, "author_mismatch");
+            } else {
+              proposals++;
+              deps.log(JSON.stringify({
+                hardcover_id: result.found.book.id,
+                title: result.found.book.title,
+                proposal: {
+                  simania_id: edition.simania_id,
+                  book_id: result.found.book.id,
+                  hebrew_title: edition.title,
+                  via: "hebrew",
+                  status: result.found.status,
+                },
+              }));
+            }
+          }
+        } catch {
+          skip(edition, "provider_failure");
+        }
+
+        if (processed % BUDGET_CHECK_EVERY === 0) {
+          const remaining = await deps.hardcoverDailyRemaining();
+          if (
+            remaining !== null && remaining < options.minHardcover &&
+            !options.forceHardcover
+          ) {
+            deps.log(JSON.stringify({
+              stopped: "hardcover_budget",
+              remaining,
+              min: options.minHardcover,
+              works: processed,
+            }));
+            return 4;
+          }
+        }
+      }
+
+      deps.log(JSON.stringify({
+        works: processed,
+        proposals,
+        linked: 0,
+        skipped,
+      }));
+      return 0;
+    }
     const works = await deps.loadWorks(sql, options);
     const linkedSimaniaIds = await deps.loadLinkedSimaniaIds(sql);
     const store = deps.authorStore(sql);
