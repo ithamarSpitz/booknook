@@ -5,8 +5,10 @@ import {
   wikidataOriginal,
 } from "../supabase/functions/_shared/bridges.ts";
 import {
+  bookDetails,
   searchBooks,
   type SimaniaBook,
+  type SimaniaBookDetails,
 } from "../supabase/functions/_shared/simania.ts";
 import { similarity } from "../supabase/functions/_shared/utils.ts";
 import { openProdDb } from "./lib/prod-db.ts";
@@ -16,6 +18,7 @@ export interface InUseWork {
   original_title: string;
   original_authors: string[];
   has_hebrew: boolean;
+  simania_id: number | null;
 }
 
 export interface MeasureProviders {
@@ -39,6 +42,19 @@ export interface WorkDecision {
   failed: boolean;
 }
 
+export interface WrongLinkProviders {
+  bookDetails: (simaniaId: number) => Promise<SimaniaBookDetails | null>;
+  nliOriginal: (
+    hebrewTitle: string,
+    hebrewAuthor: string,
+  ) => Promise<{ title: string } | null>;
+}
+
+export interface WrongLinkDecision {
+  result: "agree" | "differ" | "unknown";
+  nliTitle: string | null;
+}
+
 const HEBREW = /[\u0590-\u05ff]/;
 
 function simaniaId(book: SimaniaBook): number | null {
@@ -51,6 +67,55 @@ function stripTitle(title: string): string {
     .replace(/\(.*?\)|:.*$/g, "")
     .replace(/^the\s+/i, "")
     .trim();
+}
+
+/** Select an evenly spaced, deterministic sample from works ordered by id. */
+export function sampleLinkedWorks<T>(works: readonly T[], n: number): T[] {
+  if (n <= 0 || works.length === 0) return [];
+  const step = Math.max(1, Math.floor(works.length / n));
+  const sample: T[] = [];
+  for (
+    let index = 0;
+    index < works.length && sample.length < n;
+    index += step
+  ) {
+    sample.push(works[index]);
+  }
+  return sample;
+}
+
+/** Check one linked Hebrew edition against its work through NLI. */
+export async function decideWrongLink(
+  work: Pick<InUseWork, "original_title" | "simania_id">,
+  providers: WrongLinkProviders,
+): Promise<WrongLinkDecision> {
+  if (!work.simania_id || work.simania_id <= 0) {
+    return { result: "unknown", nliTitle: null };
+  }
+  try {
+    const details = await providers.bookDetails(work.simania_id);
+    const hebrewTitle = typeof details?.title === "string"
+      ? details.title.trim()
+      : "";
+    const hebrewAuthor = typeof details?.author === "string"
+      ? details.author.trim()
+      : "";
+    if (!hebrewTitle) return { result: "unknown", nliTitle: null };
+
+    const original = await providers.nliOriginal(hebrewTitle, hebrewAuthor);
+    const nliTitle = original?.title?.trim() ?? "";
+    if (!nliTitle) return { result: "unknown", nliTitle: null };
+    const score = Math.max(
+      similarity(work.original_title, nliTitle),
+      similarity(stripTitle(work.original_title), stripTitle(nliTitle)),
+    );
+    return {
+      result: score >= 0.6 ? "agree" : "differ",
+      nliTitle,
+    };
+  } catch {
+    return { result: "unknown", nliTitle: null };
+  }
 }
 
 function authorQuery(author: string): string {
@@ -125,7 +190,11 @@ export function loadInUseWorks(sql: Sql): Promise<InUseWork[]> {
       exists (
         select 1 from public.editions as e
         where e.work_id = w.id and e.simania_id > 0
-      ) as has_hebrew
+      ) as has_hebrew,
+      (
+        select min(e.simania_id) from public.editions as e
+        where e.work_id = w.id and e.simania_id > 0
+      ) as simania_id
     from used
     inner join public.works as w on w.id = used.work_id
     order by w.id
@@ -176,7 +245,9 @@ export function throttledWikimediaFetch(
 export interface RunDeps {
   openProdDb: typeof openProdDb;
   providers: MeasureProviders;
+  wrongLinkProviders: WrongLinkProviders;
   log: (message: string) => void;
+  error: (message: string) => void;
 }
 
 const runDefaults: RunDeps = {
@@ -187,11 +258,35 @@ const runDefaults: RunDeps = {
     nliOriginal,
     wikidataOriginal,
   },
+  wrongLinkProviders: { bookDetails, nliOriginal },
   log: console.log,
+  error: console.error,
 };
 
-export async function main(overrides: Partial<RunDeps> = {}): Promise<number> {
-  const deps = { ...runDefaults, ...overrides };
+function wrongSampleSize(args: string[]): number | null | undefined {
+  if (args.length === 0) return undefined;
+  if (
+    args.length !== 2 || args[0] !== "--wrong" ||
+    !/^[1-9]\d*$/.test(args[1])
+  ) return null;
+  const value = Number(args[1]);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+export async function main(
+  argsOrOverrides: string[] | Partial<RunDeps> = Deno.args,
+  overrides: Partial<RunDeps> = {},
+): Promise<number> {
+  const args = Array.isArray(argsOrOverrides) ? argsOrOverrides : Deno.args;
+  const suppliedOverrides = Array.isArray(argsOrOverrides)
+    ? overrides
+    : argsOrOverrides;
+  const requestedWrong = wrongSampleSize(args);
+  const deps = { ...runDefaults, ...suppliedOverrides };
+  if (requestedWrong === null) {
+    deps.error("Usage: measure-links.ts [--wrong <positive integer>]");
+    return 2;
+  }
   const originalFetch = globalThis.fetch;
   globalThis.fetch = throttledWikimediaFetch(originalFetch);
   let sql: Sql | null = null;
@@ -214,6 +309,30 @@ export async function main(overrides: Partial<RunDeps> = {}): Promise<number> {
       if (decision.missed) missedTitles.push(work.original_title);
       if (decision.failed) failed++;
     }
+    let wrongSample: Record<string, unknown> | undefined;
+    if (requestedWrong !== undefined) {
+      const linkedWorks = works.filter((work) => work.simania_id !== null);
+      const sample = sampleLinkedWorks(linkedWorks, requestedWrong);
+      let agree = 0;
+      let differ = 0;
+      let unknown = 0;
+      const differTitles: [string, string][] = [];
+      for (const work of sample) {
+        const decision = await decideWrongLink(work, deps.wrongLinkProviders);
+        if (decision.result === "agree") agree++;
+        else if (decision.result === "differ") {
+          differ++;
+          differTitles.push([work.original_title, decision.nliTitle!]);
+        } else unknown++;
+      }
+      wrongSample = {
+        n: sample.length,
+        agree,
+        differ,
+        unknown,
+        differ_titles: differTitles,
+      };
+    }
     deps.log(JSON.stringify({
       in_use_works: works.length,
       unlinked_in_use: unlinked.length,
@@ -223,6 +342,7 @@ export async function main(overrides: Partial<RunDeps> = {}): Promise<number> {
         : 0,
       missed_titles: missedTitles,
       ...(failed > 0 ? { failed } : {}),
+      ...(wrongSample ? { wrong_sample: wrongSample } : {}),
     }));
     return 0;
   } finally {
