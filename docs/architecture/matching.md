@@ -97,7 +97,7 @@ Every `rematch:cached` skip line with `"skipped":"provider_failure"` includes `f
 
 Before printing a proposal, and again before linking one with `--from ... --apply`, `rematch:cached` applies the NLI English-original guard and skips an established mismatch as `nli_english_mismatch`; an absent or failed NLI result does not reject the proposal.
 
-`npm run measure:links` is a read-only measurement of missed translations among in-use works and makes no Hardcover requests; `--wrong <n>` additionally samples `n` linked in-use works and reports each NLI comparison as `agree`, `differ` or `unknown`.
+`npm run measure:links` is a read-only measurement of missed translations among in-use works and makes no Hardcover requests; `--wrong <n>` additionally samples `n` linked in-use works and reports each NLI comparison as `agree`, `differ` or `unknown`. With `--all --sample <n>`, it measures all cached works by sampling the unlinked ones and estimates the missed rate over all works.
 
 ## Normalization
 
