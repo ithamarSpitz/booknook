@@ -1330,8 +1330,8 @@ sprints:
         depends_on:
         - S31-T2
   S32-series-companion-guards:
-    name: Wikidata bridge skips series entities; Hardcover match drops box-set and companion
-      books for single books
+    name: Wikidata bridge skips series entities; Hardcover match drops box-set and
+      companion books for single books
     tasks:
       S32-T1:
         file: tasks/sprint-32-series-companion-guards/01-contract.md
@@ -1354,8 +1354,8 @@ sprints:
         - S32-T2
         - S32-T3
   S33-spaces-prefix-retry:
-    name: Collapse title whitespace; prefix-only Wikidata matches are weak; recheck retries
-      provider failures
+    name: Collapse title whitespace; prefix-only Wikidata matches are weak; recheck
+      retries provider failures
     tasks:
       S33-T1:
         file: tasks/sprint-33-spaces-prefix-retry/01-contract.md
@@ -1413,7 +1413,8 @@ sprints:
         depends_on:
         - S35-T1
   S36-duplicates-hc-hint:
-    name: link-edition accepts same-book duplicate works; Hardcover Hebrew edition hint
+    name: link-edition accepts same-book duplicate works; Hardcover Hebrew edition
+      hint
     tasks:
       S36-T1:
         file: tasks/sprint-36-duplicates-hc-hint/01-contract.md
@@ -1443,7 +1444,8 @@ sprints:
         - S36-T3
         - S36-T4
   S37-rematch-cached:
-    name: Rematch every cached English-only work; batched Wikidata lookups; initials in name sound
+    name: Rematch every cached English-only work; batched Wikidata lookups; initials
+      in name sound
     tasks:
       S37-T1:
         file: tasks/sprint-37-rematch-cached/01-contract.md
@@ -1496,7 +1498,8 @@ sprints:
         depends_on:
         - S38-T2
   S39-authors-dictionary:
-    name: Authors table used by every author lookup; dictionary as the last rematch step
+    name: Authors table used by every author lookup; dictionary as the last rematch
+      step
     tasks:
       S39-T1:
         file: tasks/sprint-39-authors-dictionary/01-contract.md
@@ -1554,7 +1557,8 @@ sprints:
         depends_on:
         - S40-T2
   S41-author-sound:
-    name: Hebrew author names by sound, stored in the authors table; dictionary refuses contradicted words
+    name: Hebrew author names by sound, stored in the authors table; dictionary refuses
+      contradicted words
     tasks:
       S41-T1:
         file: tasks/sprint-41-author-sound/01-contract.md
@@ -1641,4 +1645,9 @@ sprints:
         - S43-T2
         - S43-T3
         - S43-T4
+        - S43-T5
+      S43-T7:
+        file: tasks/sprint-43-guards/S43-T7.md
+        stage: 4
+        depends_on:
         - S43-T5
