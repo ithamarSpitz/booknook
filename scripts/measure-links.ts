@@ -264,6 +264,22 @@ export function loadInUseWorks(sql: Sql): Promise<InUseWork[]> {
   `;
 }
 
+export function loadAllWorks(sql: Sql): Promise<InUseWork[]> {
+  return sql<InUseWork[]>`
+    select w.id, w.original_title, w.original_authors,
+      exists (
+        select 1 from public.editions as e
+        where e.work_id = w.id and e.simania_id > 0
+      ) as has_hebrew,
+      (
+        select min(e.simania_id) from public.editions as e
+        where e.work_id = w.id and e.simania_id > 0
+      ) as simania_id
+    from public.works as w
+    order by w.id
+  `;
+}
+
 async function loadLinkedSimaniaIds(sql: Sql): Promise<Set<number>> {
   const rows = await sql<{ simania_id: number }[]>`
     select simania_id from public.editions
@@ -327,6 +343,9 @@ export function throttledWikimediaFetch(
 
 export interface RunDeps {
   openProdDb: typeof openProdDb;
+  loadInUseWorks: typeof loadInUseWorks;
+  loadAllWorks: typeof loadAllWorks;
+  loadLinkedSimaniaIds: typeof loadLinkedSimaniaIds;
   providers: MeasureProviders;
   wrongLinkProviders: WrongLinkProviders;
   hebrewProviders: HebrewMeasureProviders;
@@ -336,6 +355,9 @@ export interface RunDeps {
 
 const runDefaults: RunDeps = {
   openProdDb,
+  loadInUseWorks,
+  loadAllWorks,
+  loadLinkedSimaniaIds,
   providers: {
     hebrewAuthor: wikidataHebrewAuthorStrict,
     searchBooks,
@@ -351,11 +373,15 @@ const runDefaults: RunDeps = {
 interface MeasureArgs {
   wrong: number | undefined;
   hebrew: boolean;
+  all: boolean;
+  sample: number | undefined;
 }
 
 function parseArgs(args: string[]): MeasureArgs | null {
   let wrong: number | undefined;
   let hebrew = false;
+  let all = false;
+  let sample: number | undefined;
   for (let index = 0; index < args.length; index++) {
     if (args[index] === "--hebrew" && !hebrew) {
       hebrew = true;
@@ -370,9 +396,23 @@ function parseArgs(args: string[]): MeasureArgs | null {
       wrong = value;
       continue;
     }
+    if (args[index] === "--all" && !all) {
+      all = true;
+      continue;
+    }
+    if (
+      args[index] === "--sample" && sample === undefined &&
+      /^[1-9]\d*$/.test(args[index + 1] ?? "")
+    ) {
+      const value = Number(args[++index]);
+      if (!Number.isSafeInteger(value)) return null;
+      sample = value;
+      continue;
+    }
     return null;
   }
-  return { wrong, hebrew };
+  if (sample !== undefined && !all) return null;
+  return { wrong, hebrew, all, sample };
 }
 
 export async function main(
@@ -387,7 +427,7 @@ export async function main(
   const deps = { ...runDefaults, ...suppliedOverrides };
   if (requested === null) {
     deps.error(
-      "Usage: measure-links.ts [--hebrew] [--wrong <positive integer>]",
+      "Usage: measure-links.ts [--all [--sample <positive integer>]] [--hebrew] [--wrong <positive integer>]",
     );
     return 2;
   }
@@ -397,14 +437,17 @@ export async function main(
   try {
     sql = await deps.openProdDb({ readOnly: true });
     const [works, linked] = await Promise.all([
-      loadInUseWorks(sql),
-      loadLinkedSimaniaIds(sql),
+      requested.all ? deps.loadAllWorks(sql) : deps.loadInUseWorks(sql),
+      deps.loadLinkedSimaniaIds(sql),
     ]);
     const unlinked = works.filter((work) => !work.has_hebrew);
+    const checkedUnlinked = requested.sample === undefined
+      ? unlinked
+      : sampleLinkedWorks(unlinked, requested.sample);
     const missedTitles: string[] = [];
     let failed = 0;
     // Deliberately sequential: providers and the Wikimedia throttle get one work at a time.
-    for (const work of unlinked) {
+    for (const work of checkedUnlinked) {
       const decision = await decideMissedTranslation(
         work,
         linked,
@@ -459,15 +502,37 @@ export async function main(
         linked_editions: linkedEditions,
       };
     }
+    const measurement = requested.all
+      ? (() => {
+        const sampled = checkedUnlinked.length;
+        const missedEstimate = sampled
+          ? Math.round(missedTitles.length * unlinked.length / sampled)
+          : 0;
+        return {
+          all_works: works.length,
+          unlinked: unlinked.length,
+          sampled,
+          missed_in_sample: missedTitles.length,
+          failed,
+          missed_estimate: missedEstimate,
+          missed_rate: works.length
+            ? Number((missedEstimate / works.length).toFixed(4))
+            : 0,
+          missed_titles: missedTitles,
+        };
+      })()
+      : {
+        in_use_works: works.length,
+        unlinked_in_use: unlinked.length,
+        missed: missedTitles.length,
+        missed_rate: works.length
+          ? Number((missedTitles.length / works.length).toFixed(4))
+          : 0,
+        missed_titles: missedTitles,
+        ...(failed > 0 ? { failed } : {}),
+      };
     deps.log(JSON.stringify({
-      in_use_works: works.length,
-      unlinked_in_use: unlinked.length,
-      missed: missedTitles.length,
-      missed_rate: works.length
-        ? Number((missedTitles.length / works.length).toFixed(4))
-        : 0,
-      missed_titles: missedTitles,
-      ...(failed > 0 ? { failed } : {}),
+      ...measurement,
       ...(wrongSample ? { wrong_sample: wrongSample } : {}),
       ...(hebrew ? { hebrew } : {}),
     }));
