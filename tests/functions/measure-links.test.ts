@@ -1,14 +1,17 @@
 import type { Sql } from "npm:postgres@3.4.5";
 import { assertEquals } from "jsr:@std/assert@1.0.14";
 import {
+  classifyUnlinkedWork,
   decideHebrewEdition,
   decideMissedTranslation,
   decideWrongLink,
+  findWikidataWork,
   type InUseWork,
   main,
   type MeasureProviders,
   type RunDeps,
   sampleLinkedWorks,
+  type UnlinkedEvidenceProviders,
 } from "../../scripts/measure-links.ts";
 
 const HEBREW_EDITION = {
@@ -118,6 +121,109 @@ Deno.test("provider failure is counted and is not a missed translation", async (
   );
 });
 
+function evidenceProviders(
+  options: {
+    label?: string | null;
+    books?: Array<{ id: number; title: string; author: string }>;
+    fail?: boolean;
+  } = {},
+): UnlinkedEvidenceProviders {
+  return {
+    hebrewAuthor: () => Promise.resolve(null),
+    searchBooks: () => Promise.resolve(options.books ?? []),
+    nliOriginal: () => Promise.resolve(null),
+    wikidataOriginal: () => Promise.resolve(null),
+    wikidataWork: () =>
+      options.fail
+        ? Promise.reject(new Error("Wikidata unavailable"))
+        : Promise.resolve(
+          options.label === undefined
+            ? null
+            : { id: "Q1", hebrewLabel: options.label },
+        ),
+  };
+}
+
+Deno.test("unlinked work classification covers every class", async () => {
+  assertEquals(
+    await classifyUnlinkedWork(WORK, new Set(), evidenceProviders()),
+    { class: "no_evidence" },
+  );
+  assertEquals(
+    await classifyUnlinkedWork(
+      WORK,
+      new Set(),
+      evidenceProviders({ fail: true }),
+    ),
+    { class: "failed" },
+  );
+  assertEquals(
+    await classifyUnlinkedWork(
+      WORK,
+      new Set(),
+      evidenceProviders({
+        label: "התלקחות",
+        books: [{ id: 101, title: "התלקחות", author: "סוזן קולינס" }],
+      }),
+    ),
+    { class: "missed", via: "wikidata_he", hebrewLabel: "התלקחות" },
+  );
+  assertEquals(
+    await classifyUnlinkedWork(
+      WORK,
+      new Set(),
+      evidenceProviders({
+        label: "התלקחות",
+        books: [{ id: 102, title: "התלקחות", author: "עמוס עוז" }],
+      }),
+    ),
+    { class: "hebrew_label_unconfirmed", hebrewLabel: "התלקחות" },
+  );
+});
+
+Deno.test("Wikidata Hebrew label is searched with both apostrophe forms", async () => {
+  const queries: string[] = [];
+  const fake = evidenceProviders({ label: "ג'קיל", books: [] });
+  fake.searchBooks = (query) => {
+    queries.push(query);
+    return Promise.resolve([]);
+  };
+  assertEquals(
+    (await classifyUnlinkedWork(WORK, new Set(), fake)).class,
+    "hebrew_label_unconfirmed",
+  );
+  assertEquals(queries, ["ג'קיל", "ג׳קיל"]);
+});
+
+Deno.test("Wikidata entity with a different author is not accepted", async () => {
+  const fakeFetch = ((input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const action = url.searchParams.get("action");
+    if (action === "wbsearchentities") {
+      return Promise.resolve(Response.json({ search: [{ id: "Q1" }] }));
+    }
+    if (url.searchParams.get("ids") === "Q1") {
+      return Promise.resolve(Response.json({
+        entities: {
+          Q1: {
+            labels: { he: { value: "התלקחות" } },
+            descriptions: { en: { value: "novel by Another Writer" } },
+            claims: {
+              P50: [{
+                mainsnak: { datavalue: { value: { id: "Q2" } } },
+              }],
+            },
+          },
+        },
+      }));
+    }
+    return Promise.resolve(Response.json({
+      entities: { Q2: { labels: { en: { value: "Another Writer" } } } },
+    }));
+  }) as typeof fetch;
+  assertEquals(await findWikidataWork(WORK, fakeFetch), null);
+});
+
 Deno.test("wrong-link decision covers agree, differ and unknown", async () => {
   const work = { original_title: "The Hunger Games: Book One", simania_id: 7 };
   const details = () =>
@@ -179,6 +285,7 @@ function measureHarness(works: InUseWork[]) {
         ),
       nliOriginal: () => Promise.resolve({ title: "Title 1" }),
       wikidataOriginal: () => Promise.resolve(null),
+      wikidataWork: () => Promise.resolve(null),
     },
     log: (message) => logs.push(message),
     error: (message) => errors.push(message),
@@ -214,10 +321,17 @@ Deno.test("--all switches population and --sample checks works 1, 4 and 7", asyn
     unlinked: 10,
     sampled: 3,
     missed_in_sample: 1,
-    failed: 0,
+    failed_in_sample: 0,
     missed_estimate: 3,
     missed_rate: 0.3,
     missed_titles: ["Title 1"],
+    missed: 3,
+    hebrew_label_unconfirmed: 0,
+    no_evidence: 7,
+    failed: 0,
+    missed_rate_low: 0.3,
+    missed_rate_high: 0.3,
+    hebrew_label_titles: [],
   });
 });
 
@@ -238,6 +352,12 @@ Deno.test("without --all the in-use population and legacy JSON stay unchanged", 
     missed: 1,
     missed_rate: 1,
     missed_titles: ["Title 1"],
+    hebrew_label_unconfirmed: 0,
+    no_evidence: 0,
+    failed: 0,
+    missed_rate_low: 1,
+    missed_rate_high: 1,
+    hebrew_label_titles: [],
   });
 });
 
