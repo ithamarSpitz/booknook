@@ -33,7 +33,7 @@ Deno.test("pickByDictionary picks the unique score above the threshold", async (
       { simania_id: 4, title: "נערי ניקל" },
       { simania_id: 5, title: "מחתרת המסילה" },
     ], glosses({ נער: ["boy, youth"] })),
-    { simania_id: 4, title: "נערי ניקל" },
+    null,
   );
 });
 

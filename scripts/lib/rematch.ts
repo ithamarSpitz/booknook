@@ -3,6 +3,7 @@ import {
   type HardcoverBook,
 } from "../../supabase/functions/_shared/hardcover.ts";
 import { nameSoundScore } from "../../supabase/functions/_shared/names.ts";
+import { sameAuthor } from "../../supabase/functions/_shared/author-sound.ts";
 import type { ResolveMatchResult } from "../../supabase/functions/_shared/catalog.ts";
 import type { SimaniaBook } from "../../supabase/functions/_shared/simania.ts";
 import type { EditionRow } from "../../supabase/functions/_shared/types.ts";
@@ -62,7 +63,8 @@ export function authorAgreesWithWork(
   if (!String(hebrewAuthor ?? "").trim()) return false;
   return authorVariants(hebrewAuthor).some((variant) =>
     nameSoundScore(variant, englishAuthors) >= 0.7 ||
-    knownHebrewNames.some((name) => similarity(variant, name) >= 0.6)
+    knownHebrewNames.some((name) => similarity(variant, name) >= 0.6) ||
+    englishAuthors.some((name) => sameAuthor(variant, name))
   );
 }
 

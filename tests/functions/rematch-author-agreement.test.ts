@@ -18,6 +18,8 @@ Deno.test("rematch author agreement rejects an unrelated Latin author", () => {
 Deno.test("rematch author agreement accepts sound variants", () => {
   assert(authorAgreesWithWork("אמיל זולא (זולה)", ["Émile Zola"], []));
   assert(authorAgreesWithWork("סטיב טולץ", ["Steve Toltz"], []));
+  assert(authorAgreesWithWork("לויס לורי", ["Lois Lowry"], []));
+  assert(authorAgreesWithWork("ג'ני האן", ["Jenny Han"], []));
 });
 
 Deno.test("rematch author agreement accepts an authors-table name", () => {
