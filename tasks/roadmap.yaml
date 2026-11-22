@@ -1607,3 +1607,38 @@ sprints:
         stage: 3
         depends_on:
         - S42-T2
+  S43-guards:
+    name: provider failure detail, English original guard, link measurement
+    tasks:
+      S43-T1:
+        file: tasks/sprint-43-guards/01-contract.md
+        stage: 1
+        depends_on: []
+      S43-T2:
+        file: tasks/sprint-43-guards/02-failure-detail.md
+        stage: 2
+        depends_on:
+        - S43-T1
+      S43-T4:
+        file: tasks/sprint-43-guards/04-measure-missed.md
+        stage: 2
+        depends_on:
+        - S43-T1
+      S43-T3:
+        file: tasks/sprint-43-guards/03-english-mismatch.md
+        stage: 3
+        depends_on:
+        - S43-T2
+      S43-T5:
+        file: tasks/sprint-43-guards/05-measure-wrong.md
+        stage: 3
+        depends_on:
+        - S43-T4
+      S43-T6:
+        file: tasks/sprint-43-guards/06-docs.md
+        stage: 4
+        depends_on:
+        - S43-T2
+        - S43-T3
+        - S43-T4
+        - S43-T5
