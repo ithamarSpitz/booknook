@@ -102,6 +102,30 @@ Deno.test("dry run proposes without writing", async () => {
   assertEquals(h.calls.insert, 0);
 });
 
+Deno.test("dry run skips an NLI English mismatch and keeps a null answer", async () => {
+  const mismatch = harness({
+    nliOriginal: () => Promise.resolve({ title: "Battle of Corrin" }),
+  }, [{
+    ...work(325603),
+    original_title: "Dune: The Graphic Novel, Book 1",
+  }]);
+  assertEquals(await main([], mismatch.deps), 0);
+  assertEquals(last(mismatch.lines).skipped, { nli_english_mismatch: 1 });
+  assertEquals(mismatch.calls.apply.length, 0);
+
+  const unknown = harness({ nliOriginal: () => Promise.resolve(null) });
+  assertEquals(await main([], unknown.deps), 0);
+  assertEquals(last(unknown.lines).proposals, 1);
+});
+
+Deno.test("dry run keeps a proposal when the NLI mismatch check throws", async () => {
+  const h = harness({
+    nliOriginal: () => Promise.reject(new Error("NLI unavailable")),
+  });
+  assertEquals(await main([], h.deps), 0);
+  assertEquals(last(h.lines).proposals, 1);
+});
+
 Deno.test("apply inserts the edition then links with the confirmed status", async () => {
   const h = harness();
   const code = await main(["--apply", "--hardcover-id", "325603"], h.deps);

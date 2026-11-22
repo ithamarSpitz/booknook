@@ -16,10 +16,14 @@ const bookOf = (id: number): HardcoverBook => ({
   cached_contributors: [{ author: { name: "Stephen King" } }],
 });
 
-const proposalLine = (simania_id: number, book_id: number) =>
+const proposalLine = (
+  simania_id: number,
+  book_id: number,
+  title = "t",
+) =>
   JSON.stringify({
     hardcover_id: 1,
-    title: "t",
+    title,
     proposal: {
       simania_id,
       book_id,
@@ -64,7 +68,7 @@ function harness(over: Partial<RunDeps> = {}, file = "") {
     wikidataHebrewAuthors:
       forbidden as unknown as RunDeps["wikidataHebrewAuthors"],
     wikidataOriginals: forbidden as unknown as RunDeps["wikidataOriginals"],
-    nliOriginal: forbidden as unknown as RunDeps["nliOriginal"],
+    nliOriginal: () => Promise.resolve(null),
     wiktionaryGlosses: forbidden as unknown as RunDeps["wiktionaryGlosses"],
     hebrewHint: forbidden as unknown as RunDeps["hebrewHint"],
     matchHebrewBook: forbidden as unknown as RunDeps["matchHebrewBook"],
@@ -146,6 +150,37 @@ Deno.test("--from applies one proposal and ignores other lines", async () => {
     action: "link",
   });
   assertEquals(last(h.lines), { proposals: 1, linked: 1, skipped: {} });
+});
+
+Deno.test("--from --apply skips an NLI English mismatch and keeps a null answer", async () => {
+  const mismatch = harness({
+    nliOriginal: () => Promise.resolve({ title: "Battle of Corrin" }),
+  }, proposalLine(3191, 77, "Dune: The Graphic Novel, Book 1"));
+  assertEquals(await main(["--from", "x", "--apply"], mismatch.deps), 0);
+  assertEquals(last(mismatch.lines).skipped, { nli_english_mismatch: 1 });
+  assertEquals(mismatch.calls.apply.length, 0);
+
+  const unknown = harness({}, proposalLine(3191, 77));
+  assertEquals(await main(["--from", "x", "--apply"], unknown.deps), 0);
+  assertEquals(unknown.calls.apply, ["wikidata"]);
+});
+
+Deno.test("--from --apply checks the saved work title, not a fetched duplicate title", async () => {
+  const h = harness({
+    nliOriginal: () =>
+      Promise.resolve({ title: "The Story of Another Country and Its People" }),
+    hardcoverBooks: (ids) => {
+      h.calls.books.push(ids);
+      return Promise.resolve(ids.map((id) => ({
+        ...bookOf(id),
+        title: "Another Country: A Novel",
+      })));
+    },
+  }, proposalLine(3191, 77, "Another Country"));
+
+  assertEquals(await main(["--from", "x", "--apply"], h.deps), 0);
+  assertEquals(h.calls.apply, ["wikidata"]);
+  assertEquals(last(h.lines).skipped, {});
 });
 
 Deno.test("--from accepts a dictionary proposal", async () => {
