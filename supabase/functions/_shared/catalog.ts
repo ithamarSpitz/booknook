@@ -115,7 +115,10 @@ const BOX_NOISE_WORDS = ["מלא", "דיגיטלי", "דיגיטלית"];
 const NOT_WORD = "[^\\s\\-–()\\[\\]]";
 
 function wordPattern(words: string[]): RegExp {
-  return new RegExp(`(?<!${NOT_WORD})(?:${words.join("|")})(?!${NOT_WORD})`, "g");
+  return new RegExp(
+    `(?<!${NOT_WORD})(?:${words.join("|")})(?!${NOT_WORD})`,
+    "g",
+  );
 }
 
 /** True when the match title contains a box-set word as a whole word. */
@@ -129,7 +132,9 @@ export function boxCore(matchTitle: string): string {
     .replace(wordPattern([...BOX_WORDS, ...BOX_NOISE_WORDS]), " ")
     .replace(/\s+/g, " ")
     .trim();
-  const parts = stripped.split(/(?:^|\s)[-–](?:\s|$)/).map((part) => part.trim());
+  const parts = stripped.split(/(?:^|\s)[-–](?:\s|$)/).map((part) =>
+    part.trim()
+  );
   let best = "";
   for (const part of parts) if (part.length > best.length) best = part;
   return best;
@@ -388,12 +393,12 @@ function seriesPrefixRest(
 
 async function tryMatch(
   operation: () => Promise<HardcoverBook | null>,
-  failures: { count: number },
+  failures: FailureTracker,
 ): Promise<HardcoverBook | null> {
   try {
     return await operation();
-  } catch {
-    failures.count += 1;
+  } catch (error) {
+    recordFailure(failures, "hardcover", error);
     return null;
   }
 }
@@ -450,7 +455,10 @@ function guardRejects(edition: EditionRow, match: HardcoverBook): boolean {
 }
 
 /** True when only the part of bookTitle before its first colon matches the bridge title. */
-export function isPrefixOnlyMatch(bridgeTitle: string, bookTitle: string): boolean {
+export function isPrefixOnlyMatch(
+  bridgeTitle: string,
+  bookTitle: string,
+): boolean {
   const colon = bookTitle.indexOf(":");
   if (colon < 0) return false;
   return similarity(bridgeTitle, bookTitle) < 0.9 &&
@@ -460,7 +468,33 @@ export function isPrefixOnlyMatch(bridgeTitle: string, bookTitle: string): boole
 export type ResolveMatchResult = {
   found: { book: HardcoverBook; status: "wikidata" | "nli" | "fuzzy" } | null;
   failed: boolean;
+  failures?: ProviderFailure[];
 };
+
+export type FailureProvider =
+  | "hardcover"
+  | "simania"
+  | "wikidata"
+  | "nli"
+  | "wiktionary"
+  | "sound"
+  | "db";
+
+export type ProviderFailure = { provider: FailureProvider; error: string };
+
+type FailureTracker = { count: number; details: ProviderFailure[] };
+
+function recordFailure(
+  failures: FailureTracker,
+  provider: FailureProvider,
+  error: unknown,
+): void {
+  failures.count += 1;
+  failures.details.push({
+    provider,
+    error: String((error as Error)?.message ?? error).slice(0, 200),
+  });
+}
 
 /** Wikidata -> NLI -> fuzzy decision. Never writes; ignores resolve_status. */
 export async function resolveMatch(
@@ -475,7 +509,7 @@ export async function resolveMatch(
   let weakWikidata = false;
   // A provider error is not evidence that the book is missing. If nothing matched
   // and any request failed, stay pending so the next request retries.
-  const failures = { count: 0 };
+  const failures: FailureTracker = { count: 0, details: [] };
   const fullTitle = matchTitle(edition.title);
   const box = isBoxSet(fullTitle);
   const titleForMatch = box ? boxCore(fullTitle) : fullTitle;
@@ -509,48 +543,73 @@ export async function resolveMatch(
     const bridge = await api.wikidataOriginal(titleForMatch);
     wikidataTitle = bridge?.title ?? "";
     if (bridge) {
-      match = await matchBridge(bridge.title, bridge.author, { retryWithAuthor: true });
+      match = await matchBridge(bridge.title, bridge.author, {
+        retryWithAuthor: true,
+      });
     }
     if (match && guardRejects(edition, match)) match = null;
     if (match) {
       status = "wikidata";
       weakWikidata = !!bridge && isPrefixOnlyMatch(bridge.title, match.title);
     }
-  } catch {
-    failures.count += 1;
+  } catch (error) {
+    recordFailure(failures, "wikidata", error);
   }
 
   if (!match || weakWikidata) {
+    let bridge: Awaited<ReturnType<CatalogProviders["nliOriginal"]>> = null;
     try {
-      let nli = await api.nliOriginal(
+      bridge = await api.nliOriginal(
         titleForMatch,
         edition.author ?? "",
       );
-      if (nli === null) {
+      if (bridge === null) {
         const rest = seriesPrefixRest(titleForMatch, edition.series);
-        if (rest) nli = await api.nliOriginal(rest, edition.author ?? "");
+        if (rest) {
+          bridge = await api.nliOriginal(rest, edition.author ?? "");
+        }
       }
-      const bridge = nli;
-      if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
-        let hint = await englishAuthorHint(db, edition);
+    } catch (error) {
+      recordFailure(failures, "nli", error);
+    }
+    if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
+      let hint: string | null = null;
+      let databaseFailed = false;
+      try {
+        hint = await englishAuthorHint(db, edition);
+      } catch (error) {
+        databaseFailed = true;
+        recordFailure(failures, "db", error);
+      }
+      if (!databaseFailed) {
         if (hint === null) hint = bridge.versoAuthor?.trim() || null;
         if (hint === null && edition.author?.trim()) {
           try {
-            const names = await englishNames(resolveAuthorStore(db), edition.author, {
-              wikidataEnglishAuthorStrict: api.wikidataEnglishAuthor,
-              now: api.now,
-            });
+            const names = await englishNames(
+              resolveAuthorStore(db),
+              edition.author,
+              {
+                wikidataEnglishAuthorStrict: api.wikidataEnglishAuthor,
+                now: api.now,
+              },
+            );
             hint = names[0] ?? null;
-          } catch {
-            failures.count += 1;
+          } catch (error) {
+            recordFailure(failures, "wikidata", error);
           }
         }
         const nliOptions = hint === null
           ? { retryWithAuthor: true, soundAuthor: edition.author ?? "" }
           : { retryWithAuthor: true };
-        let found = await matchBridge(bridge.title, hint ?? bridge.author, nliOptions);
+        let found = await matchBridge(
+          bridge.title,
+          hint ?? bridge.author,
+          nliOptions,
+        );
         if (found && guardRejects(edition, found)) found = null;
-        if (found && weakWikidata && isPrefixOnlyMatch(bridge.title, found.title)) {
+        if (
+          found && weakWikidata && isPrefixOnlyMatch(bridge.title, found.title)
+        ) {
           found = null;
         }
         if (found) {
@@ -558,14 +617,15 @@ export async function resolveMatch(
           status = "nli";
         }
       }
-    } catch {
-      failures.count += 1;
     }
   }
 
   if (!match && !box) {
     match = await tryMatch(
-      () => api.findHardcoverBook(titleForMatch, edition.author ?? "", { requireAuthor: true }),
+      () =>
+        api.findHardcoverBook(titleForMatch, edition.author ?? "", {
+          requireAuthor: true,
+        }),
       failures,
     );
     if (match && guardRejects(edition, match)) match = null;
@@ -575,6 +635,7 @@ export async function resolveMatch(
   return {
     found: match ? { book: match, status } : null,
     failed: failures.count > 0,
+    failures: failures.details,
   };
 }
 
@@ -598,7 +659,10 @@ export async function ensureResolved(
   const failures = { count: resolved.failed ? 1 : 0 };
 
   // Only a book built from search documents lacks details; stubs and detail-built books keep theirs.
-  if (match && match.cached_similar_book_ids === undefined && isSearchDocumentBook(match)) {
+  if (
+    match && match.cached_similar_book_ids === undefined &&
+    isSearchDocumentBook(match)
+  ) {
     try {
       match = (await api.hardcoverBooks([match.id]))[0] ?? null;
     } catch {
