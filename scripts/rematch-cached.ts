@@ -1,9 +1,12 @@
 import type { Sql } from "npm:postgres@3.4.5";
 import {
   type CatalogDb,
+  type CatalogProviders,
   type FailureProvider,
   type ProviderFailure,
   resolveMatch,
+  type ResolveTraceEvent,
+  type ResolveTraceStop,
 } from "../supabase/functions/_shared/catalog.ts";
 import {
   nliHebrew,
@@ -21,6 +24,7 @@ import {
   isSearchDocumentBook,
 } from "../supabase/functions/_shared/hardcover.ts";
 import {
+  bookDetails,
   fetchEditionDetails,
   searchBooks,
 } from "../supabase/functions/_shared/simania.ts";
@@ -56,7 +60,7 @@ import {
 } from "./repair-links.ts";
 
 const USAGE =
-  "Usage: rematch:cached [--apply] [--hebrew] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--min-hardcover <n>] [--force-hardcover]";
+  "Usage: rematch:cached [--apply] [--hebrew] [--explain] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--min-hardcover <n>] [--force-hardcover]";
 
 const BUDGET_CHECK_EVERY = 50;
 
@@ -122,10 +126,12 @@ export interface RunDeps {
   matchHebrewBook: (title: string, author: string) => Promise<unknown>;
   searchBooks: RematchDeps["searchBooks"];
   hebrewAuthorBySound: (englishName: string) => Promise<string | null>;
+  bookDetails: typeof bookDetails;
   fetchEditionDetails: (id: number) => Promise<Record<string, unknown>>;
   resolveMatch: (
     db: CatalogDb,
     edition: EditionRow,
+    overrides?: Partial<CatalogProviders>,
   ) => ReturnType<typeof resolveMatch>;
   applyRepair: (
     sql: Sql,
@@ -226,8 +232,10 @@ const runDefaults: RunDeps = {
   searchBooks,
   hebrewAuthorBySound: (englishName) =>
     hebrewAuthorBySound(englishName, searchBooks),
+  bookDetails,
   fetchEditionDetails,
-  resolveMatch: (db, edition) => resolveMatch(db, edition),
+  resolveMatch: (db, edition, overrides) =>
+    resolveMatch(db, edition, overrides),
   applyRepair: applyRepair as unknown as RunDeps["applyRepair"],
   hardcoverBooks,
   isSearchDocumentBook,
@@ -243,6 +251,7 @@ const runDefaults: RunDeps = {
 interface CliOptions {
   apply: boolean;
   hebrew: boolean;
+  explain: boolean;
   hardcoverId: number | null;
   offset: number;
   limit: number | null;
@@ -255,6 +264,7 @@ function parseArgs(args: string[]): CliOptions | null {
   const options: CliOptions = {
     apply: false,
     hebrew: false,
+    explain: false,
     hardcoverId: null,
     offset: 0,
     limit: null,
@@ -267,6 +277,7 @@ function parseArgs(args: string[]): CliOptions | null {
     const arg = args[i];
     if (arg === "--apply") options.apply = true;
     else if (arg === "--hebrew") options.hebrew = true;
+    else if (arg === "--explain") options.explain = true;
     else if (arg === "--force-hardcover") options.forceHardcover = true;
     else if (arg === "--from") {
       const value = args[++i];
@@ -291,11 +302,44 @@ function parseArgs(args: string[]): CliOptions | null {
     } else return null;
   }
   if (options.from !== null && usedOthers) return null;
+  if (options.explain && !options.hebrew) return null;
   if (
     options.hebrew &&
     (options.apply || options.from !== null || options.hardcoverId !== null)
   ) return null;
   return options;
+}
+
+type ResolveExplain = {
+  translator: string | null;
+  original: { title: string; source: string } | null;
+  english_author: { name: string; source: string } | null;
+  hardcover_queries: Array<{
+    query: string;
+    results: number;
+    best_title: string | null;
+    best_score: number | null;
+  }>;
+  stop: ResolveTraceStop | null;
+};
+
+function collectExplain(explain: ResolveExplain, event: ResolveTraceEvent) {
+  if (event.type === "original") {
+    explain.original = { title: event.title, source: event.source };
+  } else if (event.type === "english_author") {
+    explain.english_author = { name: event.name, source: event.source };
+  } else if (event.type === "hardcover_query") {
+    if (explain.hardcover_queries.length < 6) {
+      explain.hardcover_queries.push({
+        query: event.query,
+        results: event.results,
+        best_title: event.best_title,
+        best_score: event.best_score,
+      });
+    }
+  } else {
+    explain.stop = event.stop;
+  }
 }
 
 function toEditionRow(details: Record<string, unknown>): EditionRow {
@@ -566,12 +610,22 @@ export async function main(
         edition: EditionRow,
         reason: string,
         failures: ProviderFailure[] = [],
+        explain: ResolveExplain | null = null,
       ) => {
         skipped[reason] = (skipped[reason] ?? 0) + 1;
+        const completedExplain = explain
+          ? {
+            ...explain,
+            stop: explain.stop ?? (reason === "author_mismatch"
+              ? "author_mismatch"
+              : "guard_rejected"),
+          }
+          : null;
         deps.log(JSON.stringify({
           simania_id: edition.simania_id,
           skipped: reason,
           ...(reason === "provider_failure" ? { failures } : {}),
+          ...(completedExplain ? { explain: completedExplain } : {}),
         }));
       };
       let processed = 0;
@@ -580,12 +634,35 @@ export async function main(
       // Deliberately sequential: one provider request at a time.
       for (const edition of editions) {
         processed++;
+        const explain: ResolveExplain | null = options.explain
+          ? {
+            translator: null,
+            original: null,
+            english_author: null,
+            hardcover_queries: [],
+            stop: null,
+          }
+          : null;
         try {
-          const result = await deps.resolveMatch(db, edition);
+          if (explain) {
+            try {
+              const details = await deps.bookDetails(edition.simania_id);
+              explain.translator = typeof details?.translator === "string"
+                ? details.translator
+                : null;
+            } catch {
+              // Explanation details must not change the resolver's decision.
+            }
+          }
+          const result = explain
+            ? await deps.resolveMatch(db, edition, {
+              trace: (event) => collectExplain(explain, event),
+            })
+            : await deps.resolveMatch(db, edition);
           if (result.failed) {
-            skip(edition, "provider_failure", result.failures ?? []);
+            skip(edition, "provider_failure", result.failures ?? [], explain);
           } else if (!result.found) {
-            skip(edition, "no_candidate");
+            skip(edition, "no_candidate", [], explain);
           } else {
             const bookAuthors = authors(result.found.book);
             const authorAgrees = authorAgreesWithWork(
@@ -594,7 +671,7 @@ export async function main(
               await knownHebrewNames(bookAuthors),
             );
             if (!authorAgrees) {
-              skip(edition, "author_mismatch");
+              skip(edition, "author_mismatch", [], explain);
             } else if (
               await proposalHasEnglishMismatch(
                 deps,
@@ -602,7 +679,7 @@ export async function main(
                 result.found.book.title,
               )
             ) {
-              skip(edition, "nli_english_mismatch");
+              skip(edition, "nli_english_mismatch", [], explain);
             } else {
               proposals++;
               deps.log(JSON.stringify({
@@ -619,7 +696,12 @@ export async function main(
             }
           }
         } catch (error) {
-          skip(edition, "provider_failure", [failureDetail("db", error)]);
+          skip(
+            edition,
+            "provider_failure",
+            [failureDetail("db", error)],
+            explain,
+          );
         }
 
         if (processed % BUDGET_CHECK_EVERY === 0) {
