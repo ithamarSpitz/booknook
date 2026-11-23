@@ -12,6 +12,7 @@ import {
   authors,
   findHardcoverBook,
   type HardcoverBook,
+  type HardcoverQueryTrace,
   hardcoverBooks,
   isSearchDocumentBook,
 } from "./hardcover.ts";
@@ -47,7 +48,22 @@ export interface CatalogProviders {
   findHardcoverBook: typeof findHardcoverBook;
   hardcoverBooks: typeof hardcoverBooks;
   now: () => Date;
+  trace?: (event: ResolveTraceEvent) => void;
 }
+
+export type ResolveTraceStop =
+  | "no_original"
+  | "no_english_author"
+  | "no_hardcover_result"
+  | "title_below_threshold"
+  | "author_mismatch"
+  | "guard_rejected";
+
+export type ResolveTraceEvent =
+  | { type: "original"; title: string; source: string }
+  | { type: "english_author"; name: string; source: string }
+  | ({ type: "hardcover_query" } & HardcoverQueryTrace)
+  | { type: "stop"; stop: ResolveTraceStop };
 
 const providers: CatalogProviders = {
   bookDetails,
@@ -513,6 +529,33 @@ export async function resolveMatch(
   const fullTitle = matchTitle(edition.title);
   const box = isBoxSet(fullTitle);
   const titleForMatch = box ? boxCore(fullTitle) : fullTitle;
+  let sawOriginal = false;
+  let sawEnglishAuthor = false;
+  let sawGuardRejection = false;
+  let queryResults = 0;
+  let bestQueryScore: number | null = null;
+
+  const emitOriginal = (title: string, source: string): void => {
+    sawOriginal = true;
+    api.trace?.({ type: "original", title, source });
+  };
+  const emitEnglishAuthor = (name: string, source: string): void => {
+    if (!name.trim()) return;
+    sawEnglishAuthor = true;
+    api.trace?.({ type: "english_author", name, source });
+  };
+  const traceQuery = (query: HardcoverQueryTrace): void => {
+    queryResults += query.results;
+    if (
+      query.best_score !== null &&
+      (bestQueryScore === null || query.best_score > bestQueryScore)
+    ) bestQueryScore = query.best_score;
+    api.trace?.({ type: "hardcover_query", ...query });
+  };
+  const withTrace = (
+    options: Parameters<typeof findHardcoverBook>[2],
+  ): Parameters<typeof findHardcoverBook>[2] =>
+    api.trace ? { ...options, trace: traceQuery } : options;
 
   const matchBridge = async (
     bridgeTitle: string,
@@ -521,20 +564,24 @@ export async function resolveMatch(
   ): Promise<HardcoverBook | null> => {
     if (!box) {
       return await tryMatch(
-        () => api.findHardcoverBook(bridgeTitle, hint, options),
+        () =>
+          api.findHardcoverBook(bridgeTitle, hint, withTrace(options)),
         failures,
       );
     }
     for (const suffix of BOX_SUFFIXES) {
       const found = await tryMatch(
         () =>
-          api.findHardcoverBook(`${bridgeTitle} ${suffix}`, hint, {
+          api.findHardcoverBook(`${bridgeTitle} ${suffix}`, hint, withTrace({
             requireAuthor: true,
             boxTitle: true,
-          }),
+          })),
         failures,
       );
-      if (found && !guardRejects(edition, found)) return found;
+      if (found) {
+        if (guardRejects(edition, found)) sawGuardRejection = true;
+        else return found;
+      }
     }
     return null;
   };
@@ -543,11 +590,16 @@ export async function resolveMatch(
     const bridge = await api.wikidataOriginal(titleForMatch);
     wikidataTitle = bridge?.title ?? "";
     if (bridge) {
+      emitOriginal(bridge.title, bridge.source);
+      emitEnglishAuthor(bridge.author ?? "", bridge.source);
       match = await matchBridge(bridge.title, bridge.author, {
         retryWithAuthor: true,
       });
     }
-    if (match && guardRejects(edition, match)) match = null;
+    if (match && guardRejects(edition, match)) {
+      sawGuardRejection = true;
+      match = null;
+    }
     if (match) {
       status = "wikidata";
       weakWikidata = !!bridge && isPrefixOnlyMatch(bridge.title, match.title);
@@ -573,6 +625,7 @@ export async function resolveMatch(
       recordFailure(failures, "nli", error);
     }
     if (bridge && normalize(bridge.title) !== normalize(wikidataTitle)) {
+      emitOriginal(bridge.title, bridge.source);
       let hint: string | null = null;
       let databaseFailed = false;
       try {
@@ -582,7 +635,11 @@ export async function resolveMatch(
         recordFailure(failures, "db", error);
       }
       if (!databaseFailed) {
-        if (hint === null) hint = bridge.versoAuthor?.trim() || null;
+        if (hint !== null) emitEnglishAuthor(hint, "catalog");
+        if (hint === null) {
+          hint = bridge.versoAuthor?.trim() || null;
+          if (hint !== null) emitEnglishAuthor(hint, bridge.source);
+        }
         if (hint === null && edition.author?.trim()) {
           try {
             const names = await englishNames(
@@ -594,9 +651,13 @@ export async function resolveMatch(
               },
             );
             hint = names[0] ?? null;
+            if (hint !== null) emitEnglishAuthor(hint, "Wikidata");
           } catch (error) {
             recordFailure(failures, "wikidata", error);
           }
+        }
+        if (hint === null && /[A-Za-z]/.test(bridge.author ?? "")) {
+          emitEnglishAuthor(bridge.author ?? "", bridge.source);
         }
         const nliOptions = hint === null
           ? { retryWithAuthor: true, soundAuthor: edition.author ?? "" }
@@ -606,7 +667,10 @@ export async function resolveMatch(
           hint ?? bridge.author,
           nliOptions,
         );
-        if (found && guardRejects(edition, found)) found = null;
+        if (found && guardRejects(edition, found)) {
+          sawGuardRejection = true;
+          found = null;
+        }
         if (
           found && weakWikidata && isPrefixOnlyMatch(bridge.title, found.title)
         ) {
@@ -623,13 +687,31 @@ export async function resolveMatch(
   if (!match && !box) {
     match = await tryMatch(
       () =>
-        api.findHardcoverBook(titleForMatch, edition.author ?? "", {
+        api.findHardcoverBook(titleForMatch, edition.author ?? "", withTrace({
           requireAuthor: true,
-        }),
+        })),
       failures,
     );
-    if (match && guardRejects(edition, match)) match = null;
+    if (match && guardRejects(edition, match)) {
+      sawGuardRejection = true;
+      match = null;
+    }
     if (match) status = "fuzzy";
+  }
+
+  if (!match) {
+    const stop: ResolveTraceStop = sawGuardRejection
+      ? "guard_rejected"
+      : !sawOriginal
+      ? "no_original"
+      : !sawEnglishAuthor
+      ? "no_english_author"
+      : queryResults === 0
+      ? "no_hardcover_result"
+      : (bestQueryScore ?? 0) < 0.5
+      ? "title_below_threshold"
+      : "author_mismatch";
+    api.trace?.({ type: "stop", stop });
   }
 
   return {

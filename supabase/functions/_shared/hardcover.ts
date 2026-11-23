@@ -53,6 +53,14 @@ export type FindHardcoverBookOptions = {
   retryWithAuthor?: boolean;
   soundAuthor?: string;
   boxTitle?: boolean;
+  trace?: (query: HardcoverQueryTrace) => void;
+};
+
+export type HardcoverQueryTrace = {
+  query: string;
+  results: number;
+  best_title: string | null;
+  best_score: number | null;
 };
 
 /** Lowercase, ignore dots, and join each run of single-letter words (`C. J.` -> `cj`). */
@@ -97,7 +105,10 @@ function rankHardcoverBooks(
   soundAuthor: string,
   titleDiceFor: (book: HardcoverBook) => number,
   requireAuthor: boolean,
-): HardcoverBook | null {
+): {
+  match: HardcoverBook | null;
+  best: { book: HardcoverBook; titleDice: number } | null;
+} {
   const ranked = books.map((book) => {
     const titleDice = titleDiceFor(book);
     let score = titleDice * 3;
@@ -107,16 +118,22 @@ function rankHardcoverBooks(
     return { book, score, titleDice, boost };
   }).sort((a, b) => b.score - a.score || a.book.id - b.book.id);
   const top = ranked[0];
-  if (!top || top.titleDice < 0.5) return null;
-  if (requireAuthor && top.boost === 0) return null;
+  if (!top || top.titleDice < 0.5) {
+    return { match: null, best: top ?? null };
+  }
+  if (requireAuthor && top.boost === 0) {
+    return { match: null, best: top };
+  }
   if (top.boost === 0) {
     const topAuthor = firstContributorNormalized(top.book);
     for (const entry of ranked.slice(1)) {
       if (entry.titleDice !== top.titleDice) continue;
-      if (firstContributorNormalized(entry.book) !== topAuthor) return null;
+      if (firstContributorNormalized(entry.book) !== topAuthor) {
+        return { match: null, best: top };
+      }
     }
   }
-  return top.book;
+  return { match: top.book, best: top };
 }
 
 const BOX_WORDS = /\b(?:Trilogy|Collection|Box\s+Set|Boxed\s+Set|Omnibus)\b/gi;
@@ -161,18 +178,24 @@ function dropUnwanted(
 
 async function searchHardcoverDetails(
   query: string,
-): Promise<{ books: HardcoverBook[]; alternatives: Map<number, string[]> }> {
+): Promise<{
+  books: HardcoverBook[];
+  alternatives: Map<number, string[]>;
+  resultCount: number;
+}> {
   const safe = query.replace(/[\\"]/g, " ").trim();
   const search = await graphql<{
     search?: { ids?: Array<string | number>; results?: unknown };
   }>(
     `query { search(query: "${safe}", query_type: "Book", per_page: 8) { ids results } }`,
   );
+  const resultCount = search.search?.ids?.length ?? 0;
   const ids = (search.search?.ids ?? []).map(Number).filter(Number.isFinite);
   const fromDocs = booksFromDocuments(ids, search.search?.results);
   return {
     books: fromDocs ?? (ids.length ? await hardcoverBooks(ids) : []),
     alternatives: alternativeTitlesById(search.search?.results),
+    resultCount,
   };
 }
 
@@ -227,11 +250,35 @@ export async function findHardcoverBook(
   const boxTitle = options?.boxTitle ?? false;
   const queryTitle = boxTitle ? stripBoxWords(originalTitle) : originalTitle;
 
-  const rank = (
-    found: { books: HardcoverBook[]; alternatives: Map<number, string[]> },
+  const searchAndRank = async (
+    query: string,
+    found: {
+      books: HardcoverBook[];
+      alternatives: Map<number, string[]>;
+      resultCount: number;
+    },
     requireAuthor: boolean,
-  ) =>
-    rankHardcoverBooks(
+  ) => {
+    const titleDiceFor = (book: HardcoverBook) => {
+      const prep = boxTitle ? stripBoxWords : (t: string) => t;
+      const beforeColon = book.title.split(":", 1)[0].trim();
+      let best = Math.max(
+        similarity(queryTitle, prep(book.title)),
+        similarity(queryTitle, prep(beforeColon)),
+      );
+      for (const alt of found.alternatives.get(Number(book.id)) ?? []) {
+        best = Math.max(best, similarity(queryTitle, prep(alt)));
+      }
+      return best;
+    };
+    const traceRanked = rankHardcoverBooks(
+      found.books,
+      authorHint,
+      soundAuthor,
+      titleDiceFor,
+      requireAuthor || boxTitle,
+    );
+    const ranked = rankHardcoverBooks(
       dropUnwanted(
         boxTitle ? found.books.filter((book) => hasBoxWord(book.title)) : found.books,
         originalTitle,
@@ -239,29 +286,32 @@ export async function findHardcoverBook(
       ),
       authorHint,
       soundAuthor,
-      (book) => {
-        const prep = boxTitle ? stripBoxWords : (t: string) => t;
-        const beforeColon = book.title.split(":", 1)[0].trim();
-        let best = Math.max(
-          similarity(queryTitle, prep(book.title)),
-          similarity(queryTitle, prep(beforeColon)),
-        );
-        for (const alt of found.alternatives.get(Number(book.id)) ?? []) {
-          best = Math.max(best, similarity(queryTitle, prep(alt)));
-        }
-        return best;
-      },
+      titleDiceFor,
       requireAuthor || boxTitle,
     );
+    options?.trace?.({
+      query,
+      results: found.resultCount,
+      best_title: traceRanked.best?.book.title ?? null,
+      best_score: traceRanked.best?.titleDice ?? null,
+    });
+    return ranked.match;
+  };
 
-  const firstMatch = rank(
+  const firstMatch = await searchAndRank(
+    originalTitle,
     await searchHardcoverDetails(originalTitle),
     options?.requireAuthor ?? false,
   );
   if (firstMatch) return firstMatch;
   if (!options?.retryWithAuthor || !/[A-Za-z]/.test(authorHint)) return null;
 
-  return rank(await searchHardcoverDetails(`${originalTitle} ${authorHint}`), true);
+  const retryQuery = `${originalTitle} ${authorHint}`;
+  return await searchAndRank(
+    retryQuery,
+    await searchHardcoverDetails(retryQuery),
+    true,
+  );
 }
 
 /** Map numeric book id to `alternative_titles` from a search `results` payload. */
