@@ -1696,3 +1696,8 @@ sprints:
         depends_on:
         - S45-T3
         - S45-T4
+      S45-T3b:
+        file: tasks/sprint-45-explain-hebrew/S45-T3b.md
+        stage: 4
+        depends_on:
+        - S45-T3
