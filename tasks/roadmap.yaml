@@ -1701,3 +1701,37 @@ sprints:
         stage: 4
         depends_on:
         - S45-T3
+  S46-hebrew-gaps:
+    name: studies (guard, Hebrew dictionary), provider throttle, author_books source, Hebrew rules
+    tasks:
+      S46-T1:
+        file: tasks/sprint-46-hebrew-gaps/01-studies.md
+        stage: 1
+        depends_on: []
+      S46-T2:
+        file: tasks/sprint-46-hebrew-gaps/02-contract.md
+        stage: 2
+        depends_on:
+        - S46-T1
+      S46-T3:
+        file: tasks/sprint-46-hebrew-gaps/03-throttle.md
+        stage: 3
+        depends_on:
+        - S46-T2
+      S46-T4:
+        file: tasks/sprint-46-hebrew-gaps/04-author-books.md
+        stage: 4
+        depends_on:
+        - S46-T3
+      S46-T5:
+        file: tasks/sprint-46-hebrew-gaps/05-hebrew-rules.md
+        stage: 5
+        depends_on:
+        - S46-T4
+      S46-T6:
+        file: tasks/sprint-46-hebrew-gaps/06-docs.md
+        stage: 6
+        depends_on:
+        - S46-T3
+        - S46-T4
+        - S46-T5
