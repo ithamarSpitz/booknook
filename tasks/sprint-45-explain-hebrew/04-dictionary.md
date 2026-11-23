@@ -1,11 +1,12 @@
 ---
 id: S45-T4
-stage: 4
+stage: 5
 model_class: worker
 timeout_minutes: 60
 review: true
 depends_on:
   - S45-T3
+  - S45-T3b
 allowed_paths:
   - scripts/rematch-cached.ts
   - tests/functions/rematch-hebrew.test.ts

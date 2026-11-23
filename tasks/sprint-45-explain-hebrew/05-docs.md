@@ -1,6 +1,6 @@
 ---
 id: S45-T5
-stage: 5
+stage: 6
 model_class: worker
 timeout_minutes: 15
 review: true
