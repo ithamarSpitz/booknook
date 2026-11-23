@@ -1690,7 +1690,7 @@ sprints:
         stage: 5
         depends_on:
         - S45-T3
-            S45-T5:
+      S45-T5:
         file: tasks/sprint-45-explain-hebrew/05-docs.md
         stage: 6
         depends_on:
