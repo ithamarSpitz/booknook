@@ -56,6 +56,10 @@ import {
   pickByDictionary,
   wordForms,
 } from "./lib/dictionary.ts";
+import {
+  throttledHardcoverFetch,
+  throttledWikimediaFetch,
+} from "./lib/provider-throttle.ts";
 import { nliEnglishMismatch } from "./lib/nli-english-mismatch.ts";
 import { serviceCatalogDb } from "./recheck-links.ts";
 import {
@@ -1358,6 +1362,11 @@ export async function main(
 }
 
 if (import.meta.main) {
+  // hardcover.ts and the Wikimedia helpers call global fetch; throttle it here
+  // only, so edge functions keep their speed.
+  globalThis.fetch = throttledWikimediaFetch(
+    throttledHardcoverFetch(globalThis.fetch),
+  );
   try {
     Deno.exit(await main());
   } catch (error) {
