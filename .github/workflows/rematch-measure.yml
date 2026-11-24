@@ -1,0 +1,153 @@
+# Long read-only rematch + measurement runs on GitHub runners. Never applies changes.
+# Secrets: TORIMITOR_DB_PASSWORD, HARDCOVER_API_KEY, NLI_API_KEY.
+# Jobs run strictly one after another to avoid Hardcover 429s.
+name: Rematch measure
+
+on:
+  workflow_dispatch:
+    inputs:
+      english_shards:
+        description: Number of English shards
+        type: number
+        default: 4
+      sample:
+        description: Measure sample size
+        type: number
+        default: 400
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    outputs:
+      shards: ${{ steps.m.outputs.shards }}
+    steps:
+      - id: m
+        env:
+          N: ${{ inputs.english_shards }}
+        run: |
+          n=$(( ${N%.*} ))
+          [ "$n" -ge 1 ] || n=1
+          echo "shards=$(seq 0 $((n-1)) | paste -sd, | sed 's/^/[/;s/$/]/')" >> "$GITHUB_OUTPUT"
+
+  hebrew:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Write env file
+        env:
+          DB: ${{ secrets.TORIMITOR_DB_PASSWORD }}
+          HC: ${{ secrets.HARDCOVER_API_KEY }}
+          NLI: ${{ secrets.NLI_API_KEY }}
+        run: |
+          printf 'TORIMITOR_DB_PASSWORD=%s\nHARDCOVER_API_KEY=%s\nNLI_API_KEY=%s\n' "$DB" "$HC" "$NLI" > "$RUNNER_TEMP/booknook.env"
+          echo "BOOKNOOK_ENV_FILE=$RUNNER_TEMP/booknook.env" >> "$GITHUB_ENV"
+      - name: Rematch Hebrew
+        run: |
+          set +e
+          deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/rematch-cached.ts --hebrew --explain --min-hardcover 1500 > hebrew.jsonl
+          code=$?
+          [ "$code" -eq 4 ] && code=0
+          exit "$code"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hebrew
+          path: hebrew.jsonl
+          retention-days: 14
+
+  english:
+    needs: [plan, hebrew]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Write env file
+        env:
+          DB: ${{ secrets.TORIMITOR_DB_PASSWORD }}
+          HC: ${{ secrets.HARDCOVER_API_KEY }}
+          NLI: ${{ secrets.NLI_API_KEY }}
+        run: |
+          printf 'TORIMITOR_DB_PASSWORD=%s\nHARDCOVER_API_KEY=%s\nNLI_API_KEY=%s\n' "$DB" "$HC" "$NLI" > "$RUNNER_TEMP/booknook.env"
+          echo "BOOKNOOK_ENV_FILE=$RUNNER_TEMP/booknook.env" >> "$GITHUB_ENV"
+      - name: Count works without a linked Hebrew edition
+        id: count
+        env:
+          SHARDS: ${{ inputs.english_shards }}
+        run: |
+          total=$(deno eval --allow-all '
+            const { openProdDb } = await import("./scripts/lib/prod-db.ts");
+            const sql = await openProdDb();
+            const rows = await sql`
+              select count(*)::int as n from public.works as w
+              where not exists (
+                select 1 from public.editions as e
+                where e.work_id = w.id and e.simania_id > 0
+              )`;
+            await sql.end();
+            console.log(rows[0].n);
+          ')
+          shards=$(( ${SHARDS%.*} ))
+          [ "$shards" -ge 1 ] || shards=1
+          size=$(( (total + shards - 1) / shards ))
+          [ "$size" -ge 1 ] || size=1
+          echo "size=$size" >> "$GITHUB_OUTPUT"
+          echo "offset=$(( ${{ matrix.shard }} * size ))" >> "$GITHUB_OUTPUT"
+      - name: Rematch English shard
+        run: |
+          set +e
+          deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/rematch-cached.ts --offset "${{ steps.count.outputs.offset }}" --limit "${{ steps.count.outputs.size }}" --min-hardcover 1500 > "english-${{ matrix.shard }}.jsonl"
+          code=$?
+          [ "$code" -eq 4 ] && code=0
+          exit "$code"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: english-${{ matrix.shard }}
+          path: english-${{ matrix.shard }}.jsonl
+          retention-days: 14
+
+  measure:
+    needs: english
+    if: ${{ !cancelled() && needs.english.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Write env file
+        env:
+          DB: ${{ secrets.TORIMITOR_DB_PASSWORD }}
+          HC: ${{ secrets.HARDCOVER_API_KEY }}
+          NLI: ${{ secrets.NLI_API_KEY }}
+        run: |
+          printf 'TORIMITOR_DB_PASSWORD=%s\nHARDCOVER_API_KEY=%s\nNLI_API_KEY=%s\n' "$DB" "$HC" "$NLI" > "$RUNNER_TEMP/booknook.env"
+          echo "BOOKNOOK_ENV_FILE=$RUNNER_TEMP/booknook.env" >> "$GITHUB_ENV"
+      - name: Measure links
+        run: |
+          deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/measure-links.ts --all --sample "${{ inputs.sample }}" --hebrew > measure.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: measure
+          path: measure.json
+          retention-days: 14

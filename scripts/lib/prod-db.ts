@@ -38,7 +38,7 @@ export function readEnvFile(path: string): Record<string, string> {
   return values;
 }
 
-export function loadOperatorEnv(): { dbPassword: string } {
+export function loadOperatorEnv(): { dbPassword: string; dbHost?: string } {
   const envFile = Deno.env.get("BOOKNOOK_ENV_FILE")?.trim();
   if (!envFile) {
     throw new Error("BOOKNOOK_ENV_FILE is missing.");
@@ -64,15 +64,20 @@ export function loadOperatorEnv(): { dbPassword: string } {
     Deno.env.set("HARDCOVER_API_KEY", hardcoverApiKey);
   }
 
-  return { dbPassword };
+  const dbHost = values.TORIMITOR_DB_HOST?.trim();
+  return dbHost ? { dbPassword, dbHost } : { dbPassword };
+}
+
+export function prodDbConfig(dbHost?: string) {
+  return { ...PROD_DB, host: dbHost || PROD_DB.host };
 }
 
 export async function openProdDb(
   { readOnly = true }: { readOnly?: boolean } = {},
 ): Promise<Sql> {
-  const { dbPassword } = loadOperatorEnv();
+  const { dbPassword, dbHost } = loadOperatorEnv();
   const sql = postgres({
-    ...PROD_DB,
+    ...prodDbConfig(dbHost),
     password: dbPassword,
     ssl: "require",
     max: 1,
