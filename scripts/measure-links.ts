@@ -43,6 +43,8 @@ export interface MeasureProviders {
 export interface WorkDecision {
   missed: boolean;
   failed: boolean;
+  /** Only set when asked for with `withBook`. */
+  book?: { simania_id: number; title: string };
 }
 
 export interface WikidataWorkEntity {
@@ -340,6 +342,7 @@ export async function decideMissedTranslation(
   work: Pick<InUseWork, "original_title" | "original_authors">,
   linkedSimaniaIds: ReadonlySet<number>,
   providers: MeasureProviders,
+  options: { withBook?: boolean } = {},
 ): Promise<WorkDecision> {
   try {
     const englishAuthor = work.original_authors?.[0]?.trim() ?? "";
@@ -363,7 +366,7 @@ export async function decideMissedTranslation(
       if (page.length < 50) break;
     }
 
-    for (const title of books.values()) {
+    for (const [bookId, title] of books) {
       const [nli, wikidata] = await Promise.all([
         providers.nliOriginal(title, hebrewAuthor),
         providers.wikidataOriginal(title),
@@ -374,7 +377,15 @@ export async function decideMissedTranslation(
           similarity(work.original_title, original),
           similarity(stripTitle(work.original_title), stripTitle(original)),
         );
-        if (score >= 0.6) return { missed: true, failed: false };
+        if (score >= 0.6) {
+          return options.withBook
+            ? {
+              missed: true,
+              failed: false,
+              book: { simania_id: bookId, title },
+            }
+            : { missed: true, failed: false };
+        }
       }
     }
     return { missed: false, failed: false };
