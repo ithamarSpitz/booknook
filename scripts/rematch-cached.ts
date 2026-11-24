@@ -52,9 +52,7 @@ import {
   type RematchWork,
 } from "./lib/rematch.ts";
 import {
-  dictionaryVerdict,
   pickByDictionary,
-  wordForms,
 } from "./lib/dictionary.ts";
 import {
   throttledHardcoverFetch,
@@ -446,35 +444,6 @@ async function proposalHasEnglishMismatch(
   }
 }
 
-function dictionaryGlossHead(value: string): string {
-  const words = value
-    .replace(/\([^)]*\)/g, " ")
-    .split(/(?:;|,|\bor\b)/i, 1)[0]
-    .match(/[a-z]+(?:['-][a-z]+)*/gi) ?? [];
-  while (/^(?:a|an|the|to)$/i.test(words[0] ?? "")) words.shift();
-  return words.slice(0, 2).join(" ");
-}
-
-async function dictionaryEnglishTitle(
-  title: string,
-  glosses: RunDeps["wiktionaryGlosses"],
-): Promise<string | null> {
-  const translated: string[] = [];
-  for (const word of title.match(/[\u0590-\u05ff']+/gu) ?? []) {
-    let head = "";
-    for (const form of wordForms(word)) {
-      const answers = await identifyProvider(
-        "wiktionary",
-        () => glosses(form),
-      );
-      head = answers.map(dictionaryGlossHead).find(Boolean) ?? "";
-      if (head) break;
-    }
-    if (head) translated.push(head);
-  }
-  return translated.join(" ").trim() || null;
-}
-
 async function runFromFile(
   deps: RunDeps,
   sql: Sql,
@@ -606,11 +575,6 @@ export async function main(
   overrides: Partial<RunDeps> = {},
 ): Promise<number> {
   const deps = { ...runDefaults, ...overrides };
-  // Resolver fakes must also fake both dictionary providers; never mix a fake
-  // resolver decision with live Wiktionary or Hardcover calls in unit tests.
-  const dictionaryFallbackAvailable = overrides.resolveMatch === undefined ||
-    (overrides.wiktionaryGlosses !== undefined &&
-      overrides.findHardcoverBook !== undefined);
   deps.hebrewAuthorBySound = overrides.hebrewAuthorBySound ??
     ((englishName) => hebrewAuthorBySound(englishName, deps.searchBooks));
   const options = parseArgs(args);
@@ -711,93 +675,6 @@ export async function main(
           } else {
             let found = result.found;
             let via = "hebrew";
-            if (!found && dictionaryFallbackAvailable) {
-              const dictionaryTitle = await dictionaryEnglishTitle(
-                edition.title,
-                deps.wiktionaryGlosses,
-              );
-              if (dictionaryTitle) {
-                if (explain) {
-                  explain.original = {
-                    title: dictionaryTitle,
-                    source: "dictionary",
-                  };
-                  explain.stop = null;
-                }
-                const queryStart = explain?.hardcover_queries.length ?? 0;
-                const knownAuthor = await store.find(
-                  "he",
-                  nameKey(edition.author ?? ""),
-                );
-                const englishAuthor = knownAuthor?.names.find((name) =>
-                  name.lang === "en"
-                )?.name ?? "";
-                const book = await identifyProvider(
-                  "hardcover",
-                  () =>
-                    deps.findHardcoverBook(
-                      dictionaryTitle,
-                      englishAuthor,
-                      {
-                        requireAuthor: true,
-                        retryWithAuthor: true,
-                        soundAuthor: edition.author ?? "",
-                        ...(explain
-                          ? {
-                            trace: (query) =>
-                              collectExplain(explain, {
-                                type: "hardcover_query",
-                                ...query,
-                              }),
-                          }
-                          : {}),
-                      },
-                    ),
-                );
-                if (!book && explain) {
-                  const queries = explain.hardcover_queries.slice(queryStart);
-                  const results = queries.reduce(
-                    (sum, query) => sum + query.results,
-                    0,
-                  );
-                  const bestScore = queries.reduce<number | null>(
-                    (best, query) =>
-                      query.best_score !== null &&
-                        (best === null || query.best_score > best)
-                        ? query.best_score
-                        : best,
-                    null,
-                  );
-                  explain.stop = results === 0
-                    ? "no_hardcover_result"
-                    : (bestScore ?? 0) < 0.5
-                    ? "title_below_threshold"
-                    : "author_mismatch";
-                }
-                if (book) {
-                  const verdict = await identifyProvider(
-                    "wiktionary",
-                    () =>
-                      dictionaryVerdict(
-                        edition.title,
-                        book.title,
-                        deps.wiktionaryGlosses,
-                      ),
-                  );
-                  if (
-                    verdict.english >= 0.67 && verdict.hebrew >= 0.67 &&
-                    verdict.contradicted === 0
-                  ) {
-                    found = { book, status: "fuzzy" };
-                    via = "hebrew_dictionary";
-                  } else if (explain) {
-                    explain.stop = "guard_rejected";
-                  }
-                }
-              } else if (explain) {
-                explain.stop = "no_original";
-              }
-            }
             if (!found) {
               skip(edition, "no_candidate", [], explain);
             } else {
