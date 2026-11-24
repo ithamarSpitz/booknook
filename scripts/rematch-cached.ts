@@ -61,6 +61,7 @@ import {
   throttledWikimediaFetch,
 } from "./lib/provider-throttle.ts";
 import { nliEnglishMismatch } from "./lib/nli-english-mismatch.ts";
+import { decideMissedTranslation } from "./measure-links.ts";
 import { serviceCatalogDb } from "./recheck-links.ts";
 import {
   applyRepair,
@@ -382,7 +383,7 @@ type Proposal = {
   work: RematchWork;
   edition: EditionRow;
   existed: boolean;
-  via: "forward" | "reverse" | "dictionary";
+  via: "forward" | "reverse" | "dictionary" | "author_books";
   status: RematchStatus;
   book: HardcoverBook;
 };
@@ -986,6 +987,7 @@ export async function main(
       return cached;
     };
 
+    const hebrewNamesMemo = new Map<string, Promise<string[]>>();
     const rematchDeps: RematchDeps = {
       hebrewHint: async (work) => {
         try {
@@ -1014,7 +1016,9 @@ export async function main(
       hebrewNames: (work) => {
         const name = firstAuthor(work);
         if (!name) return Promise.resolve([]);
-        return (async () => {
+        const memo = hebrewNamesMemo.get(name);
+        if (memo) return memo;
+        const result = (async () => {
           let found: Awaited<ReturnType<AuthorStore["find"]>>;
           try {
             found = await store.find("en", nameKey(name));
@@ -1044,6 +1048,9 @@ export async function main(
             throw error;
           }
         })();
+        hebrewNamesMemo.set(name, result);
+        result.catch(() => hebrewNamesMemo.delete(name));
+        return result;
       },
       searchBooks: async (query, limit, offset) => {
         try {
@@ -1233,6 +1240,77 @@ export async function main(
         }
       }
 
+      if (!proposal && !anyFailed && !linkedElsewhere && authorBooks.length > 0) {
+        const decision = await decideMissedTranslation(
+          {
+            original_title: work.original_title,
+            original_authors: work.original_authors ?? [],
+          },
+          linkedSimaniaIds,
+          {
+            hebrewAuthor: async (name) =>
+              (await rematchDeps.hebrewNames({
+                ...work,
+                original_authors: [name],
+              }))[0] ?? null,
+            searchBooks: rematchDeps.searchBooks,
+            nliOriginal: async (title, name) => {
+              try {
+                return await deps.nliOriginal(title, name);
+              } catch (error) {
+                rememberFailure("nli", error);
+                throw error;
+              }
+            },
+            wikidataOriginal: async (title) => {
+              try {
+                const found = (await deps.wikidataOriginals([title])).get(
+                  title,
+                );
+                return found?.[0] ? { title: found[0] } : null;
+              } catch (error) {
+                rememberFailure("wikidata", error);
+                throw error;
+              }
+            },
+          },
+          { withBook: true },
+        );
+        if (decision.failed) anyFailed = true;
+        if (decision.book) {
+          const loaded = await candidateEdition(decision.book.simania_id);
+          const knownNames = loaded
+            ? await agreementNames(work.original_authors ?? [])
+            : null;
+          if (loaded && knownNames) {
+            if (
+              !authorAgreesWithWork(
+                loaded.edition.author ?? "",
+                work.original_authors ?? [],
+                knownNames,
+              )
+            ) {
+              authorMismatch = true;
+            } else {
+              proposal = {
+                work,
+                edition: loaded.edition,
+                existed: loaded.existed,
+                via: "author_books",
+                status: "nli",
+                book: {
+                  id: work.hardcover_id,
+                  title: work.original_title,
+                  cached_contributors: (work.original_authors ?? []).map((
+                    name,
+                  ) => ({ author: { name } })),
+                },
+              };
+            }
+          }
+        }
+      }
+
       if (
         proposal &&
         await proposalHasEnglishMismatch(
@@ -1282,7 +1360,8 @@ export async function main(
             let book = proposal.book;
             let detailsOk = true;
             if (
-              proposal.via === "dictionary" || deps.isSearchDocumentBook(book)
+              proposal.via === "dictionary" || proposal.via === "author_books" ||
+              deps.isSearchDocumentBook(book)
             ) {
               let detailed: HardcoverBook | undefined;
               try {
