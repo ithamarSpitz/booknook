@@ -4,6 +4,7 @@ import {
   englishOnlyRecommendations,
   linkedEditionsWithWorks,
   loadOperatorEnv,
+  prodDbConfig,
   readEnvFile,
   shelvedUnlinkedEditions,
 } from "../../scripts/lib/prod-db.ts";
@@ -182,4 +183,27 @@ Deno.test("linked editions query returns the current work id", async () => {
   const statements: string[] = [];
   await linkedEditionsWithWorks(recordingSql(statements));
   assertMatch(statements[0], /w\.id as work_id/i);
+});
+
+Deno.test("TORIMITOR_DB_HOST overrides the default host without connecting", async () => {
+  const previous = Deno.env.get("HARDCOVER_API_KEY");
+  Deno.env.set("HARDCOVER_API_KEY", "existing-secret");
+  const previousFile = Deno.env.get("BOOKNOOK_ENV_FILE");
+  try {
+    await withTempEnvFile(
+      "TORIMITOR_DB_PASSWORD=db-secret\nTORIMITOR_DB_HOST=pool.example.test\n",
+      import.meta.filename!,
+      (path) => {
+        Deno.env.set("BOOKNOOK_ENV_FILE", path);
+        if (path === import.meta.filename) return;
+        const env = loadOperatorEnv();
+        assertEquals(env, { dbPassword: "db-secret", dbHost: "pool.example.test" });
+        assertEquals(prodDbConfig(env.dbHost).host, "pool.example.test");
+      },
+    );
+  } finally {
+    restoreEnv("HARDCOVER_API_KEY", previous);
+    restoreEnv("BOOKNOOK_ENV_FILE", previousFile);
+  }
+  assertEquals(prodDbConfig().host, "aws-1-eu-central-1.pooler.supabase.com");
 });
