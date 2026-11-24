@@ -1735,3 +1735,15 @@ sprints:
         - S46-T3
         - S46-T4
         - S46-T5
+  S47-ops-workflow:
+    name: rematch-measure.yml - read-only dry runs and measurement on GitHub runners
+    tasks:
+      S47-T1:
+        file: tasks/sprint-47-ops-workflow/01-workflow.md
+        stage: 1
+        depends_on: []
+      S47-T2:
+        file: tasks/sprint-47-ops-workflow/02-docs.md
+        stage: 2
+        depends_on:
+        - S47-T1
