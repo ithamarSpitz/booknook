@@ -14,6 +14,7 @@ import { sameAuthor } from "../supabase/functions/_shared/author-sound.ts";
 import { similarity } from "../supabase/functions/_shared/utils.ts";
 import { authorAgreesWithWork } from "./lib/rematch.ts";
 import { openProdDb } from "./lib/prod-db.ts";
+import { throttledWikimediaFetch } from "./lib/provider-throttle.ts";
 
 export interface InUseWork {
   id: string;
@@ -493,38 +494,7 @@ async function countLinkedHebrewEditions(sql: Sql): Promise<number> {
   return Number(row?.count ?? 0);
 }
 
-function isWikimedia(input: RequestInfo | URL): boolean {
-  const url = String(input instanceof Request ? input.url : input);
-  return /(?:wikidata|wiktionary|wikipedia)\.org/.test(url);
-}
-
-/** Serialize Wikimedia requests, space starts by 300 ms, and retry HTTP 429. */
-export function throttledWikimediaFetch(
-  fetchImpl: typeof fetch,
-  sleep = (ms: number) =>
-    new Promise<void>((resolve) => setTimeout(resolve, ms)),
-): typeof fetch {
-  let chain: Promise<unknown> = Promise.resolve();
-  let lastStart = 0;
-  return ((input: RequestInfo | URL, init?: RequestInit) => {
-    if (!isWikimedia(input)) return fetchImpl(input, init);
-    const run = async (): Promise<Response> => {
-      for (let attempt = 0;; attempt++) {
-        const wait = Math.max(0, 300 - (Date.now() - lastStart));
-        if (wait > 0) await sleep(wait);
-        lastStart = Date.now();
-        const response = await fetchImpl(input, init);
-        if (response.status !== 429 || attempt >= 6) return response;
-        const retryAfter = Number(response.headers.get("retry-after"));
-        await response.body?.cancel();
-        await sleep((retryAfter > 0 ? retryAfter : 15) * 1000);
-      }
-    };
-    const result = chain.then(run, run);
-    chain = result.catch(() => undefined);
-    return result;
-  }) as typeof fetch;
-}
+export { throttledWikimediaFetch };
 
 export interface RunDeps {
   openProdDb: typeof openProdDb;
