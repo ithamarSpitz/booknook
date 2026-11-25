@@ -54,10 +54,7 @@ import {
   type RematchWork,
 } from "./lib/rematch.ts";
 import { pickByDictionary } from "./lib/dictionary.ts";
-import {
-  throttledHardcoverFetch,
-  throttledWikimediaFetch,
-} from "./lib/provider-throttle.ts";
+import { throttledProviderFetch } from "./lib/provider-throttle.ts";
 import { cachedFetch, type CacheStats } from "./lib/provider-cache.ts";
 import { nliEnglishMismatch } from "./lib/nli-english-mismatch.ts";
 import { decideMissedTranslation } from "./measure-links.ts";
@@ -69,9 +66,10 @@ import {
 } from "./repair-links.ts";
 
 const USAGE =
-  "Usage: rematch:cached [--apply] [--hebrew] [--explain] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--cache-dir <dir>] [--min-hardcover <n>] [--force-hardcover]";
+  "Usage: rematch:cached [--apply] [--hebrew] [--explain] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--cache-dir <dir>] [--min-hardcover <n>] [--force-hardcover] [--concurrency <1-4>]";
 
 const BUDGET_CHECK_EVERY = 50;
+const PROGRESS_EVERY = 25;
 
 function failureDetail(
   provider: FailureProvider,
@@ -102,6 +100,46 @@ async function identifyProvider<T>(
   } catch (error) {
     throw new ProviderCallError(provider, error);
   }
+}
+
+type MemoOutcome<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: unknown; failures: [FailureProvider, unknown][] };
+
+/** Share one in-flight computation per key; every caller records failures. */
+async function memoized<T>(
+  map: Map<string, Promise<MemoOutcome<T>>>,
+  key: string,
+  remember: (provider: FailureProvider, error: unknown) => void,
+  compute: (
+    note: (provider: FailureProvider, error: unknown) => void,
+  ) => Promise<T>,
+): Promise<T> {
+  let cached = map.get(key);
+  if (!cached) {
+    const entry = (async (): Promise<MemoOutcome<T>> => {
+      const failures: [FailureProvider, unknown][] = [];
+      try {
+        return {
+          ok: true,
+          value: await compute((provider, error) =>
+            failures.push([provider, error])
+          ),
+        };
+      } catch (error) {
+        return { ok: false, error, failures };
+      }
+    })();
+    cached = entry;
+    map.set(key, entry);
+    entry.then((outcome) => {
+      if (!outcome.ok && map.get(key) === entry) map.delete(key);
+    });
+  }
+  const outcome = await cached;
+  if (outcome.ok) return outcome.value;
+  for (const [provider, error] of outcome.failures) remember(provider, error);
+  throw outcome.error;
 }
 
 export type RematchStatus = "wikidata" | "nli" | "fuzzy" | "dictionary";
@@ -271,6 +309,7 @@ interface CliOptions {
   forceHardcover: boolean;
   from: string | null;
   cacheDir: string | null;
+  concurrency: number;
 }
 
 function parseArgs(args: string[]): CliOptions | null {
@@ -285,15 +324,22 @@ function parseArgs(args: string[]): CliOptions | null {
     forceHardcover: false,
     from: null,
     cacheDir: null,
+    concurrency: 1,
   };
   let usedOthers = false;
+  let usedConcurrency = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--apply") options.apply = true;
     else if (arg === "--hebrew") options.hebrew = true;
     else if (arg === "--explain") options.explain = true;
     else if (arg === "--force-hardcover") options.forceHardcover = true;
-    else if (arg === "--cache-dir") {
+    else if (arg === "--concurrency") {
+      const value = args[++i];
+      if (value === undefined || !/^[1-4]$/.test(value)) return null;
+      options.concurrency = Number(value);
+      usedConcurrency = true;
+    } else if (arg === "--cache-dir") {
       const value = args[++i];
       if (value === undefined || value === "") return null;
       options.cacheDir = value;
@@ -320,6 +366,10 @@ function parseArgs(args: string[]): CliOptions | null {
     } else return null;
   }
   if (options.from !== null && usedOthers) return null;
+  if (
+    usedConcurrency &&
+    (options.hebrew || options.from !== null || options.hardcoverId !== null)
+  ) return null;
   if (options.explain && !options.hebrew) return null;
   if (
     options.hebrew &&
@@ -775,10 +825,6 @@ async function mainInner(
     const works = await deps.loadWorks(sql, options);
     const linkedSimaniaIds = await deps.loadLinkedSimaniaIds(sql);
     const store = deps.authorStore(sql);
-    let currentFailures: ProviderFailure[] | null = null;
-    const rememberFailure = (provider: FailureProvider, error: unknown) => {
-      currentFailures?.push(failureDetail(provider, error));
-    };
     const soundStore: AuthorStore = options.apply ? store : {
       ...store,
       create: () => Promise.resolve(crypto.randomUUID()),
@@ -860,16 +906,20 @@ async function mainInner(
       }
     }
 
-    const originalsCache = new Map<string, Promise<string[]>>();
-    const originals = (title: string, name: string): Promise<string[]> => {
-      let cached = originalsCache.get(title);
-      if (!cached) {
-        cached = (async () => {
+    // Shared memos hold outcomes, so each work that uses an entry records the
+    // failure detail itself (a failed entry is dropped and retried later).
+    const originalsCache = new Map<string, Promise<MemoOutcome<string[]>>>();
+    const hebrewNamesMemo = new Map<string, Promise<MemoOutcome<string[]>>>();
+    const makeDeps = (
+      rememberFailure: (provider: FailureProvider, error: unknown) => void,
+    ): RematchDeps => {
+      const originals = (title: string, name: string): Promise<string[]> =>
+        memoized(originalsCache, title, rememberFailure, async (note) => {
           let wikidata: Map<string, string[]>;
           try {
             wikidata = await deps.wikidataOriginals([title]);
           } catch (error) {
-            rememberFailure("wikidata", error);
+            note("wikidata", error);
             throw error;
           }
           const found = new Set<string>(wikidata.get(title) ?? []);
@@ -877,93 +927,91 @@ async function mainInner(
           try {
             nli = await deps.nliOriginal(title, name);
           } catch (error) {
-            rememberFailure("nli", error);
+            note("nli", error);
             throw error;
           }
           if (nli?.title) found.add(nli.title);
           return [...found];
-        })();
-        originalsCache.set(title, cached);
-        cached.catch(() => originalsCache.delete(title));
-      }
-      return cached;
-    };
-
-    const hebrewNamesMemo = new Map<string, Promise<string[]>>();
-    const rematchDeps: RematchDeps = {
-      hebrewHint: async (work) => {
-        try {
-          return await deps.hebrewHint({
-            id: work.hardcover_id,
-            title: work.original_title,
-            cached_contributors: (work.original_authors ?? []).map((name) => ({
-              author: { name },
-            })),
-          });
-        } catch (error) {
-          if (error instanceof ProviderCallError) {
-            rememberFailure(error.provider, error.original);
-          }
-          throw error;
-        }
-      },
-      matchHebrewBook: async (title, author) => {
-        try {
-          return simaniaIdOf(await deps.matchHebrewBook(title, author)) ?? null;
-        } catch (error) {
-          rememberFailure("simania", error);
-          throw error;
-        }
-      },
-      hebrewNames: (work) => {
-        const name = firstAuthor(work);
-        if (!name) return Promise.resolve([]);
-        const memo = hebrewNamesMemo.get(name);
-        if (memo) return memo;
-        const result = (async () => {
-          let found: Awaited<ReturnType<AuthorStore["find"]>>;
+        });
+      return {
+        hebrewHint: async (work) => {
           try {
-            found = await store.find("en", nameKey(name));
+            return await deps.hebrewHint({
+              id: work.hardcover_id,
+              title: work.original_title,
+              cached_contributors: (work.original_authors ?? []).map((
+                name,
+              ) => ({
+                author: { name },
+              })),
+            });
           } catch (error) {
-            rememberFailure("db", error);
+            if (error instanceof ProviderCallError) {
+              rememberFailure(error.provider, error.original);
+            }
             throw error;
           }
-          const stored = (found?.names ?? [])
-            .filter((row) => row.lang === "he")
-            .sort((x, y) =>
-              Number(x.source === "wikidata") - Number(y.source === "wikidata")
-            )
-            .map((row) => row.name);
-          const knownNames = [
-            ...new Set([...stored, ...(wikidataNames.get(name) ?? [])]),
-          ];
-          if (knownNames.length > 0) return knownNames;
+        },
+        matchHebrewBook: async (title, author) => {
           try {
-            return await soundNames(
-              soundStore,
-              name,
-              (englishName) => deps.hebrewAuthorBySound(englishName),
-              deps.now,
-            );
+            return simaniaIdOf(await deps.matchHebrewBook(title, author)) ??
+              null;
           } catch (error) {
-            rememberFailure("sound", error);
+            rememberFailure("simania", error);
             throw error;
           }
-        })();
-        hebrewNamesMemo.set(name, result);
-        result.catch(() => hebrewNamesMemo.delete(name));
-        return result;
-      },
-      searchBooks: async (query, limit, offset) => {
-        try {
-          return await deps.searchBooks(query, limit, offset);
-        } catch (error) {
-          rememberFailure("simania", error);
-          throw error;
-        }
-      },
-      originals,
-      linkedSimaniaIds,
+        },
+        hebrewNames: (work) => {
+          const name = firstAuthor(work);
+          if (!name) return Promise.resolve([]);
+          return memoized(
+            hebrewNamesMemo,
+            name,
+            rememberFailure,
+            async (note) => {
+              let found: Awaited<ReturnType<AuthorStore["find"]>>;
+              try {
+                found = await store.find("en", nameKey(name));
+              } catch (error) {
+                note("db", error);
+                throw error;
+              }
+              const stored = (found?.names ?? [])
+                .filter((row) => row.lang === "he")
+                .sort((x, y) =>
+                  Number(x.source === "wikidata") -
+                  Number(y.source === "wikidata")
+                )
+                .map((row) => row.name);
+              const knownNames = [
+                ...new Set([...stored, ...(wikidataNames.get(name) ?? [])]),
+              ];
+              if (knownNames.length > 0) return knownNames;
+              try {
+                return await soundNames(
+                  soundStore,
+                  name,
+                  (englishName) => deps.hebrewAuthorBySound(englishName),
+                  deps.now,
+                );
+              } catch (error) {
+                note("sound", error);
+                throw error;
+              }
+            },
+          );
+        },
+        searchBooks: async (query, limit, offset) => {
+          try {
+            return await deps.searchBooks(query, limit, offset);
+          } catch (error) {
+            rememberFailure("simania", error);
+            throw error;
+          }
+        },
+        originals,
+        linkedSimaniaIds,
+      };
     };
     const db = serviceCatalogDb(sql);
 
@@ -976,16 +1024,18 @@ async function mainInner(
     let linked = 0;
     let failed = false;
 
-    // Deliberately sequential: one provider request at a time.
-    for (const work of works) {
-      processed++;
+    // Handles one work; every output line goes to `lines`, never to stdout.
+    const processWork = async (work: RematchWork, lines: string[]) => {
       const base = {
         hardcover_id: work.hardcover_id,
         title: work.original_title,
       };
       const failures: ProviderFailure[] = [];
-      currentFailures = failures;
-      try {
+      const rememberFailure = (provider: FailureProvider, error: unknown) => {
+        failures.push(failureDetail(provider, error));
+      };
+      const rematchDeps = makeDeps(rememberFailure);
+      {
         const { candidates, authorBooks, failed: searchFailed } =
           await findCandidates(
             work,
@@ -1224,7 +1274,7 @@ async function mainInner(
           )
         ) {
           skip("nli_english_mismatch");
-          deps.log(JSON.stringify({
+          lines.push(JSON.stringify({
             ...base,
             skipped: "nli_english_mismatch",
           }));
@@ -1240,7 +1290,7 @@ async function mainInner(
             ? "linked_elsewhere"
             : "no_candidate";
           skip(reason);
-          deps.log(JSON.stringify({
+          lines.push(JSON.stringify({
             ...base,
             skipped: reason,
             ...(reason === "provider_failure" ? { failures } : {}),
@@ -1248,7 +1298,7 @@ async function mainInner(
         }
         if (proposal) {
           proposals++;
-          deps.log(JSON.stringify({
+          lines.push(JSON.stringify({
             ...base,
             proposal: {
               simania_id: proposal.edition.simania_id,
@@ -1279,7 +1329,7 @@ async function mainInner(
               }
               if (!detailsOk) {
                 skip("details_failure");
-                deps.log(
+                lines.push(
                   JSON.stringify({
                     simania_id: id,
                     skipped: "details_failure",
@@ -1310,7 +1360,7 @@ async function mainInner(
               }
             } catch (error) {
               failed = true;
-              deps.log(JSON.stringify({
+              lines.push(JSON.stringify({
                 simania_id: id,
                 status: "failed",
                 error: error instanceof Error ? error.message : "Unknown error",
@@ -1318,25 +1368,74 @@ async function mainInner(
             }
           }
         }
+      }
+    };
 
-        if (processed % BUDGET_CHECK_EVERY === 0) {
+    // Up to `concurrency` works at once; lines print strictly in work order.
+    const started = Date.now();
+    const buffers: (string[] | null)[] = works.map(() => null);
+    let nextPrint = 0;
+    let nextWork = 0;
+    let done = 0;
+    let stop = false;
+    let stopInfo: { remaining: number } | null = null;
+    const flush = () => {
+      while (nextPrint < works.length && buffers[nextPrint]) {
+        for (const line of buffers[nextPrint]!) deps.log(line);
+        buffers[nextPrint++] = null;
+        // A started-but-unfinished gap stops the loop; later ones wait.
+      }
+    };
+    const worker = async () => {
+      while (!stop && nextWork < works.length) {
+        const index = nextWork++;
+        processed++;
+        const lines: string[] = [];
+        try {
+          await processWork(works[index], lines);
+        } finally {
+          buffers[index] = lines;
+          flush();
+        }
+        done++;
+        if (done % PROGRESS_EVERY === 0) {
+          console.error(JSON.stringify({
+            progress: {
+              done,
+              total: works.length,
+              elapsed_s: Math.round((Date.now() - started) / 1000),
+            },
+          }));
+        }
+        if ((index + 1) % BUDGET_CHECK_EVERY === 0) {
           const remaining = await deps.hardcoverDailyRemaining();
           if (
             remaining !== null && remaining < options.minHardcover &&
-            !options.forceHardcover
+            !options.forceHardcover && !stop
           ) {
-            deps.log(JSON.stringify({
-              stopped: "hardcover_budget",
-              remaining,
-              min: options.minHardcover,
-              works: processed,
-            }));
-            return 4;
+            stop = true;
+            stopInfo = { remaining };
           }
         }
-      } finally {
-        currentFailures = null;
       }
+    };
+    const results = await Promise.allSettled(
+      Array.from(
+        { length: Math.min(options.concurrency, works.length) },
+        worker,
+      ),
+    );
+    flush();
+    const rejected = results.find((r) => r.status === "rejected");
+    if (rejected) throw (rejected as PromiseRejectedResult).reason;
+    if (stopInfo !== null) {
+      deps.log(JSON.stringify({
+        stopped: "hardcover_budget",
+        remaining: (stopInfo as { remaining: number }).remaining,
+        min: options.minHardcover,
+        works: processed,
+      }));
+      return 4;
     }
 
     deps.log(JSON.stringify({
@@ -1354,9 +1453,7 @@ async function mainInner(
 if (import.meta.main) {
   // hardcover.ts and the Wikimedia helpers call global fetch; throttle it here
   // only, so edge functions keep their speed.
-  globalThis.fetch = throttledWikimediaFetch(
-    throttledHardcoverFetch(globalThis.fetch),
-  );
+  globalThis.fetch = throttledProviderFetch(globalThis.fetch);
   try {
     const policy = { timeoutMs: 25000, pauseMs: 1000 };
     setProviderRetry(policy);
