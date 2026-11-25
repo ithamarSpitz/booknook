@@ -70,6 +70,21 @@ export function checkRunHealth(text: string): HealthResult {
     return { healthy: true, counts };
   }
 
+  if (typeof last.unlinked_in_use === "number") {
+    const unlinked = last.unlinked_in_use;
+    const failed = num(last.failed);
+    if (failed * 2 > unlinked) {
+      return {
+        healthy: false,
+        reason: `measure: ${failed}/${unlinked} unlinked in-use works failed`,
+      };
+    }
+    return {
+      healthy: true,
+      counts: { unlinked_in_use: unlinked, failed },
+    };
+  }
+
   if (typeof last.works !== "number") {
     return { healthy: false, reason: "no works summary in last JSON line" };
   }

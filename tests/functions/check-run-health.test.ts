@@ -77,3 +77,23 @@ Deno.test("Hebrew file with 2/136 failures", () => {
   ));
   assertEquals(r.healthy, true);
 });
+
+const IN_USE = {
+  in_use_works: 488,
+  unlinked_in_use: 92,
+  missed: 3,
+  hebrew_label_unconfirmed: 3,
+  no_evidence: 71,
+  failed: 15,
+  missed_rate_low: 0.0061,
+  missed_rate_high: 0.043,
+};
+
+Deno.test("in-use measure format healthy", () => {
+  assertEquals(checkRunHealth(j(IN_USE)).healthy, true);
+});
+
+Deno.test("in-use measure format unhealthy when failed dominates", () => {
+  const r = checkRunHealth(j({ ...IN_USE, failed: 50 }));
+  assertEquals(r.healthy, false);
+});
