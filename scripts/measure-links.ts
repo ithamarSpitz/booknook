@@ -16,6 +16,7 @@ import { sameAuthor } from "../supabase/functions/_shared/author-sound.ts";
 import { similarity } from "../supabase/functions/_shared/utils.ts";
 import { authorAgreesWithWork } from "./lib/rematch.ts";
 import { openProdDb } from "./lib/prod-db.ts";
+import { cachedFetch, type CacheStats } from "./lib/provider-cache.ts";
 import { throttledWikimediaFetch } from "./lib/provider-throttle.ts";
 
 export interface InUseWork {
@@ -544,6 +545,7 @@ interface MeasureArgs {
   hebrew: boolean;
   all: boolean;
   sample: number | undefined;
+  cacheDir: string | undefined;
 }
 
 function parseArgs(args: string[]): MeasureArgs | null {
@@ -551,6 +553,7 @@ function parseArgs(args: string[]): MeasureArgs | null {
   let hebrew = false;
   let all = false;
   let sample: number | undefined;
+  let cacheDir: string | undefined;
   for (let index = 0; index < args.length; index++) {
     if (args[index] === "--hebrew" && !hebrew) {
       hebrew = true;
@@ -563,6 +566,13 @@ function parseArgs(args: string[]): MeasureArgs | null {
       const value = Number(args[++index]);
       if (!Number.isSafeInteger(value)) return null;
       wrong = value;
+      continue;
+    }
+    if (
+      args[index] === "--cache-dir" && cacheDir === undefined &&
+      (args[index + 1] ?? "") !== ""
+    ) {
+      cacheDir = args[++index];
       continue;
     }
     if (args[index] === "--all" && !all) {
@@ -581,7 +591,7 @@ function parseArgs(args: string[]): MeasureArgs | null {
     return null;
   }
   if (sample !== undefined && !all) return null;
-  return { wrong, hebrew, all, sample };
+  return { wrong, hebrew, all, sample, cacheDir };
 }
 
 export async function main(
@@ -596,12 +606,19 @@ export async function main(
   const deps = { ...runDefaults, ...suppliedOverrides };
   if (requested === null) {
     deps.error(
-      "Usage: measure-links.ts [--all [--sample <positive integer>]] [--hebrew] [--wrong <positive integer>]",
+      "Usage: measure-links.ts [--all [--sample <positive integer>]] [--hebrew] [--wrong <positive integer>] [--cache-dir <dir>]",
     );
     return 2;
   }
   const originalFetch = globalThis.fetch;
   globalThis.fetch = throttledWikimediaFetch(originalFetch);
+  const cacheStats: CacheStats = { hits: 0, misses: 0, stored: 0 };
+  if (requested.cacheDir) {
+    globalThis.fetch = cachedFetch(globalThis.fetch, {
+      dir: requested.cacheDir,
+      stats: cacheStats,
+    });
+  }
   let sql: Sql | null = null;
   try {
     sql = await deps.openProdDb({ readOnly: true });
@@ -734,6 +751,9 @@ export async function main(
   } finally {
     await sql?.end();
     globalThis.fetch = originalFetch;
+    if (requested.cacheDir) {
+      console.error(JSON.stringify({ cache: cacheStats }));
+    }
   }
 }
 

@@ -58,6 +58,7 @@ import {
   throttledHardcoverFetch,
   throttledWikimediaFetch,
 } from "./lib/provider-throttle.ts";
+import { cachedFetch, type CacheStats } from "./lib/provider-cache.ts";
 import { nliEnglishMismatch } from "./lib/nli-english-mismatch.ts";
 import { decideMissedTranslation } from "./measure-links.ts";
 import { serviceCatalogDb } from "./recheck-links.ts";
@@ -68,7 +69,7 @@ import {
 } from "./repair-links.ts";
 
 const USAGE =
-  "Usage: rematch:cached [--apply] [--hebrew] [--explain] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--min-hardcover <n>] [--force-hardcover]";
+  "Usage: rematch:cached [--apply] [--hebrew] [--explain] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--cache-dir <dir>] [--min-hardcover <n>] [--force-hardcover]";
 
 const BUDGET_CHECK_EVERY = 50;
 
@@ -269,6 +270,7 @@ interface CliOptions {
   minHardcover: number;
   forceHardcover: boolean;
   from: string | null;
+  cacheDir: string | null;
 }
 
 function parseArgs(args: string[]): CliOptions | null {
@@ -282,6 +284,7 @@ function parseArgs(args: string[]): CliOptions | null {
     minHardcover: 1500,
     forceHardcover: false,
     from: null,
+    cacheDir: null,
   };
   let usedOthers = false;
   for (let i = 0; i < args.length; i++) {
@@ -290,7 +293,11 @@ function parseArgs(args: string[]): CliOptions | null {
     else if (arg === "--hebrew") options.hebrew = true;
     else if (arg === "--explain") options.explain = true;
     else if (arg === "--force-hardcover") options.forceHardcover = true;
-    else if (arg === "--from") {
+    else if (arg === "--cache-dir") {
+      const value = args[++i];
+      if (value === undefined || value === "") return null;
+      options.cacheDir = value;
+    } else if (arg === "--from") {
       const value = args[++i];
       if (value === undefined || value === "") return null;
       options.from = value;
@@ -573,6 +580,24 @@ async function runFromFile(
 export async function main(
   args: string[] = Deno.args,
   overrides: Partial<RunDeps> = {},
+): Promise<number> {
+  const cacheIndex = args.indexOf("--cache-dir");
+  const cacheDir = cacheIndex >= 0 ? args[cacheIndex + 1] : undefined;
+  if (!cacheDir) return await mainInner(args, overrides);
+  const stats: CacheStats = { hits: 0, misses: 0, stored: 0 };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = cachedFetch(originalFetch, { dir: cacheDir, stats });
+  try {
+    return await mainInner(args, overrides);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error(JSON.stringify({ cache: stats }));
+  }
+}
+
+async function mainInner(
+  args: string[],
+  overrides: Partial<RunDeps>,
 ): Promise<number> {
   const deps = { ...runDefaults, ...overrides };
   deps.hebrewAuthorBySound = overrides.hebrewAuthorBySound ??
