@@ -97,7 +97,7 @@ Deno.test("NLI original equal to the English title is a missed translation", asy
       new Set(),
       providers({ nli: "Catching Fire" }),
     ),
-    { missed: true, failed: false },
+    { missed: true, failed: false, class: "missed" },
   );
 });
 
@@ -108,7 +108,7 @@ Deno.test("different candidate originals are not a missed translation", async ()
       new Set(),
       providers({ nli: "The Hunger Games", wikidata: "Mockingjay" }),
     ),
-    { missed: false, failed: false },
+    { missed: false, failed: false, class: "catalog_checked" },
   );
 });
 
@@ -117,7 +117,7 @@ Deno.test("provider failure is counted and is not a missed translation", async (
   failing.hebrewAuthor = () => Promise.reject(new Error("provider down"));
   assertEquals(
     await decideMissedTranslation(WORK, new Set(), failing),
-    { missed: false, failed: true },
+    { missed: false, failed: true, class: "failed" },
   );
 });
 
@@ -147,7 +147,7 @@ function evidenceProviders(
 Deno.test("unlinked work classification covers every class", async () => {
   assertEquals(
     await classifyUnlinkedWork(WORK, new Set(), evidenceProviders()),
-    { class: "no_evidence" },
+    { class: "no_hebrew_author" },
   );
   assertEquals(
     await classifyUnlinkedWork(
@@ -275,6 +275,7 @@ function measureHarness(works: InUseWork[]) {
       return Promise.resolve(works);
     },
     loadLinkedSimaniaIds: () => Promise.resolve(new Set()),
+    loadEditionWork: () => Promise.resolve(null),
     providers: {
       hebrewAuthor: (author) => Promise.resolve(`he-${author}`),
       searchBooks: (_query, _limit, offset) =>
@@ -332,6 +333,18 @@ Deno.test("--all switches population and --sample checks works 1, 4 and 7", asyn
     missed_rate_low: 0.3,
     missed_rate_high: 0.3,
     hebrew_label_titles: [],
+    catalog_checked: 7,
+    no_english_author: 0,
+    no_hebrew_author: 0,
+    no_author_books: 0,
+    catalog_truncated: 0,
+    unbridged_books: 0,
+    duplicate_work: 0,
+    linked_other_work: 0,
+    missed_rate_strict_high: 0.3,
+    duplicate_titles: [],
+    linked_other_titles: [],
+    rechecked: 0,
   });
 });
 
@@ -358,6 +371,18 @@ Deno.test("without --all the in-use population and legacy JSON stay unchanged", 
     missed_rate_low: 1,
     missed_rate_high: 1,
     hebrew_label_titles: [],
+    catalog_checked: 0,
+    no_english_author: 0,
+    no_hebrew_author: 0,
+    no_author_books: 0,
+    catalog_truncated: 0,
+    unbridged_books: 0,
+    duplicate_work: 0,
+    linked_other_work: 0,
+    missed_rate_strict_high: 1,
+    duplicate_titles: [],
+    linked_other_titles: [],
+    rechecked: 0,
   });
 });
 

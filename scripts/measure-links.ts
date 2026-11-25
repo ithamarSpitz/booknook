@@ -13,7 +13,7 @@ import {
   type SimaniaBookDetails,
 } from "../supabase/functions/_shared/simania.ts";
 import { sameAuthor } from "../supabase/functions/_shared/author-sound.ts";
-import { similarity } from "../supabase/functions/_shared/utils.ts";
+import { normalize, similarity } from "../supabase/functions/_shared/utils.ts";
 import { authorAgreesWithWork } from "./lib/rematch.ts";
 import { openProdDb } from "./lib/prod-db.ts";
 import { cachedFetch, type CacheStats } from "./lib/provider-cache.ts";
@@ -43,9 +43,20 @@ export interface MeasureProviders {
   ) => Promise<{ title: string } | null>;
 }
 
+export type EvidenceClass =
+  | "missed"
+  | "failed"
+  | "no_english_author"
+  | "no_hebrew_author"
+  | "no_author_books"
+  | "catalog_truncated"
+  | "unbridged_books"
+  | "catalog_checked";
+
 export interface WorkDecision {
   missed: boolean;
   failed: boolean;
+  class: EvidenceClass;
   /** Only set when asked for with `withBook`. */
   book?: { simania_id: number; title: string };
 }
@@ -56,10 +67,16 @@ export interface WikidataWorkEntity {
 }
 
 export type UnlinkedWorkClass =
-  | "missed"
+  | EvidenceClass
   | "hebrew_label_unconfirmed"
-  | "no_evidence"
-  | "failed";
+  | "duplicate_work"
+  | "linked_other_work";
+
+export interface EditionWork {
+  id: string;
+  original_title: string;
+  original_authors: string[];
+}
 
 export interface UnlinkedWorkDecision {
   class: UnlinkedWorkClass;
@@ -71,6 +88,8 @@ export interface UnlinkedEvidenceProviders extends MeasureProviders {
   wikidataWork: (
     work: Pick<InUseWork, "original_title" | "original_authors">,
   ) => Promise<WikidataWorkEntity | null>;
+  /** The work a Simania edition is linked to, or null when unlinked. */
+  editionWork?: (simaniaId: number) => Promise<EditionWork | null>;
 }
 
 export interface WrongLinkProviders {
@@ -349,14 +368,21 @@ export async function decideMissedTranslation(
 ): Promise<WorkDecision> {
   try {
     const englishAuthor = work.original_authors?.[0]?.trim() ?? "";
-    if (!englishAuthor) return { missed: false, failed: false };
+    if (!englishAuthor) {
+      return { missed: false, failed: false, class: "no_english_author" };
+    }
     const hebrewAuthor = await providers.hebrewAuthor(englishAuthor);
-    if (!hebrewAuthor) return { missed: false, failed: false };
+    if (!hebrewAuthor) {
+      return { missed: false, failed: false, class: "no_hebrew_author" };
+    }
 
     const books = new Map<number, string>();
     const query = authorQuery(hebrewAuthor);
+    let listed = 0;
+    let truncated = false;
     for (let offset = 0; offset < 300; offset += 50) {
       const page = await providers.searchBooks(query, 50, offset);
+      listed += page.length;
       for (const book of page) {
         const id = simaniaId(book);
         if (
@@ -367,8 +393,10 @@ export async function decideMissedTranslation(
         }
       }
       if (page.length < 50) break;
+      if (offset + 50 >= 300) truncated = true;
     }
 
+    let unbridged = false;
     for (const [bookId, title] of books) {
       const [nli, wikidata] = await Promise.all([
         providers.nliOriginal(title, hebrewAuthor),
@@ -385,15 +413,24 @@ export async function decideMissedTranslation(
             ? {
               missed: true,
               failed: false,
+              class: "missed",
               book: { simania_id: bookId, title },
             }
-            : { missed: true, failed: false };
+            : { missed: true, failed: false, class: "missed" };
         }
       }
+      if (!nli?.title && !wikidata?.title) unbridged = true;
     }
-    return { missed: false, failed: false };
+    const evidence: EvidenceClass = truncated
+      ? "catalog_truncated"
+      : unbridged
+      ? "unbridged_books"
+      : listed === 0
+      ? "no_author_books"
+      : "catalog_checked";
+    return { missed: false, failed: false, class: evidence };
   } catch {
-    return { missed: false, failed: true };
+    return { missed: false, failed: true, class: "failed" };
   }
 }
 
@@ -402,9 +439,44 @@ function apostropheVariants(title: string): string[] {
   return [...new Set([ascii, ascii.replace(/'/g, "׳")])];
 }
 
-/** Give one checked unlinked work exactly one S44 class. */
-export async function classifyUnlinkedWork(
+function sameWork(
   work: Pick<InUseWork, "original_title" | "original_authors">,
+  other: EditionWork,
+): boolean {
+  if (normalize(work.original_title) !== normalize(other.original_title)) {
+    return false;
+  }
+  const authors = work.original_authors ?? [];
+  const otherAuthors = other.original_authors ?? [];
+  return otherAuthors.some((name) => authorEvidenceAgrees(name, authors));
+}
+
+/** Decide whether the books found for a work are free, duplicates or linked elsewhere. */
+async function judgeFoundBooks(
+  work: Pick<InUseWork, "original_title" | "original_authors"> & {
+    id?: string;
+  },
+  ids: number[],
+  providers: UnlinkedEvidenceProviders,
+): Promise<"missed" | "duplicate_work" | "linked_other_work"> {
+  if (!providers.editionWork) return "missed";
+  let other: EditionWork | null = null;
+  for (const id of ids) {
+    const linked = await providers.editionWork(id);
+    if (!linked || (work.id !== undefined && linked.id === work.id)) {
+      return "missed";
+    }
+    other ??= linked;
+  }
+  if (!other) return "missed";
+  return sameWork(work, other) ? "duplicate_work" : "linked_other_work";
+}
+
+/** Give one checked unlinked work exactly one class. */
+export async function classifyUnlinkedWork(
+  work: Pick<InUseWork, "original_title" | "original_authors"> & {
+    id?: string;
+  },
   linkedSimaniaIds: ReadonlySet<number>,
   providers: UnlinkedEvidenceProviders,
 ): Promise<UnlinkedWorkDecision> {
@@ -412,26 +484,48 @@ export async function classifyUnlinkedWork(
     work,
     linkedSimaniaIds,
     providers,
+    { withBook: true },
   );
-  if (existing.missed) return { class: "missed", via: "existing" };
+  if (existing.missed) {
+    try {
+      const found = await judgeFoundBooks(
+        work,
+        [existing.book!.simania_id],
+        providers,
+      );
+      return { class: found, via: "existing" };
+    } catch {
+      return { class: "failed" };
+    }
+  }
   if (existing.failed) return { class: "failed" };
 
   try {
     const entity = await providers.wikidataWork(work);
     const hebrewLabel = entity?.hebrewLabel?.trim() ?? "";
-    if (!entity || !hebrewLabel) return { class: "no_evidence" };
+    if (!entity || !hebrewLabel) return { class: existing.class };
 
     const books: SimaniaBook[] = [];
     for (const query of apostropheVariants(hebrewLabel)) {
       books.push(...await providers.searchBooks(query, 50, 0));
     }
     const authors = work.original_authors ?? [];
-    const confirmed = books.some((book) =>
+    const confirmed = books.filter((book) =>
       authorAgreesWithWork(String(book.author ?? ""), authors, [])
     );
-    return confirmed
-      ? { class: "missed", via: "wikidata_he", hebrewLabel }
-      : { class: "hebrew_label_unconfirmed", hebrewLabel };
+    if (!confirmed.length) {
+      return { class: "hebrew_label_unconfirmed", hebrewLabel };
+    }
+    const ids = [
+      ...new Set(
+        confirmed.map(simaniaId).filter((id): id is number => id !== null),
+      ),
+    ];
+    return {
+      class: await judgeFoundBooks(work, ids, providers),
+      via: "wikidata_he",
+      hebrewLabel,
+    };
   } catch {
     return { class: "failed" };
   }
@@ -480,6 +574,19 @@ export function loadAllWorks(sql: Sql): Promise<InUseWork[]> {
   `;
 }
 
+export async function loadEditionWork(
+  sql: Sql,
+  simaniaId: number,
+): Promise<EditionWork | null> {
+  const [row] = await sql<EditionWork[]>`
+    select w.id, w.original_title, w.original_authors
+    from public.editions as e
+    inner join public.works as w on w.id = e.work_id
+    where e.simania_id = ${simaniaId}
+  `;
+  return row ?? null;
+}
+
 async function loadLinkedSimaniaIds(sql: Sql): Promise<Set<number>> {
   const rows = await sql<{ simania_id: number }[]>`
     select simania_id from public.editions
@@ -515,6 +622,7 @@ export interface RunDeps {
   loadInUseWorks: typeof loadInUseWorks;
   loadAllWorks: typeof loadAllWorks;
   loadLinkedSimaniaIds: typeof loadLinkedSimaniaIds;
+  loadEditionWork: typeof loadEditionWork;
   providers: UnlinkedEvidenceProviders;
   wrongLinkProviders: WrongLinkProviders;
   hebrewProviders: HebrewMeasureProviders;
@@ -527,6 +635,7 @@ const runDefaults: RunDeps = {
   loadInUseWorks,
   loadAllWorks,
   loadLinkedSimaniaIds,
+  loadEditionWork,
   providers: {
     hebrewAuthor: wikidataHebrewAuthorStrict,
     searchBooks,
@@ -630,25 +739,57 @@ export async function main(
     const checkedUnlinked = requested.sample === undefined
       ? unlinked
       : sampleLinkedWorks(unlinked, requested.sample);
-    const missedTitles: string[] = [];
-    const hebrewLabelTitles: string[] = [];
-    const classCounts: Record<UnlinkedWorkClass, number> = {
-      missed: 0,
-      hebrew_label_unconfirmed: 0,
-      no_evidence: 0,
-      failed: 0,
+    const providers: UnlinkedEvidenceProviders = {
+      editionWork: (id) => deps.loadEditionWork(sql!, id),
+      ...deps.providers,
     };
+    const results: UnlinkedWorkDecision[] = [];
     // Deliberately sequential: providers and the Wikimedia throttle get one work at a time.
     for (const work of checkedUnlinked) {
-      const decision = await classifyUnlinkedWork(
-        work,
-        linked,
-        deps.providers,
-      );
-      classCounts[decision.class]++;
-      if (decision.class === "missed") missedTitles.push(work.original_title);
-      if (decision.hebrewLabel) hebrewLabelTitles.push(decision.hebrewLabel);
+      results.push(await classifyUnlinkedWork(work, linked, providers));
     }
+    // End-of-run recheck: failed works run once more, one at a time.
+    let rechecked = 0;
+    for (let index = 0; index < results.length; index++) {
+      if (results[index].class !== "failed") continue;
+      rechecked++;
+      results[index] = await classifyUnlinkedWork(
+        checkedUnlinked[index],
+        linked,
+        providers,
+      );
+    }
+    const classCounts: Record<UnlinkedWorkClass, number> = {
+      missed: 0,
+      failed: 0,
+      no_english_author: 0,
+      no_hebrew_author: 0,
+      no_author_books: 0,
+      catalog_truncated: 0,
+      unbridged_books: 0,
+      catalog_checked: 0,
+      hebrew_label_unconfirmed: 0,
+      duplicate_work: 0,
+      linked_other_work: 0,
+    };
+    const missedTitles: string[] = [];
+    const duplicateTitles: string[] = [];
+    const linkedOtherTitles: string[] = [];
+    const hebrewLabelTitles: string[] = [];
+    results.forEach((decision, index) => {
+      const title = checkedUnlinked[index].original_title;
+      classCounts[decision.class]++;
+      if (decision.class === "missed") missedTitles.push(title);
+      if (decision.class === "duplicate_work") duplicateTitles.push(title);
+      if (decision.class === "linked_other_work") {
+        linkedOtherTitles.push(title);
+      }
+      if (
+        decision.class === "hebrew_label_unconfirmed" && decision.hebrewLabel
+      ) {
+        hebrewLabelTitles.push(decision.hebrewLabel);
+      }
+    });
     let wrongSample: Record<string, unknown> | undefined;
     if (requested.wrong !== undefined) {
       const linkedWorks = works.filter((work) => work.simania_id !== null);
@@ -686,9 +827,19 @@ export async function main(
         provider_failure: 0,
       };
       // Deliberately sequential: Wikimedia calls share the global throttle.
+      const kinds: HebrewEditionKind[] = [];
       for (const edition of editions) {
-        counts[await decideHebrewEdition(edition, deps.hebrewProviders)]++;
+        kinds.push(await decideHebrewEdition(edition, deps.hebrewProviders));
       }
+      for (let index = 0; index < kinds.length; index++) {
+        if (kinds[index] !== "provider_failure") continue;
+        rechecked++;
+        kinds[index] = await decideHebrewEdition(
+          editions[index],
+          deps.hebrewProviders,
+        );
+      }
+      for (const kind of kinds) counts[kind]++;
       hebrew = {
         unlinked_editions: editions.length,
         ...counts,
@@ -700,26 +851,49 @@ export async function main(
       requested.sample !== undefined && sampled
         ? Math.round(count * unlinked.length / sampled)
         : count;
+    const scaledClasses = Object.fromEntries(
+      Object.entries(classCounts).map(([key, count]) => [key, scaled(count)]),
+    ) as Record<UnlinkedWorkClass, number>;
     const counts = {
-      missed: scaled(classCounts.missed),
-      hebrew_label_unconfirmed: scaled(classCounts.hebrew_label_unconfirmed),
-      no_evidence: scaled(classCounts.no_evidence),
-      failed: scaled(classCounts.failed),
+      // Duplicates count as missed.
+      missed: scaledClasses.missed + scaledClasses.duplicate_work,
+      hebrew_label_unconfirmed: scaledClasses.hebrew_label_unconfirmed,
+      // Everything else that is neither missed, label-only, failed nor linked elsewhere.
+      no_evidence: scaledClasses.no_english_author +
+        scaledClasses.no_hebrew_author + scaledClasses.no_author_books +
+        scaledClasses.catalog_truncated + scaledClasses.unbridged_books +
+        scaledClasses.catalog_checked,
+      failed: scaledClasses.failed,
     };
-    const missedRateLow = works.length
-      ? Number((counts.missed / works.length).toFixed(4))
-      : 0;
-    const missedRateHigh = works.length
-      ? Number((
-        (counts.missed + counts.hebrew_label_unconfirmed + counts.failed) /
-        works.length
-      ).toFixed(4))
-      : 0;
+    const rate = (count: number) =>
+      works.length ? Number((count / works.length).toFixed(4)) : 0;
+    const missedRateLow = rate(counts.missed);
+    const missedRateHigh = rate(
+      counts.missed + counts.hebrew_label_unconfirmed + counts.failed,
+    );
+    const missedRateStrictHigh = rate(
+      counts.missed + counts.hebrew_label_unconfirmed + counts.failed +
+        scaledClasses.linked_other_work + scaledClasses.no_hebrew_author +
+        scaledClasses.no_author_books + scaledClasses.catalog_truncated +
+        scaledClasses.unbridged_books,
+    );
     const classification = {
       ...counts,
+      catalog_checked: scaledClasses.catalog_checked,
+      no_english_author: scaledClasses.no_english_author,
+      no_hebrew_author: scaledClasses.no_hebrew_author,
+      no_author_books: scaledClasses.no_author_books,
+      catalog_truncated: scaledClasses.catalog_truncated,
+      unbridged_books: scaledClasses.unbridged_books,
+      duplicate_work: scaledClasses.duplicate_work,
+      linked_other_work: scaledClasses.linked_other_work,
       missed_rate_low: missedRateLow,
       missed_rate_high: missedRateHigh,
+      missed_rate_strict_high: missedRateStrictHigh,
       hebrew_label_titles: hebrewLabelTitles,
+      duplicate_titles: duplicateTitles,
+      linked_other_titles: linkedOtherTitles,
+      rechecked,
     };
     const measurement = requested.all
       ? (() => {
@@ -727,7 +901,7 @@ export async function main(
           all_works: works.length,
           unlinked: unlinked.length,
           sampled,
-          missed_in_sample: missedTitles.length,
+          missed_in_sample: classCounts.missed + classCounts.duplicate_work,
           failed_in_sample: classCounts.failed,
           missed_estimate: counts.missed,
           missed_rate: missedRateLow,
