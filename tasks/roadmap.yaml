@@ -1785,3 +1785,31 @@ sprints:
         depends_on:
         - S49-T5
         - S49-T6
+  S50-unknowns:
+    name: narrow the unknown range - run health formats, recheck, rematch covers measurement, duplicates, evidence classes
+    tasks:
+      S50-T1:
+        file: tasks/sprint-50-unknowns/01-contract.md
+        stage: 1
+        depends_on: []
+      S50-T2:
+        file: tasks/sprint-50-unknowns/02-health.md
+        stage: 2
+        depends_on:
+        - S50-T1
+      S50-T3:
+        file: tasks/sprint-50-unknowns/03-measure.md
+        stage: 2
+        depends_on:
+        - S50-T1
+      S50-T4:
+        file: tasks/sprint-50-unknowns/04-rematch.md
+        stage: 3
+        depends_on:
+        - S50-T3
+      S50-T5:
+        file: tasks/sprint-50-unknowns/05-docs.md
+        stage: 4
+        depends_on:
+        - S50-T2
+        - S50-T4
