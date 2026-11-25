@@ -57,6 +57,8 @@ jobs:
           code=$?
           [ "$code" -eq 4 ] && code=0
           exit "$code"
+      - name: Check run health
+        run: npm run check:run-health -- hebrew.jsonl
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -117,6 +119,8 @@ jobs:
           code=$?
           [ "$code" -eq 4 ] && code=0
           exit "$code"
+      - name: Check run health
+        run: npm run check:run-health -- "english-${{ matrix.shard }}.jsonl"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -145,6 +149,8 @@ jobs:
       - name: Measure links
         run: |
           deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/measure-links.ts --all --sample "${{ inputs.sample }}" --hebrew > measure.json
+      - name: Check run health
+        run: npm run check:run-health -- measure.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
