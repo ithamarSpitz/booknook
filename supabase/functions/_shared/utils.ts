@@ -44,6 +44,36 @@ export async function fetchTimeout(url: string, init: RequestInit = {}, timeoutM
   }
 }
 
+export type ProviderRetry = { timeoutMs: number; pauseMs: number };
+let providerRetry: ProviderRetry | null = null;
+
+/** Opt-in (scripts only): retry an idempotent request once after a timeout abort or HTTP 5xx. */
+export function setProviderRetry(policy: ProviderRetry | null): void {
+  providerRetry = policy;
+}
+
+export function getProviderRetry(): ProviderRetry | null {
+  return providerRetry;
+}
+
+/** fetchTimeout plus the optional one-shot retry policy. Do not use for non-idempotent or Hardcover calls. */
+export async function fetchRetry(url: string, init: RequestInit = {}, timeoutMs = 12000): Promise<Response> {
+  const policy = providerRetry;
+  if (!policy) return await fetchTimeout(url, init, timeoutMs);
+  let response: Response;
+  try {
+    response = await fetchTimeout(url, init, timeoutMs);
+  } catch (error) {
+    if ((error as { name?: string })?.name !== "AbortError") throw error;
+    await new Promise((resolve) => setTimeout(resolve, policy.pauseMs));
+    return await fetchTimeout(url, init, policy.timeoutMs);
+  }
+  if (response.status < 500) return response;
+  await response.body?.cancel();
+  await new Promise((resolve) => setTimeout(resolve, policy.pauseMs));
+  return await fetchTimeout(url, init, policy.timeoutMs);
+}
+
 export function stripHebrewPoints(value: string): string {
   return value.replace(/[\u0591-\u05c7]/g, (character) =>
     character === "\u05be" ? " " : ""

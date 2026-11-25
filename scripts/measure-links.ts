@@ -1,3 +1,5 @@
+import { setProviderRetry } from "../supabase/functions/_shared/utils.ts";
+import { setProviderRetry as setSimaniaRetry } from "../public/js/simania.js";
 import type { Sql } from "npm:postgres@3.4.5";
 import {
   nliOriginal,
@@ -737,6 +739,9 @@ export async function main(
 
 if (import.meta.main) {
   try {
+    const policy = { timeoutMs: 25000, pauseMs: 1000 };
+    setProviderRetry(policy);
+    setSimaniaRetry(policy);
     Deno.exit(await main());
   } catch (error) {
     console.error(

@@ -42,34 +42,62 @@ function parseMcp(raw) {
   return JSON.parse(text || "null");
 }
 
+/** @type {{timeoutMs: number, pauseMs: number} | null} */
+let providerRetry = null;
+
+/** Opt-in (scripts only): retry once after a timeout abort or HTTP 5xx. */
+export function setProviderRetry(policy) {
+  providerRetry = policy;
+}
+
+async function post(fetchImpl, body, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(SIMANIA, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * @param {string} name
  * @param {Record<string, unknown>} args
  * @param {typeof fetch} [fetchImpl]
  */
 export async function callTool(name, args, fetchImpl = fetch) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: ++requestId,
+    method: "tools/call",
+    params: { name, arguments: args },
+  });
+  const policy = providerRetry;
+  const pause = () => new Promise((resolve) => setTimeout(resolve, policy.pauseMs));
   let response;
   try {
-    response = await fetchImpl(SIMANIA, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: ++requestId,
-        method: "tools/call",
-        params: { name, arguments: args },
-      }),
-      signal: controller.signal,
-    });
+    try {
+      response = await post(fetchImpl, body, TIMEOUT_MS);
+      if (policy && response.status >= 500) {
+        await response.body?.cancel();
+        await pause();
+        response = await post(fetchImpl, body, policy.timeoutMs);
+      }
+    } catch (error) {
+      if (!policy || error?.name !== "AbortError" || response) throw error;
+      await pause();
+      response = await post(fetchImpl, body, policy.timeoutMs);
+    }
   } catch {
     throw new Error("קטלוג הספרים לא זמין כרגע");
-  } finally {
-    clearTimeout(timer);
   }
   if (!response.ok) throw new Error(`קטלוג הספרים החזיר שגיאה (${response.status})`);
   try {
