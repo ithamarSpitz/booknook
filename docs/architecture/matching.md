@@ -103,6 +103,14 @@ Before printing a proposal, and again before linking one with `--from ... --appl
 
 Provider throttle: the scripts wrap their `fetch` with `scripts/lib/provider-throttle.ts`. `throttledHardcoverFetch` serializes Hardcover requests 1000 ms apart, and `throttledWikimediaFetch` serializes Wikidata, Wiktionary and Wikipedia requests with starts at least 300 ms apart. On HTTP 429 each waits for `Retry-After` (15 s when absent) and retries, up to 5 times for Hardcover and 6 for Wikimedia. All 69 provider failures in the 2026-11-23 `--hebrew` run were rate limits (81 Hardcover 429 errors, 10 Wikidata 429 errors).
 
+Provider retry: `rematch:cached` and `measure:links` call `setProviderRetry` at start, and only the scripts do, so edge functions keep their behavior. With the policy set, an idempotent provider request (Wikidata, NLI, Wiktionary, Simania) that aborts on its timeout or gets HTTP 5xx is retried once after a pause, with a longer timeout. Hardcover is not retried, and HTTP 429 keeps its own handling.
+
+Response cache: `--cache-dir <dir>` stores provider responses on disk for 7 days, so a rerun or another script reuses them. Only idempotent providers are cached; Hardcover requests are never cached.
+
+Concurrency: `rematch:cached --concurrency <n>` takes 1 to 4 works at a time. The throttles still allow one request at a time per host, and the output stays in work order, so a run is comparable with a sequential one.
+
+Run health: `npm run check:run-health -- <file>` reads one `rematch:cached` or `measure:links` output and exits 1 with a one-line reason when the output cannot be trusted: no summary line, more than half provider failures, or any Simania HTTP 403. `rematch-measure.yml` runs it after the hebrew job, each English shard and the measure job, so an unusable run is red while the artifact is still uploaded.
+
 Workflow `.github/workflows/rematch-measure.yml` runs the rematch and measurement on GitHub runners. It is manual (`gh workflow run rematch-measure.yml`) and read-only; it never applies. The jobs run in order: hebrew, then the English shards one at a time, then measure. Results are uploaded as artifacts kept 14 days. It needs the repo secrets `TORIMITOR_DB_PASSWORD`, `HARDCOVER_API_KEY` and `NLI_API_KEY`, plus `TORIMITOR_DB_HOST` if the pooler is used. Applying is still done locally with `--from <file> --apply`, after review.
 
 Hebrew-side guard and dictionary decisions (studies in `docs/reports/2026-11-23-*.md`): the NLI English-original guard stays on `--hebrew` proposals. Of 35 pairs it checked on the Hebrew side, 0 were right, 34 wrong and 1 unknown, so it rejects wrong pairs rather than right ones. There is no `hebrew_dictionary` step in `--hebrew`: the dictionary study over 136 editions checked 38 and found 0 right, 35 wrong and 3 unknown. Its 4 accepted proposals were 0 right, 2 wrong and 2 unknown, short of the bar of at least 3 right and a wrong share below 0.05.
