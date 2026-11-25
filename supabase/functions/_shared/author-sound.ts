@@ -236,6 +236,7 @@ export async function hebrewAuthorBySound(
   const et = enTokens(englishName);
   if (!et.length) return null;
   const lastS = surnameSpellings(et[et.length - 1], 6);
+  if (!lastS.length) return null;
   const firstS = et.length > 1 ? hebrewSpellings(et[0], 4) : [];
   const plan: [string, number][] = [];
   // Full names first (precise), then each surname spelling alone (Simania
@@ -249,7 +250,8 @@ export async function hebrewAuthorBySound(
   }
   plan.push([lastS[0], 50]);
   // Simania treats ' and ׳ as different characters: send both.
-  const queries = plan.slice(0, 20)
+  const queries = plan.filter(([q]) => typeof q === "string" && q)
+    .slice(0, 20)
     .flatMap(([query, offset]) =>
       (query.includes("'")
         ? [[query, offset], [query.replace(/'/g, "׳"), offset]]

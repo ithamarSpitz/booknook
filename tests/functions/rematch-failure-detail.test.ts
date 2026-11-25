@@ -107,3 +107,66 @@ Deno.test("resolveMatch reports a failed author-hint query as db", async () => {
 
   assertEquals(result.failures, [{ provider: "db", error: "db boom" }]);
 });
+
+Deno.test("author_books NLI failure is recorded in failures", async () => {
+  const lines: string[] = [];
+  let nliCalls = 0;
+  const hc = {
+    id: 11,
+    title: "Catching Fire",
+    cached_contributors: [{ author: { name: "Suzanne Collins" } }],
+  };
+  const deps: Partial<RunDeps> = {
+    loadOperatorEnv: (() => ({})) as unknown as RunDeps["loadOperatorEnv"],
+    openProdDb: (() =>
+      Promise.resolve({
+        end: () => Promise.resolve(),
+      })) as unknown as RunDeps["openProdDb"],
+    checkHardcoverBudget: () => Promise.resolve(true),
+    hardcoverDailyRemaining: () => Promise.resolve(5000),
+    loadWorks: () =>
+      Promise.resolve([{
+        id: "w1",
+        hardcover_id: 11,
+        original_title: "Catching Fire",
+        original_authors: ["Suzanne Collins"],
+      }]),
+    authorStore: () => memoryAuthorStore(),
+    loadLinkedSimaniaIds: () => Promise.resolve(new Set<number>()),
+    loadEdition: () => Promise.resolve(null),
+    insertEdition: () => Promise.resolve(),
+    wikidataHebrewAuthors: () =>
+      Promise.resolve(new Map([["Suzanne Collins", ["סוזן קולינס"]]])),
+    wikidataOriginals: () => Promise.resolve(new Map()),
+    nliOriginal: () =>
+      ++nliCalls === 1
+        ? Promise.resolve(null)
+        : Promise.reject(new Error("nli boom")),
+    wiktionaryGlosses: () => Promise.resolve([]),
+    hebrewHint: () => Promise.resolve(null),
+    matchHebrewBook: () => Promise.resolve({ id: 101 }),
+    searchBooks: () =>
+      Promise.resolve([{ id: 101, title: "התלקחות", author: "סוזן קולינס" }]),
+    hebrewAuthorBySound: () => Promise.resolve(null),
+    resolveMatch: () =>
+      Promise.resolve({
+        found: { book: hc, status: "wikidata" as const },
+        failed: false,
+        failures: [],
+      }) as unknown as ReturnType<RunDeps["resolveMatch"]>,
+    fetchEditionDetails: (id) =>
+      Promise.resolve({
+        simania_id: id,
+        title: "התלקחות",
+        author: "סוזן קולינס",
+      }),
+    sleep: () => Promise.resolve(),
+    now: () => new Date(0),
+    log: (line) => lines.push(line),
+    error: () => {},
+  };
+  await main([], deps);
+  const line = JSON.parse(lines[0]);
+  assertEquals(line.skipped, "provider_failure");
+  assertEquals(line.failures[0].provider, "nli");
+});
