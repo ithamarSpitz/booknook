@@ -1,5 +1,10 @@
-import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
 import {
+  assert,
+  assertEquals,
+  assertFalse,
+} from "jsr:@std/assert@1";
+import {
+  hebrewAuthorBySound,
   hebrewSpellings,
   sameAuthor,
   surnameSpellings,
@@ -45,4 +50,17 @@ Deno.test("hebrewSpellings generates ordered Hebrew transliterations", () => {
   assert(hebrewSpellings("Burgess").includes("ברג'ס"));
   assertEquals(hebrewSpellings("Julia", 4)[0], "ג'וליה");
   assert(surnameSpellings("DiCamillo").includes("די קמילו"));
+});
+
+Deno.test("hebrewAuthorBySound skips search for surnames without Latin letters", async () => {
+  let calls = 0;
+  const fake = () => {
+    calls++;
+    return Promise.resolve([]);
+  };
+  assertEquals(await hebrewAuthorBySound("Фёдор Достоевский", fake), null);
+  assertEquals(await hebrewAuthorBySound("Иванов", fake), null);
+  assertEquals(calls, 0);
+  await hebrewAuthorBySound("Stephen King", fake);
+  assert(calls > 0);
 });

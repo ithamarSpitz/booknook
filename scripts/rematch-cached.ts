@@ -51,9 +51,7 @@ import {
   type RematchDeps,
   type RematchWork,
 } from "./lib/rematch.ts";
-import {
-  pickByDictionary,
-} from "./lib/dictionary.ts";
+import { pickByDictionary } from "./lib/dictionary.ts";
 import {
   throttledHardcoverFetch,
   throttledWikimediaFetch,
@@ -960,348 +958,357 @@ export async function main(
       };
       const failures: ProviderFailure[] = [];
       currentFailures = failures;
-      const { candidates, authorBooks, failed: searchFailed } =
-        await findCandidates(
-          work,
-          rematchDeps,
-        );
-      currentFailures = null;
-      let anyFailed = searchFailed;
-      let rejected = false;
-      let authorMismatch = false;
-      let linkedElsewhere = false;
-      let proposal: Proposal | null = null;
+      try {
+        const { candidates, authorBooks, failed: searchFailed } =
+          await findCandidates(
+            work,
+            rematchDeps,
+          );
+        let anyFailed = searchFailed;
+        let rejected = false;
+        let authorMismatch = false;
+        let linkedElsewhere = false;
+        let proposal: Proposal | null = null;
 
-      const candidateEdition = async (
-        simaniaId: number,
-      ): Promise<{ edition: EditionRow; existed: boolean } | null> => {
-        let edition: EditionRow | null;
-        try {
-          edition = await deps.loadEdition(sql, simaniaId);
-        } catch (error) {
-          anyFailed = true;
-          failures.push(failureDetail("db", error));
-          return null;
-        }
-        if (edition?.work_id) {
-          linkedElsewhere = true;
-          return null;
-        }
-        const existed = edition !== null;
-        if (!edition) {
+        const candidateEdition = async (
+          simaniaId: number,
+        ): Promise<{ edition: EditionRow; existed: boolean } | null> => {
+          let edition: EditionRow | null;
           try {
-            edition = toEditionRow(await deps.fetchEditionDetails(simaniaId));
+            edition = await deps.loadEdition(sql, simaniaId);
           } catch (error) {
             anyFailed = true;
-            failures.push(failureDetail("simania", error));
+            failures.push(failureDetail("db", error));
             return null;
           }
-        }
-        return { edition, existed };
-      };
-
-      const agreementNames = async (
-        englishAuthors: string[],
-      ): Promise<string[] | null> => {
-        try {
-          return await knownHebrewNames(englishAuthors);
-        } catch (error) {
-          anyFailed = true;
-          failures.push(failureDetail("db", error));
-          return null;
-        }
-      };
-
-      for (const candidate of candidates) {
-        const loaded = await candidateEdition(candidate.simania_id);
-        if (!loaded) continue;
-        const { edition, existed } = loaded;
-        const knownNames = await agreementNames(work.original_authors ?? []);
-        if (!knownNames) continue;
-        const authorAgrees = authorAgreesWithWork(
-          edition.author ?? "",
-          work.original_authors ?? [],
-          knownNames,
-        );
-        try {
-          const result = await confirmCandidate(work, edition, authorAgrees, {
-            resolveMatch: async (e) => {
-              const resolved = await deps.resolveMatch(db, e);
-              failures.push(...(resolved.failures ?? []));
-              return resolved;
-            },
-          });
-          if (!authorAgrees) authorMismatch = true;
-          else if (result.failed) anyFailed = true;
-          else if (!result.accepted || !result.book || !result.status) {
-            rejected = true;
-          } else {
-            proposal = {
-              work,
-              edition,
-              existed,
-              via: candidate.via,
-              status: result.status,
-              book: result.book,
-            };
-            break;
+          if (edition?.work_id) {
+            linkedElsewhere = true;
+            return null;
           }
-        } catch (error) {
-          anyFailed = true;
-          failures.push(failureDetail("db", error));
-        }
-      }
+          const existed = edition !== null;
+          if (!edition) {
+            try {
+              edition = toEditionRow(await deps.fetchEditionDetails(simaniaId));
+            } catch (error) {
+              anyFailed = true;
+              failures.push(failureDetail("simania", error));
+              return null;
+            }
+          }
+          return { edition, existed };
+        };
 
-      const reasonBeforeDictionary = anyFailed
-        ? "provider_failure"
-        : authorMismatch
-        ? "author_mismatch"
-        : rejected
-        ? "rejected"
-        : linkedElsewhere
-        ? "linked_elsewhere"
-        : "no_candidate";
-      if (
-        !proposal && !anyFailed && authorBooks.length > 0 &&
-        (reasonBeforeDictionary === "no_candidate" ||
-          reasonBeforeDictionary === "rejected" ||
-          reasonBeforeDictionary === "author_mismatch")
-      ) {
-        let picked: Awaited<ReturnType<typeof pickByDictionary>> = null;
-        try {
-          picked = await pickByDictionary(
-            work.original_title,
-            authorBooks,
-            deps.wiktionaryGlosses,
+        const agreementNames = async (
+          englishAuthors: string[],
+        ): Promise<string[] | null> => {
+          try {
+            return await knownHebrewNames(englishAuthors);
+          } catch (error) {
+            anyFailed = true;
+            failures.push(failureDetail("db", error));
+            return null;
+          }
+        };
+
+        for (const candidate of candidates) {
+          const loaded = await candidateEdition(candidate.simania_id);
+          if (!loaded) continue;
+          const { edition, existed } = loaded;
+          const knownNames = await agreementNames(work.original_authors ?? []);
+          if (!knownNames) continue;
+          const authorAgrees = authorAgreesWithWork(
+            edition.author ?? "",
+            work.original_authors ?? [],
+            knownNames,
           );
-        } catch (error) {
-          anyFailed = true;
-          failures.push(failureDetail("wiktionary", error));
-        }
-        if (picked) {
-          const loaded = await candidateEdition(picked.simania_id);
-          if (loaded) {
-            const { edition, existed } = loaded;
-            const knownNames = await agreementNames(
-              work.original_authors ?? [],
-            );
-            if (knownNames === null) {
-              // The failed database lookup is already recorded.
-            } else if (
-              !authorAgreesWithWork(
-                edition.author ?? "",
-                work.original_authors ?? [],
-                knownNames,
-              )
-            ) {
-              authorMismatch = true;
+          try {
+            const result = await confirmCandidate(work, edition, authorAgrees, {
+              resolveMatch: async (e) => {
+                const resolved = await deps.resolveMatch(db, e);
+                failures.push(...(resolved.failures ?? []));
+                return resolved;
+              },
+            });
+            if (!authorAgrees) authorMismatch = true;
+            else if (result.failed) anyFailed = true;
+            else if (!result.accepted || !result.book || !result.status) {
+              rejected = true;
             } else {
               proposal = {
                 work,
                 edition,
                 existed,
-                via: "dictionary",
-                status: "dictionary",
-                book: {
-                  id: work.hardcover_id,
-                  title: work.original_title,
-                  cached_contributors: (work.original_authors ?? []).map((
-                    name,
-                  ) => ({
-                    author: { name },
-                  })),
-                },
+                via: candidate.via,
+                status: result.status,
+                book: result.book,
               };
+              break;
             }
+          } catch (error) {
+            anyFailed = true;
+            failures.push(failureDetail("db", error));
           }
         }
-      }
 
-      if (!proposal && !anyFailed && !linkedElsewhere && authorBooks.length > 0) {
-        const decision = await decideMissedTranslation(
-          {
-            original_title: work.original_title,
-            original_authors: work.original_authors ?? [],
-          },
-          linkedSimaniaIds,
-          {
-            hebrewAuthor: async (name) =>
-              (await rematchDeps.hebrewNames({
-                ...work,
-                original_authors: [name],
-              }))[0] ?? null,
-            searchBooks: rematchDeps.searchBooks,
-            nliOriginal: async (title, name) => {
-              try {
-                return await deps.nliOriginal(title, name);
-              } catch (error) {
-                rememberFailure("nli", error);
-                throw error;
-              }
-            },
-            wikidataOriginal: async (title) => {
-              try {
-                const found = (await deps.wikidataOriginals([title])).get(
-                  title,
-                );
-                return found?.[0] ? { title: found[0] } : null;
-              } catch (error) {
-                rememberFailure("wikidata", error);
-                throw error;
-              }
-            },
-          },
-          { withBook: true },
-        );
-        if (decision.failed) anyFailed = true;
-        if (decision.book) {
-          const loaded = await candidateEdition(decision.book.simania_id);
-          const knownNames = loaded
-            ? await agreementNames(work.original_authors ?? [])
-            : null;
-          if (loaded && knownNames) {
-            if (
-              !authorAgreesWithWork(
-                loaded.edition.author ?? "",
-                work.original_authors ?? [],
-                knownNames,
-              )
-            ) {
-              authorMismatch = true;
-            } else {
-              proposal = {
-                work,
-                edition: loaded.edition,
-                existed: loaded.existed,
-                via: "author_books",
-                status: "nli",
-                book: {
-                  id: work.hardcover_id,
-                  title: work.original_title,
-                  cached_contributors: (work.original_authors ?? []).map((
-                    name,
-                  ) => ({ author: { name } })),
-                },
-              };
-            }
-          }
-        }
-      }
-
-      if (
-        proposal &&
-        await proposalHasEnglishMismatch(
-          deps,
-          proposal.edition,
-          proposal.work.original_title,
-        )
-      ) {
-        skip("nli_english_mismatch");
-        deps.log(JSON.stringify({
-          ...base,
-          skipped: "nli_english_mismatch",
-        }));
-        proposal = null;
-      } else if (!proposal) {
-        const reason = authorMismatch
-          ? "author_mismatch"
-          : anyFailed
+        const reasonBeforeDictionary = anyFailed
           ? "provider_failure"
+          : authorMismatch
+          ? "author_mismatch"
           : rejected
           ? "rejected"
           : linkedElsewhere
           ? "linked_elsewhere"
           : "no_candidate";
-        skip(reason);
-        deps.log(JSON.stringify({
-          ...base,
-          skipped: reason,
-          ...(reason === "provider_failure" ? { failures } : {}),
-        }));
-      }
-      if (proposal) {
-        proposals++;
-        deps.log(JSON.stringify({
-          ...base,
-          proposal: {
-            simania_id: proposal.edition.simania_id,
-            book_id: proposal.book.id,
-            hebrew_title: proposal.edition.title,
-            via: proposal.via,
-            status: proposal.status,
-          },
-        }));
-        if (options.apply) {
-          const id = proposal.edition.simania_id;
+        if (
+          !proposal && !anyFailed && authorBooks.length > 0 &&
+          (reasonBeforeDictionary === "no_candidate" ||
+            reasonBeforeDictionary === "rejected" ||
+            reasonBeforeDictionary === "author_mismatch")
+        ) {
+          let picked: Awaited<ReturnType<typeof pickByDictionary>> = null;
           try {
-            let book = proposal.book;
-            let detailsOk = true;
-            if (
-              proposal.via === "dictionary" || proposal.via === "author_books" ||
-              deps.isSearchDocumentBook(book)
-            ) {
-              let detailed: HardcoverBook | undefined;
-              try {
-                detailed = (await deps.hardcoverBooks([book.id]))[0];
-              } catch {
-                detailed = undefined;
-              }
-              if (detailed) book = detailed;
-              else detailsOk = false;
-            }
-            if (!detailsOk) {
-              skip("details_failure");
-              deps.log(
-                JSON.stringify({ simania_id: id, skipped: "details_failure" }),
-              );
-            } else {
-              if (!proposal.existed) {
-                await deps.insertEdition(sql, proposal.edition);
-              }
-              const plan = {
-                kind: "link",
-                simania_id: id,
-                title: proposal.edition.title,
-                author: proposal.edition.author,
-                translator: proposal.edition.translator,
-                original_title: book.title,
-                book,
-                reason: "ok",
-              } as unknown as LinkRepairPlan;
-              const result = await deps.applyRepair(
-                sql,
-                plan,
-                deps.now(),
-                proposal.status,
-              );
-              if (result.status === "linked") linked++;
-              else skip("not_linked");
-            }
+            picked = await pickByDictionary(
+              work.original_title,
+              authorBooks,
+              deps.wiktionaryGlosses,
+            );
           } catch (error) {
-            failed = true;
-            deps.log(JSON.stringify({
-              simania_id: id,
-              status: "failed",
-              error: error instanceof Error ? error.message : "Unknown error",
-            }));
+            anyFailed = true;
+            failures.push(failureDetail("wiktionary", error));
+          }
+          if (picked) {
+            const loaded = await candidateEdition(picked.simania_id);
+            if (loaded) {
+              const { edition, existed } = loaded;
+              const knownNames = await agreementNames(
+                work.original_authors ?? [],
+              );
+              if (knownNames === null) {
+                // The failed database lookup is already recorded.
+              } else if (
+                !authorAgreesWithWork(
+                  edition.author ?? "",
+                  work.original_authors ?? [],
+                  knownNames,
+                )
+              ) {
+                authorMismatch = true;
+              } else {
+                proposal = {
+                  work,
+                  edition,
+                  existed,
+                  via: "dictionary",
+                  status: "dictionary",
+                  book: {
+                    id: work.hardcover_id,
+                    title: work.original_title,
+                    cached_contributors: (work.original_authors ?? []).map((
+                      name,
+                    ) => ({
+                      author: { name },
+                    })),
+                  },
+                };
+              }
+            }
           }
         }
-      }
 
-      if (processed % BUDGET_CHECK_EVERY === 0) {
-        const remaining = await deps.hardcoverDailyRemaining();
         if (
-          remaining !== null && remaining < options.minHardcover &&
-          !options.forceHardcover
+          !proposal && !anyFailed && !linkedElsewhere && authorBooks.length > 0
         ) {
-          deps.log(JSON.stringify({
-            stopped: "hardcover_budget",
-            remaining,
-            min: options.minHardcover,
-            works: processed,
-          }));
-          return 4;
+          const decision = await decideMissedTranslation(
+            {
+              original_title: work.original_title,
+              original_authors: work.original_authors ?? [],
+            },
+            linkedSimaniaIds,
+            {
+              hebrewAuthor: async (name) =>
+                (await rematchDeps.hebrewNames({
+                  ...work,
+                  original_authors: [name],
+                }))[0] ?? null,
+              searchBooks: rematchDeps.searchBooks,
+              nliOriginal: async (title, name) => {
+                try {
+                  return await deps.nliOriginal(title, name);
+                } catch (error) {
+                  rememberFailure("nli", error);
+                  throw error;
+                }
+              },
+              wikidataOriginal: async (title) => {
+                try {
+                  const found = (await deps.wikidataOriginals([title])).get(
+                    title,
+                  );
+                  return found?.[0] ? { title: found[0] } : null;
+                } catch (error) {
+                  rememberFailure("wikidata", error);
+                  throw error;
+                }
+              },
+            },
+            { withBook: true },
+          );
+          if (decision.failed) anyFailed = true;
+          if (decision.book) {
+            const loaded = await candidateEdition(decision.book.simania_id);
+            const knownNames = loaded
+              ? await agreementNames(work.original_authors ?? [])
+              : null;
+            if (loaded && knownNames) {
+              if (
+                !authorAgreesWithWork(
+                  loaded.edition.author ?? "",
+                  work.original_authors ?? [],
+                  knownNames,
+                )
+              ) {
+                authorMismatch = true;
+              } else {
+                proposal = {
+                  work,
+                  edition: loaded.edition,
+                  existed: loaded.existed,
+                  via: "author_books",
+                  status: "nli",
+                  book: {
+                    id: work.hardcover_id,
+                    title: work.original_title,
+                    cached_contributors: (work.original_authors ?? []).map((
+                      name,
+                    ) => ({ author: { name } })),
+                  },
+                };
+              }
+            }
+          }
         }
+
+        if (
+          proposal &&
+          await proposalHasEnglishMismatch(
+            deps,
+            proposal.edition,
+            proposal.work.original_title,
+          )
+        ) {
+          skip("nli_english_mismatch");
+          deps.log(JSON.stringify({
+            ...base,
+            skipped: "nli_english_mismatch",
+          }));
+          proposal = null;
+        } else if (!proposal) {
+          const reason = authorMismatch
+            ? "author_mismatch"
+            : anyFailed
+            ? "provider_failure"
+            : rejected
+            ? "rejected"
+            : linkedElsewhere
+            ? "linked_elsewhere"
+            : "no_candidate";
+          skip(reason);
+          deps.log(JSON.stringify({
+            ...base,
+            skipped: reason,
+            ...(reason === "provider_failure" ? { failures } : {}),
+          }));
+        }
+        if (proposal) {
+          proposals++;
+          deps.log(JSON.stringify({
+            ...base,
+            proposal: {
+              simania_id: proposal.edition.simania_id,
+              book_id: proposal.book.id,
+              hebrew_title: proposal.edition.title,
+              via: proposal.via,
+              status: proposal.status,
+            },
+          }));
+          if (options.apply) {
+            const id = proposal.edition.simania_id;
+            try {
+              let book = proposal.book;
+              let detailsOk = true;
+              if (
+                proposal.via === "dictionary" ||
+                proposal.via === "author_books" ||
+                deps.isSearchDocumentBook(book)
+              ) {
+                let detailed: HardcoverBook | undefined;
+                try {
+                  detailed = (await deps.hardcoverBooks([book.id]))[0];
+                } catch {
+                  detailed = undefined;
+                }
+                if (detailed) book = detailed;
+                else detailsOk = false;
+              }
+              if (!detailsOk) {
+                skip("details_failure");
+                deps.log(
+                  JSON.stringify({
+                    simania_id: id,
+                    skipped: "details_failure",
+                  }),
+                );
+              } else {
+                if (!proposal.existed) {
+                  await deps.insertEdition(sql, proposal.edition);
+                }
+                const plan = {
+                  kind: "link",
+                  simania_id: id,
+                  title: proposal.edition.title,
+                  author: proposal.edition.author,
+                  translator: proposal.edition.translator,
+                  original_title: book.title,
+                  book,
+                  reason: "ok",
+                } as unknown as LinkRepairPlan;
+                const result = await deps.applyRepair(
+                  sql,
+                  plan,
+                  deps.now(),
+                  proposal.status,
+                );
+                if (result.status === "linked") linked++;
+                else skip("not_linked");
+              }
+            } catch (error) {
+              failed = true;
+              deps.log(JSON.stringify({
+                simania_id: id,
+                status: "failed",
+                error: error instanceof Error ? error.message : "Unknown error",
+              }));
+            }
+          }
+        }
+
+        if (processed % BUDGET_CHECK_EVERY === 0) {
+          const remaining = await deps.hardcoverDailyRemaining();
+          if (
+            remaining !== null && remaining < options.minHardcover &&
+            !options.forceHardcover
+          ) {
+            deps.log(JSON.stringify({
+              stopped: "hardcover_budget",
+              remaining,
+              min: options.minHardcover,
+              works: processed,
+            }));
+            return 4;
+          }
+        }
+      } finally {
+        currentFailures = null;
       }
     }
 
