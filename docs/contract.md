@@ -780,6 +780,18 @@ Measured on 2026-11-22, on 30 proposals where NLI's original disagreed with the 
 
 **Hebrew dictionary step (S46).** When `resolveMatch` finds nothing, `--hebrew` tries the dictionary title through Hardcover with the author agreement only if a study finds `right >= 3` and `wrong / (right + wrong) < 0.05`; proposals from this step use `via: "hebrew_dictionary"`. Otherwise there is no such step. Study B measured `editions: 136`, `checked: 38`, `right: 0`, `wrong: 35`, and `unknown: 3`; `wrong / (right + wrong)` was `35 / 35 = 1`, so there is no dictionary step.
 
+**Sound lookup input (S49).** `hebrewAuthorBySound` never sends an empty or missing query. A name whose surname has no Latin letters (so no Hebrew spellings) returns `null` without any search. It never throws on its input.
+
+**Failure accounting (S49).** Every `rematch:cached` line with `"skipped":"provider_failure"` has at least one entry in `failures`. A step that marks the work failed always records `{provider, error}` for that work, including steps after the candidate search (for example the `author_books` checks).
+
+**Provider retry (S49).** In the operator scripts (`rematch:cached`, `measure:links`), an idempotent provider request (Wikidata API and SPARQL, NLI, Wiktionary, Simania search and book details) that times out or gets HTTP 5xx is retried once, with a timeout of 25 s, after a 1 s pause. HTTP 429 handling stays as it is. Hardcover is not retried by this rule. Edge functions keep today's behavior: the retry is off unless a script turns it on.
+
+**Response cache (S49).** With `--cache-dir <dir>`, the operator scripts keep successful responses (HTTP 2xx, plus Wiktionary 404) of the idempotent providers in the retry rule on disk, keyed by method, URL and request body, for 7 days. A cached answer is used instead of a request. Hardcover, the database and quota checks are never cached. Without the flag, nothing changes.
+
+**Work concurrency (S49).** `rematch:cached --concurrency <n>` (1 to 4, default 1) processes up to n works at once. Every provider host still gets at most one request in flight, with a minimum gap between request starts: Wikimedia 300 ms, Hardcover 1000 ms, Simania 250 ms, NLI 250 ms. Output lines are printed in work order and are byte-identical to `--concurrency 1` for the same provider answers. The Hardcover budget floor still stops the run.
+
+**Run health (S49).** `npm run check:run-health -- <file>` reads a `rematch:cached` or `measure:links` output and exits non-zero when more than half of the checked works or editions are provider failures, when any recorded failure is HTTP 403 from Simania, or when the file has no summary line. The `rematch-measure.yml` jobs run it on each output, so an unusable run is red.
+
 **Dictionary last resort (S39).** Applies only in `rematch:cached`, and only for a work where every other step gave no proposal and no provider failed.
 - **Scoring.** The candidates are the author's unlinked Hebrew books that the reverse step listed. Each candidate title is scored by Wiktionary glosses of its Hebrew words (`en.wiktionary.org/api/rest_v1/page/definition/<word>`, Hebrew sections only). Each word is also tried without a leading `ה ו ב ל מ ש כ` and without a plural suffix. The score is the share of the English title's content words that appear in the glosses.
 - **Accepting.** A book is proposed only when its score is `>= 0.5` and strictly higher than every other candidate's. It gets `via` `dictionary` and the new `resolve_status` `dictionary`, linked to the work itself.
