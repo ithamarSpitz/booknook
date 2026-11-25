@@ -22,30 +22,62 @@ async function retryAfterWait(response: Response, sleep: Sleep) {
   await sleep((retryAfter > 0 ? retryAfter : 15) * 1000);
 }
 
-function serialized(
+function isSimania(input: RequestInfo | URL): boolean {
+  return /simania\.co\.il/.test(urlOf(input));
+}
+
+function isNli(input: RequestInfo | URL): boolean {
+  return /nli\.alma\.exlibrisgroup\.com|nli\.org\.il/.test(urlOf(input));
+}
+
+export interface HostGroup {
+  matches: (input: RequestInfo | URL) => boolean;
+  /** Minimum gap between request starts. */
+  spacingMs: number;
+  maxRetries: number;
+}
+
+export const HOST_GROUPS: Record<
+  "wikimedia" | "hardcover" | "simania" | "nli",
+  HostGroup
+> = {
+  wikimedia: { matches: isWikimedia, spacingMs: 300, maxRetries: 6 },
+  hardcover: { matches: isHardcover, spacingMs: 1000, maxRetries: 5 },
+  simania: { matches: isSimania, spacingMs: 250, maxRetries: 5 },
+  nli: { matches: isNli, spacingMs: 250, maxRetries: 5 },
+};
+
+/**
+ * One limiter for several host groups: each group has one request in flight
+ * and a minimum gap between starts; other URLs pass through untouched.
+ */
+export function hostLimitedFetch(
   fetchImpl: typeof fetch,
-  matches: (input: RequestInfo | URL) => boolean,
-  spacingMs: number,
-  maxRetries: number,
-  sleep: Sleep,
-  now: Now,
+  groups: HostGroup[],
+  sleep: Sleep = realSleep,
+  now: Now = Date.now,
 ): typeof fetch {
-  let chain: Promise<unknown> = Promise.resolve();
-  let lastStart = -Infinity;
+  const states = groups.map((group) => ({
+    group,
+    chain: Promise.resolve() as Promise<unknown>,
+    lastStart: -Infinity,
+  }));
   return ((input: RequestInfo | URL, init?: RequestInit) => {
-    if (!matches(input)) return fetchImpl(input, init);
+    const state = states.find((s) => s.group.matches(input));
+    if (!state) return fetchImpl(input, init);
+    const { spacingMs, maxRetries } = state.group;
     const run = async (): Promise<Response> => {
       for (let attempt = 0;; attempt++) {
-        const wait = Math.max(0, spacingMs - (now() - lastStart));
+        const wait = Math.max(0, spacingMs - (now() - state.lastStart));
         if (wait > 0) await sleep(wait);
-        lastStart = now();
+        state.lastStart = now();
         const response = await fetchImpl(input, init);
         if (response.status !== 429 || attempt >= maxRetries) return response;
         await retryAfterWait(response, sleep);
       }
     };
-    const result = chain.then(run, run);
-    chain = result.catch(() => undefined);
+    const result = state.chain.then(run, run);
+    state.chain = result.catch(() => undefined);
     return result;
   }) as typeof fetch;
 }
@@ -56,7 +88,7 @@ export function throttledHardcoverFetch(
   sleep: Sleep = realSleep,
   now: Now = Date.now,
 ): typeof fetch {
-  return serialized(fetchImpl, isHardcover, 1000, 5, sleep, now);
+  return hostLimitedFetch(fetchImpl, [HOST_GROUPS.hardcover], sleep, now);
 }
 
 /** Serialize Wikimedia requests, space starts by 300 ms, and retry HTTP 429. */
@@ -65,5 +97,14 @@ export function throttledWikimediaFetch(
   sleep: Sleep = realSleep,
   now: Now = Date.now,
 ): typeof fetch {
-  return serialized(fetchImpl, isWikimedia, 300, 6, sleep, now);
+  return hostLimitedFetch(fetchImpl, [HOST_GROUPS.wikimedia], sleep, now);
+}
+
+/** All four host groups behind one limiter (used by the rematch CLI). */
+export function throttledProviderFetch(
+  fetchImpl: typeof fetch,
+  sleep: Sleep = realSleep,
+  now: Now = Date.now,
+): typeof fetch {
+  return hostLimitedFetch(fetchImpl, Object.values(HOST_GROUPS), sleep, now);
 }
