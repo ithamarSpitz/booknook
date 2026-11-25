@@ -1,4 +1,4 @@
-import { fetchTimeout, normalize, similarity } from "./utils.ts";
+import { fetchRetry, getProviderRetry, normalize, similarity } from "./utils.ts";
 
 // Wikimedia's API etiquette requires a descriptive User-Agent; anonymous clients are throttled hard.
 const PROVIDER_HEADERS = {
@@ -18,10 +18,10 @@ async function providerFetch(
 ): Promise<Response> {
   const headers = { ...PROVIDER_HEADERS, ...(init.headers as Record<string, string> | undefined) };
   for (let attempt = 0; ; attempt += 1) {
-    const response = await fetchTimeout(url, { ...init, headers }, timeoutMs);
+    const response = await fetchRetry(url, { ...init, headers }, timeoutMs);
     if (response.ok || (allowNotFound && response.status === 404)) return response;
     await response.body?.cancel();
-    if (attempt === 0 && (response.status === 429 || response.status >= 500)) {
+    if (attempt === 0 && (response.status === 429 || (response.status >= 500 && !getProviderRetry()))) {
       const retryAfter = Number(response.headers.get("retry-after"));
       await new Promise((resolve) => setTimeout(resolve, Math.min(2000, (retryAfter > 0 ? retryAfter : 1) * 1000)));
       continue;

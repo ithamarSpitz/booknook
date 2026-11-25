@@ -1,4 +1,4 @@
-import { fetchTimeout, HttpError, normalize } from "./utils.ts";
+import { fetchRetry, HttpError, normalize } from "./utils.ts";
 
 const SIMANIA = "https://simania.co.il/api/mcp";
 let requestId = 0;
@@ -35,7 +35,7 @@ async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  const response = await fetchTimeout(SIMANIA, {
+  const response = await fetchRetry(SIMANIA, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
