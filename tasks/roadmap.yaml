@@ -1747,3 +1747,41 @@ sprints:
         stage: 2
         depends_on:
         - S47-T1
+  S49-throughput:
+    name: English pass in hours - sound crash, failure accounting, provider retry, response cache, work concurrency, run health
+    tasks:
+      S49-T1:
+        file: tasks/sprint-49-throughput/01-contract.md
+        stage: 1
+        depends_on: []
+      S49-T2:
+        file: tasks/sprint-49-throughput/02-crash-accounting.md
+        stage: 2
+        depends_on:
+        - S49-T1
+      S49-T6:
+        file: tasks/sprint-49-throughput/06-run-health.md
+        stage: 2
+        depends_on:
+        - S49-T1
+      S49-T3:
+        file: tasks/sprint-49-throughput/03-retry.md
+        stage: 3
+        depends_on:
+        - S49-T2
+      S49-T4:
+        file: tasks/sprint-49-throughput/04-cache.md
+        stage: 4
+        depends_on:
+        - S49-T3
+      S49-T5:
+        file: tasks/sprint-49-throughput/05-concurrency.md
+        stage: 5
+        depends_on:
+        - S49-T4
+      S49-T7:
+        file: tasks/sprint-49-throughput/07-docs.md
+        stage: 6
+        depends_on:
+        - S49-T5
+        - S49-T6
