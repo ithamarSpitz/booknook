@@ -11,6 +11,8 @@ allowed_paths:
   - tests/functions/rematch-author-books.test.ts
   - tests/functions/rematch-recheck.test.ts
   - tests/functions/rematch-concurrency.test.ts
+  - tests/functions/rematch-hebrew.test.ts
+  - tests/functions/rematch-failure-detail.test.ts
 context:
   - contract
   - architecture.matching
@@ -49,5 +51,5 @@ In `scripts/rematch-cached.ts`, implement the rematch parts of **Rematch covers 
    - a non-matching linked work gives no `duplicate_of`;
    - a work that fails first and succeeds on recheck ends with its real outcome and `rechecked: 1`;
    - with `--concurrency 3`, the output is byte-identical to `--concurrency 1`, including the recheck.
-2. Existing tests pass.
+2. Existing tests pass. The recheck changes one existing expectation: `--hebrew continues after a resolver provider failure` in `tests/functions/rematch-hebrew.test.ts` expects `provider_failure`. Keep that test's intent. Its fake must fail on **every** call, so the edition is still `provider_failure` after the recheck and `rechecked` is 1. Don't weaken any other assertion.
 3. All verification commands pass.
