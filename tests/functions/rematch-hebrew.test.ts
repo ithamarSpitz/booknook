@@ -133,17 +133,14 @@ Deno.test("--hebrew skips a resolved edition whose author disagrees", async () =
 });
 
 Deno.test("--hebrew continues after a resolver provider failure", async () => {
-  let calls = 0;
   const h = harness([edition(1), edition(2)], {
-    resolveMatch: () => {
-      calls++;
-      return Promise.resolve(
-        calls === 1 ? { found: null, failed: true } : {
+    resolveMatch: (_db, e) =>
+      Promise.resolve(
+        e.simania_id === 1 ? { found: null, failed: true } : {
           found: { book: kingBook, status: "fuzzy" as const },
           failed: false,
         },
-      ) as unknown as ReturnType<RunDeps["resolveMatch"]>;
-    },
+      ) as unknown as ReturnType<RunDeps["resolveMatch"]>,
   });
   assertEquals(await main(["--hebrew"], h.deps), 0);
   assertEquals(JSON.parse(h.lines[0]).skipped, "provider_failure");
@@ -153,6 +150,7 @@ Deno.test("--hebrew continues after a resolver provider failure", async () => {
     proposals: 1,
     linked: 0,
     skipped: { provider_failure: 1 },
+    rechecked: 1,
   });
 });
 

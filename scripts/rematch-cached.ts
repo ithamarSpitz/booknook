@@ -1,4 +1,7 @@
-import { setProviderRetry } from "../supabase/functions/_shared/utils.ts";
+import {
+  normalize,
+  setProviderRetry,
+} from "../supabase/functions/_shared/utils.ts";
 import { setProviderRetry as setSimaniaRetry } from "../public/js/simania.js";
 import type { Sql } from "npm:postgres@3.4.5";
 import {
@@ -159,6 +162,16 @@ export interface RunDeps {
   authorStore: (sql: Sql) => AuthorStore;
   loadLinkedSimaniaIds: (sql: Sql) => Promise<Set<number>>;
   loadEdition: (sql: Sql, simaniaId: number) => Promise<EditionRow | null>;
+  loadLinkedWork: (
+    sql: Sql,
+    simaniaId: number,
+  ) => Promise<
+    {
+      hardcover_id: number;
+      original_title: string;
+      original_authors: string[] | null;
+    } | null
+  >;
   insertEdition: (sql: Sql, edition: EditionRow) => Promise<void>;
   wikidataHebrewAuthors: (names: string[]) => Promise<Map<string, string[]>>;
   wikidataOriginals: (titles: string[]) => Promise<Map<string, string[]>>;
@@ -239,6 +252,21 @@ const runDefaults: RunDeps = {
   loadEdition: async (sql, simaniaId) => {
     const rows = await sql<EditionRow[]>`
       select * from public.editions where simania_id = ${simaniaId}
+    `;
+    return rows[0] ?? null;
+  },
+  loadLinkedWork: async (sql, simaniaId) => {
+    const rows = await sql<
+      {
+        hardcover_id: number;
+        original_title: string;
+        original_authors: string[] | null;
+      }[]
+    >`
+      select w.hardcover_id, w.original_title, w.original_authors
+      from public.editions as e
+      join public.works as w on w.id = e.work_id
+      where e.simania_id = ${simaniaId}
     `;
     return rows[0] ?? null;
   },
@@ -692,6 +720,7 @@ async function mainInner(
       };
       const db = serviceCatalogDb(sql);
       const skipped: Record<string, number> = {};
+      let lines: string[] = [];
       const skip = (
         edition: EditionRow,
         reason: string,
@@ -707,7 +736,7 @@ async function mainInner(
               : "guard_rejected"),
           }
           : null;
-        deps.log(JSON.stringify({
+        lines.push(JSON.stringify({
           simania_id: edition.simania_id,
           skipped: reason,
           ...(reason === "provider_failure" ? { failures } : {}),
@@ -716,10 +745,19 @@ async function mainInner(
       };
       let processed = 0;
       let proposals = 0;
+      let rechecked = 0;
+      const outputs: { lines: string[]; held: boolean }[] = [];
+      let printed = 0;
+      const flushOutputs = () => {
+        while (printed < outputs.length && !outputs[printed].held) {
+          for (const line of outputs[printed].lines) deps.log(line);
+          printed++;
+        }
+      };
 
-      // Deliberately sequential: one provider request at a time.
-      for (const edition of editions) {
-        processed++;
+      // Handles one edition; returns true when it ended provider_failure.
+      const processEdition = async (edition: EditionRow): Promise<boolean> => {
+        let failedEdition = false;
         const explain: ResolveExplain | null = options.explain
           ? {
             translator: null,
@@ -746,6 +784,7 @@ async function mainInner(
             })
             : await deps.resolveMatch(db, edition);
           if (result.failed) {
+            failedEdition = true;
             skip(edition, "provider_failure", result.failures ?? [], explain);
           } else {
             let found = result.found;
@@ -771,7 +810,7 @@ async function mainInner(
                 skip(edition, "nli_english_mismatch", [], explain);
               } else {
                 proposals++;
-                deps.log(JSON.stringify({
+                lines.push(JSON.stringify({
                   hardcover_id: found.book.id,
                   title: found.book.title,
                   proposal: {
@@ -789,6 +828,7 @@ async function mainInner(
           const provider = error instanceof ProviderCallError
             ? error.provider
             : "db";
+          failedEdition = true;
           skip(
             edition,
             "provider_failure",
@@ -796,6 +836,18 @@ async function mainInner(
             explain,
           );
         }
+        return failedEdition;
+      };
+
+      // Deliberately sequential: one provider request at a time.
+      const failedEditions: number[] = [];
+      for (const edition of editions) {
+        processed++;
+        lines = [];
+        const failedEdition = await processEdition(edition);
+        outputs.push({ lines, held: failedEdition });
+        if (failedEdition) failedEditions.push(outputs.length - 1);
+        flushOutputs();
 
         if (processed % BUDGET_CHECK_EVERY === 0) {
           const remaining = await deps.hardcoverDailyRemaining();
@@ -803,6 +855,8 @@ async function mainInner(
             remaining !== null && remaining < options.minHardcover &&
             !options.forceHardcover
           ) {
+            for (const output of outputs) output.held = false;
+            flushOutputs();
             deps.log(JSON.stringify({
               stopped: "hardcover_budget",
               remaining,
@@ -814,11 +868,24 @@ async function mainInner(
         }
       }
 
+      // One more attempt for each provider failure, one at a time.
+      for (const index of failedEditions) {
+        rechecked++;
+        skipped.provider_failure--;
+        if (skipped.provider_failure === 0) delete skipped.provider_failure;
+        lines = [];
+        await processEdition(editions[index]);
+        outputs[index] = { lines, held: false };
+      }
+      for (const output of outputs) output.held = false;
+      flushOutputs();
+
       deps.log(JSON.stringify({
         works: processed,
         proposals,
         linked: 0,
         skipped,
+        ...(rechecked > 0 ? { rechecked } : {}),
       }));
       return 0;
     }
@@ -913,6 +980,10 @@ async function mainInner(
     const makeDeps = (
       rememberFailure: (provider: FailureProvider, error: unknown) => void,
     ): RematchDeps => {
+      const searched = new Map<
+        string,
+        Awaited<ReturnType<RunDeps["searchBooks"]>>
+      >();
       const originals = (title: string, name: string): Promise<string[]> =>
         memoized(originalsCache, title, rememberFailure, async (note) => {
           let wikidata: Map<string, string[]>;
@@ -1002,8 +1073,15 @@ async function mainInner(
           );
         },
         searchBooks: async (query, limit, offset) => {
+          // The candidate search and the missed-translation check list the
+          // same author; ask the provider once per work.
+          const key = JSON.stringify([query, limit, offset]);
+          const hit = searched.get(key);
+          if (hit) return hit;
           try {
-            return await deps.searchBooks(query, limit, offset);
+            const found = await deps.searchBooks(query, limit, offset);
+            searched.set(key, found);
+            return found;
           } catch (error) {
             rememberFailure("simania", error);
             throw error;
@@ -1025,7 +1103,12 @@ async function mainInner(
     let failed = false;
 
     // Handles one work; every output line goes to `lines`, never to stdout.
-    const processWork = async (work: RematchWork, lines: string[]) => {
+    // Returns true when the work ended provider_failure.
+    const processWork = async (
+      work: RematchWork,
+      lines: string[],
+    ): Promise<boolean> => {
+      let providerFailed = false;
       const base = {
         hardcover_id: work.hardcover_id,
         title: work.original_title,
@@ -1045,7 +1128,14 @@ async function mainInner(
         let rejected = false;
         let authorMismatch = false;
         let linkedElsewhere = false;
+        let duplicateOf: number | null = null;
         let proposal: Proposal | null = null;
+
+        const sameAuthors = async (a: string[], b: string[]) => {
+          const keys = new Set(b.map((name) => nameKey(name)).filter(Boolean));
+          return a.length > 0 && b.length > 0 &&
+            a.some((name) => keys.has(nameKey(name)));
+        };
 
         const candidateEdition = async (
           simaniaId: number,
@@ -1060,6 +1150,24 @@ async function mainInner(
           }
           if (edition?.work_id) {
             linkedElsewhere = true;
+            if (duplicateOf === null) {
+              try {
+                const other = await deps.loadLinkedWork(sql, simaniaId);
+                if (
+                  other && other.hardcover_id !== work.hardcover_id &&
+                  normalize(other.original_title) ===
+                    normalize(work.original_title) &&
+                  (await sameAuthors(
+                    work.original_authors ?? [],
+                    other.original_authors ?? [],
+                  ))
+                ) {
+                  duplicateOf = other.hardcover_id;
+                }
+              } catch {
+                // The duplicate hint is optional; it never changes the outcome.
+              }
+            }
             return null;
           }
           const existed = edition !== null;
@@ -1193,7 +1301,7 @@ async function mainInner(
         }
 
         if (
-          !proposal && !anyFailed && !linkedElsewhere && authorBooks.length > 0
+          !proposal && !anyFailed && !linkedElsewhere
         ) {
           const decision = await decideMissedTranslation(
             {
@@ -1290,10 +1398,14 @@ async function mainInner(
             ? "linked_elsewhere"
             : "no_candidate";
           skip(reason);
+          if (reason === "provider_failure") providerFailed = true;
           lines.push(JSON.stringify({
             ...base,
             skipped: reason,
             ...(reason === "provider_failure" ? { failures } : {}),
+            ...(reason === "linked_elsewhere" && duplicateOf !== null
+              ? { duplicate_of: duplicateOf }
+              : {}),
           }));
         }
         if (proposal) {
@@ -1369,6 +1481,7 @@ async function mainInner(
           }
         }
       }
+      return providerFailed;
     };
 
     // Up to `concurrency` works at once; lines print strictly in work order.
@@ -1379,8 +1492,12 @@ async function mainInner(
     let done = 0;
     let stop = false;
     let stopInfo: { remaining: number } | null = null;
+    const held = new Set<number>();
     const flush = () => {
-      while (nextPrint < works.length && buffers[nextPrint]) {
+      while (
+        nextPrint < works.length && buffers[nextPrint] &&
+        !held.has(nextPrint)
+      ) {
         for (const line of buffers[nextPrint]!) deps.log(line);
         buffers[nextPrint++] = null;
         // A started-but-unfinished gap stops the loop; later ones wait.
@@ -1392,7 +1509,7 @@ async function mainInner(
         processed++;
         const lines: string[] = [];
         try {
-          await processWork(works[index], lines);
+          if (await processWork(works[index], lines)) held.add(index);
         } finally {
           buffers[index] = lines;
           flush();
@@ -1425,8 +1542,21 @@ async function mainInner(
         worker,
       ),
     );
-    flush();
     const rejected = results.find((r) => r.status === "rejected");
+    let rechecked = 0;
+    if (stopInfo === null && !rejected) {
+      // One more attempt for each provider failure, one at a time.
+      for (const index of [...held].sort((a, b) => a - b)) {
+        rechecked++;
+        skipped.provider_failure--;
+        if (skipped.provider_failure === 0) delete skipped.provider_failure;
+        const lines: string[] = [];
+        await processWork(works[index], lines);
+        buffers[index] = lines;
+      }
+    }
+    held.clear();
+    flush();
     if (rejected) throw (rejected as PromiseRejectedResult).reason;
     if (stopInfo !== null) {
       deps.log(JSON.stringify({
@@ -1443,6 +1573,7 @@ async function mainInner(
       proposals,
       linked,
       skipped,
+      ...(rechecked > 0 ? { rechecked } : {}),
     }));
     return failed ? 1 : 0;
   } finally {
