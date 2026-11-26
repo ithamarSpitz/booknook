@@ -93,6 +93,8 @@ Author translation in both directions goes through the server-only `authors` and
 
 The operator-only sound lookup uses `_shared/author-sound.ts` (`sameAuthor`, `hebrewAuthorBySound`); only operator scripts run it. Names it discovers are stored with source `sound`, while `authors.sound_checked_at` records checks and allows rechecking after 30 days. Its dictionary rule requires both sides to score at least `0.67` and no word to be `contradicted`.
 
+Sound lookup fail-fast: in `hebrewAuthorBySound`, the first failed Simania search (timeout, 5xx, network error) stops the lookup and throws. It does not run the remaining queries of its plan.
+
 Every `rematch:cached` skip line with `"skipped":"provider_failure"` includes `failures`, with one entry per failed call containing the provider name and an error message truncated to 200 characters.
 
 Before printing a proposal, and again before linking one with `--from ... --apply`, `rematch:cached` applies the NLI English-original guard and skips an established mismatch as `nli_english_mismatch`; an absent or failed NLI result does not reject the proposal.
@@ -110,6 +112,10 @@ Evidence classes: `measure:links` splits the works that are neither missed nor f
 Rematch covers the measurement: in the English pass, when a work has no proposal and no provider failure, `rematch:cached` always runs the measurement's check (`decideMissedTranslation`), whether or not the candidate search listed books by the author. A book it finds becomes the `author_books` proposal, or a skip with its reason (`author_mismatch`, `nli_english_mismatch`, `linked_elsewhere`).
 
 Provider throttle: the scripts wrap their `fetch` with `scripts/lib/provider-throttle.ts`. `throttledHardcoverFetch` serializes Hardcover requests 1000 ms apart, and `throttledWikimediaFetch` serializes Wikidata, Wiktionary and Wikipedia requests with starts at least 300 ms apart. On HTTP 429 each waits for `Retry-After` (15 s when absent) and retries, up to 5 times for Hardcover and 6 for Wikimedia. All 69 provider failures in the 2026-11-23 `--hebrew` run were rate limits (81 Hardcover 429 errors, 10 Wikidata 429 errors).
+
+Bounded waits: no provider wait in the operator scripts is unbounded. A `Retry-After` wait is capped at 60 s; a 429 that asks for more than 60 s, or that remains after the retries, is returned to the caller as the 429 response, so the caller records a provider failure. A request that waits more than 5 minutes for its host slot fails with `host queue timeout`, does not run its fetch later, and the queue keeps moving.
+
+Work deadline: `rematch:cached --work-timeout <seconds>` (integer 30 to 3600, default 600) bounds each work in the English loop and each edition in `--hebrew`. A work that runs longer ends as `provider_failure` with `failures: [{ provider: "deadline", error: "<seconds> s; pending: <hosts>" }]`, where `<hosts>` lists the host groups with requests still in flight or queued. The run continues, output stays in work order, and the end-of-run recheck runs such works once more under the same deadline.
 
 Provider retry: `rematch:cached` and `measure:links` call `setProviderRetry` at start, and only the scripts do, so edge functions keep their behavior. With the policy set, an idempotent provider request (Wikidata, NLI, Wiktionary, Simania) that aborts on its timeout or gets HTTP 5xx is retried once after a pause, with a longer timeout. Hardcover is not retried, and HTTP 429 keeps its own handling.
 
