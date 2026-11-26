@@ -57,7 +57,10 @@ import {
   type RematchWork,
 } from "./lib/rematch.ts";
 import { pickByDictionary } from "./lib/dictionary.ts";
-import { throttledProviderFetch } from "./lib/provider-throttle.ts";
+import {
+  pendingHosts,
+  throttledProviderFetch,
+} from "./lib/provider-throttle.ts";
 import { cachedFetch, type CacheStats } from "./lib/provider-cache.ts";
 import { nliEnglishMismatch } from "./lib/nli-english-mismatch.ts";
 import { decideMissedTranslation } from "./measure-links.ts";
@@ -69,7 +72,7 @@ import {
 } from "./repair-links.ts";
 
 const USAGE =
-  "Usage: rematch:cached [--apply] [--hebrew] [--explain] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--cache-dir <dir>] [--min-hardcover <n>] [--force-hardcover] [--concurrency <1-4>]";
+  "Usage: rematch:cached [--apply] [--hebrew] [--explain] [--hardcover-id <id>] [--offset <n>] [--limit <n>] [--from <path>] [--cache-dir <dir>] [--min-hardcover <n>] [--force-hardcover] [--concurrency <1-4>] [--work-timeout <30-3600>]";
 
 const BUDGET_CHECK_EVERY = 50;
 const PROGRESS_EVERY = 25;
@@ -148,6 +151,8 @@ async function memoized<T>(
 export type RematchStatus = "wikidata" | "nli" | "fuzzy" | "dictionary";
 
 export interface RunDeps {
+  /** Starts a timer; returns its cancel function. Tests inject a fake clock. */
+  setTimer: (fn: () => void, ms: number) => () => void;
   loadOperatorEnv: typeof loadOperatorEnv;
   openProdDb: typeof openProdDb;
   loadWorks: (
@@ -232,6 +237,10 @@ async function loadWorks(
 }
 
 const runDefaults: RunDeps = {
+  setTimer: (fn, ms) => {
+    const id = setTimeout(fn, ms);
+    return () => clearTimeout(id);
+  },
   loadOperatorEnv,
   openProdDb,
   loadWorks,
@@ -338,6 +347,7 @@ interface CliOptions {
   from: string | null;
   cacheDir: string | null;
   concurrency: number;
+  workTimeout: number;
 }
 
 function parseArgs(args: string[]): CliOptions | null {
@@ -353,9 +363,11 @@ function parseArgs(args: string[]): CliOptions | null {
     from: null,
     cacheDir: null,
     concurrency: 1,
+    workTimeout: 600,
   };
   let usedOthers = false;
   let usedConcurrency = false;
+  let usedTimeout = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--apply") options.apply = true;
@@ -367,6 +379,13 @@ function parseArgs(args: string[]): CliOptions | null {
       if (value === undefined || !/^[1-4]$/.test(value)) return null;
       options.concurrency = Number(value);
       usedConcurrency = true;
+    } else if (arg === "--work-timeout") {
+      const value = args[++i];
+      if (value === undefined || !/^\d+$/.test(value)) return null;
+      const seconds = Number(value);
+      if (seconds < 30 || seconds > 3600) return null;
+      options.workTimeout = seconds;
+      usedTimeout = true;
     } else if (arg === "--cache-dir") {
       const value = args[++i];
       if (value === undefined || value === "") return null;
@@ -393,7 +412,7 @@ function parseArgs(args: string[]): CliOptions | null {
       if (arg !== "--min-hardcover") usedOthers = true;
     } else return null;
   }
-  if (options.from !== null && usedOthers) return null;
+  if (options.from !== null && (usedOthers || usedTimeout)) return null;
   if (
     usedConcurrency &&
     (options.hebrew || options.from !== null || options.hardcoverId !== null)
@@ -526,6 +545,44 @@ async function proposalHasEnglishMismatch(
     return original !== null && nliEnglishMismatch(workTitle, original.title);
   } catch {
     return false;
+  }
+}
+
+const TIMED_OUT = Symbol("timed out");
+
+/**
+ * Runs `run` under a deadline; a late settlement is ignored by the caller.
+ * `run` gets `assertLive`, which throws once the deadline fired: call it
+ * before every database write so an expired work cannot change state.
+ */
+async function withDeadline<T>(
+  deps: RunDeps,
+  seconds: number,
+  run: (assertLive: () => void) => Promise<T>,
+): Promise<T | { deadline: ProviderFailure }> {
+  let cancel = () => {};
+  let expired = false;
+  const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+    cancel = deps.setTimer(() => {
+      expired = true;
+      resolve(TIMED_OUT);
+    }, seconds * 1000);
+  });
+  const work = run(() => {
+    if (expired) throw new Error("work deadline expired");
+  });
+  work.catch(() => {});
+  try {
+    const result = await Promise.race([work, timeout]);
+    if (result !== TIMED_OUT) return result as T;
+    return {
+      deadline: {
+        provider: "deadline",
+        error: `${seconds} s; pending: ${pendingHosts().join(",")}`,
+      } as unknown as ProviderFailure,
+    };
+  } finally {
+    cancel();
   }
 }
 
@@ -720,14 +777,19 @@ async function mainInner(
       };
       const db = serviceCatalogDb(sql);
       const skipped: Record<string, number> = {};
-      let lines: string[] = [];
-      const skip = (
+      type Tally = {
+        lines: string[];
+        skipped: Record<string, number>;
+        proposals: number;
+      };
+      const makeSkip = (tally: Tally) =>
+      (
         edition: EditionRow,
         reason: string,
         failures: ProviderFailure[] = [],
         explain: ResolveExplain | null = null,
       ) => {
-        skipped[reason] = (skipped[reason] ?? 0) + 1;
+        tally.skipped[reason] = (tally.skipped[reason] ?? 0) + 1;
         const completedExplain = explain
           ? {
             ...explain,
@@ -736,7 +798,7 @@ async function mainInner(
               : "guard_rejected"),
           }
           : null;
-        lines.push(JSON.stringify({
+        tally.lines.push(JSON.stringify({
           simania_id: edition.simania_id,
           skipped: reason,
           ...(reason === "provider_failure" ? { failures } : {}),
@@ -746,6 +808,7 @@ async function mainInner(
       let processed = 0;
       let proposals = 0;
       let rechecked = 0;
+      let lines: string[] = [];
       const outputs: { lines: string[]; held: boolean }[] = [];
       let printed = 0;
       const flushOutputs = () => {
@@ -756,7 +819,12 @@ async function mainInner(
       };
 
       // Handles one edition; returns true when it ended provider_failure.
-      const processEdition = async (edition: EditionRow): Promise<boolean> => {
+      const processEdition = async (
+        edition: EditionRow,
+        tally: Tally,
+        _assertLive: () => void,
+      ): Promise<boolean> => {
+        const skip = makeSkip(tally);
         let failedEdition = false;
         const explain: ResolveExplain | null = options.explain
           ? {
@@ -809,8 +877,8 @@ async function mainInner(
               ) {
                 skip(edition, "nli_english_mismatch", [], explain);
               } else {
-                proposals++;
-                lines.push(JSON.stringify({
+                tally.proposals++;
+                tally.lines.push(JSON.stringify({
                   hardcover_id: found.book.id,
                   title: found.book.title,
                   proposal: {
@@ -840,11 +908,32 @@ async function mainInner(
       };
 
       // Deliberately sequential: one provider request at a time.
+      // A timed-out edition's late results are discarded with its tally.
+      const runEdition = async (edition: EditionRow): Promise<boolean> => {
+        // The attempt keeps its own tally; on timeout it is abandoned (late
+        // writes land there) and a separate result is built.
+        const attempt: Tally = { lines: [], skipped: {}, proposals: 0 };
+        const outcome = await withDeadline(
+          deps,
+          options.workTimeout,
+          (assertLive) => processEdition(edition, attempt, assertLive),
+        );
+        let tally = attempt;
+        if (typeof outcome === "object") {
+          tally = { lines: [], skipped: {}, proposals: 0 };
+          makeSkip(tally)(edition, "provider_failure", [outcome.deadline]);
+        }
+        lines = tally.lines;
+        for (const [reason, n] of Object.entries(tally.skipped)) {
+          skipped[reason] = (skipped[reason] ?? 0) + n;
+        }
+        proposals += tally.proposals;
+        return typeof outcome === "object" ? true : outcome;
+      };
       const failedEditions: number[] = [];
       for (const edition of editions) {
         processed++;
-        lines = [];
-        const failedEdition = await processEdition(edition);
+        const failedEdition = await runEdition(edition);
         outputs.push({ lines, held: failedEdition });
         if (failedEdition) failedEditions.push(outputs.length - 1);
         flushOutputs();
@@ -873,8 +962,7 @@ async function mainInner(
         rechecked++;
         skipped.provider_failure--;
         if (skipped.provider_failure === 0) delete skipped.provider_failure;
-        lines = [];
-        await processEdition(editions[index]);
+        await runEdition(editions[index]);
         outputs[index] = { lines, held: false };
       }
       for (const output of outputs) output.held = false;
@@ -979,7 +1067,30 @@ async function mainInner(
     const hebrewNamesMemo = new Map<string, Promise<MemoOutcome<string[]>>>();
     const makeDeps = (
       rememberFailure: (provider: FailureProvider, error: unknown) => void,
+      assertLive: () => void,
     ): RematchDeps => {
+      // After the work's deadline, author-store writes become no-ops (the
+      // lookup is shared through a memo, so it must not fail for others).
+      const live = () => {
+        try {
+          assertLive();
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const guarded: AuthorStore = {
+        ...soundStore,
+        create: () =>
+          live() ? soundStore.create() : Promise.resolve(crypto.randomUUID()),
+        addNames: (...a) =>
+          live() ? soundStore.addNames(...a) : Promise.resolve(),
+        merge: (...a) => live() ? soundStore.merge(...a) : Promise.resolve(),
+        markWikidataChecked: (...a) =>
+          live() ? soundStore.markWikidataChecked(...a) : Promise.resolve(),
+        markSoundChecked: (...a) =>
+          live() ? soundStore.markSoundChecked(...a) : Promise.resolve(),
+      };
       const searched = new Map<
         string,
         Awaited<ReturnType<RunDeps["searchBooks"]>>
@@ -1060,7 +1171,7 @@ async function mainInner(
               if (knownNames.length > 0) return knownNames;
               try {
                 return await soundNames(
-                  soundStore,
+                  guarded,
                   name,
                   (englishName) => deps.hebrewAuthorBySound(englishName),
                   deps.now,
@@ -1094,9 +1205,6 @@ async function mainInner(
     const db = serviceCatalogDb(sql);
 
     const skipped: Record<string, number> = {};
-    const skip = (reason: string) => {
-      skipped[reason] = (skipped[reason] ?? 0) + 1;
-    };
     let processed = 0;
     let proposals = 0;
     let linked = 0;
@@ -1104,10 +1212,20 @@ async function mainInner(
 
     // Handles one work; every output line goes to `lines`, never to stdout.
     // Returns true when the work ended provider_failure.
+    // Counters are local and merged by runWork, so a work that hit its
+    // deadline cannot change shared state when its promises settle later.
     const processWork = async (
       work: RematchWork,
       lines: string[],
-    ): Promise<boolean> => {
+      assertLive: () => void,
+    ) => {
+      const skippedLocal: Record<string, number> = {};
+      const skip = (reason: string) => {
+        skippedLocal[reason] = (skippedLocal[reason] ?? 0) + 1;
+      };
+      let proposals = 0;
+      let linked = 0;
+      let failed = false;
       let providerFailed = false;
       const base = {
         hardcover_id: work.hardcover_id,
@@ -1117,7 +1235,7 @@ async function mainInner(
       const rememberFailure = (provider: FailureProvider, error: unknown) => {
         failures.push(failureDetail(provider, error));
       };
-      const rematchDeps = makeDeps(rememberFailure);
+      const rematchDeps = makeDeps(rememberFailure, assertLive);
       {
         const { candidates, authorBooks, failed: searchFailed } =
           await findCandidates(
@@ -1448,6 +1566,7 @@ async function mainInner(
                   }),
                 );
               } else {
+                assertLive();
                 if (!proposal.existed) {
                   await deps.insertEdition(sql, proposal.edition);
                 }
@@ -1461,6 +1580,7 @@ async function mainInner(
                   book,
                   reason: "ok",
                 } as unknown as LinkRepairPlan;
+                assertLive();
                 const result = await deps.applyRepair(
                   sql,
                   plan,
@@ -1481,7 +1601,44 @@ async function mainInner(
           }
         }
       }
-      return providerFailed;
+      return {
+        providerFailed,
+        skipped: skippedLocal,
+        proposals,
+        linked,
+        failed,
+      };
+    };
+
+    // Runs one work under the deadline; returns true on provider_failure.
+    const runWork = async (
+      work: RematchWork,
+      lines: string[],
+    ): Promise<boolean> => {
+      const mine: string[] = [];
+      const outcome = await withDeadline(
+        deps,
+        options.workTimeout,
+        (assertLive) => processWork(work, mine, assertLive),
+      );
+      if ("deadline" in outcome) {
+        skipped.provider_failure = (skipped.provider_failure ?? 0) + 1;
+        lines.push(JSON.stringify({
+          hardcover_id: work.hardcover_id,
+          title: work.original_title,
+          skipped: "provider_failure",
+          failures: [outcome.deadline],
+        }));
+        return true;
+      }
+      lines.push(...mine);
+      for (const [reason, n] of Object.entries(outcome.skipped)) {
+        skipped[reason] = (skipped[reason] ?? 0) + n;
+      }
+      proposals += outcome.proposals;
+      linked += outcome.linked;
+      if (outcome.failed) failed = true;
+      return outcome.providerFailed;
     };
 
     // Up to `concurrency` works at once; lines print strictly in work order.
@@ -1509,7 +1666,7 @@ async function mainInner(
         processed++;
         const lines: string[] = [];
         try {
-          if (await processWork(works[index], lines)) held.add(index);
+          if (await runWork(works[index], lines)) held.add(index);
         } finally {
           buffers[index] = lines;
           flush();
@@ -1551,7 +1708,7 @@ async function mainInner(
         skipped.provider_failure--;
         if (skipped.provider_failure === 0) delete skipped.provider_failure;
         const lines: string[] = [];
-        await processWork(works[index], lines);
+        await runWork(works[index], lines);
         buffers[index] = lines;
       }
     }
