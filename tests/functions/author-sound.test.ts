@@ -2,6 +2,7 @@ import {
   assert,
   assertEquals,
   assertFalse,
+  assertRejects,
 } from "jsr:@std/assert@1";
 import {
   hebrewAuthorBySound,
@@ -63,4 +64,19 @@ Deno.test("hebrewAuthorBySound skips search for surnames without Latin letters",
   assertEquals(calls, 0);
   await hebrewAuthorBySound("Stephen King", fake);
   assert(calls > 0);
+});
+
+Deno.test("hebrewAuthorBySound stops at the first thrown search error", async () => {
+  let calls = 0;
+  const fake = (): Promise<never[]> => {
+    calls++;
+    if (calls === 2) return Promise.reject(new Error("simania down"));
+    return Promise.resolve([]);
+  };
+  await assertRejects(
+    () => hebrewAuthorBySound("Stephen King", fake),
+    Error,
+    "simania down",
+  );
+  assertEquals(calls, 2);
 });
