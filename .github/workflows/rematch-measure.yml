@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     strategy:
-      max-parallel: 1
+      max-parallel: 2
       fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
@@ -115,7 +115,7 @@ jobs:
       - name: Rematch English shard
         run: |
           set +e
-          deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/rematch-cached.ts --offset "${{ steps.count.outputs.offset }}" --limit "${{ steps.count.outputs.size }}" --min-hardcover 1500 > "english-${{ matrix.shard }}.jsonl"
+          deno run --allow-net --allow-env --allow-read --allow-write --allow-sys scripts/rematch-cached.ts --offset "${{ steps.count.outputs.offset }}" --limit "${{ steps.count.outputs.size }}" --min-hardcover 1500 --concurrency 4 > "english-${{ matrix.shard }}.jsonl"
           code=$?
           [ "$code" -eq 4 ] && code=0
           exit "$code"
