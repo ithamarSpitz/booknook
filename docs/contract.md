@@ -813,6 +813,20 @@ Measured on 2026-11-22, on 30 proposals where NLI's original disagreed with the 
 
 Only `catalog_checked` and `no_english_author` count as fine. The output keeps `missed_rate_low` and `missed_rate_high`, and adds `missed_rate_strict_high`, which also counts every other evidence class as unknown. `hebrew_label_titles` lists only works whose class is the Hebrew-label one.
 
+**Bounded provider waits (S51).** No provider wait in the operator scripts is unbounded:
+- a 429 `Retry-After` wait is capped at 60 s;
+- a 429 that asks for more than 60 s, or that remains after the retries, is returned to the caller as the 429 response, so the caller records a provider failure;
+- no queued request waits for its host slot for more than 5 minutes; past that it fails with `host queue timeout`.
+
+Measured on 2026-11-26 (local DB copy, `rematch:cached --concurrency 4 --cache-dir`), two full English passes hung. The S49 pass finished 4 works in its last 2 hours, at 450 of 1,767. The S50 pass, at 94 output lines, had no new requests and no new cache entries for over 25 minutes with the CPU idle. The work holding the ordered output finished in under 2 minutes when run alone. The cause: the per-host limiter waited for whatever `Retry-After` a 429 said, with no upper bound, while holding that host's queue.
+
+**Work deadline (S51).** `rematch:cached --work-timeout <seconds>` (default 600) bounds each work in the English loop and each edition in `--hebrew`:
+- a work that runs longer ends as `provider_failure` with `failures: [{provider: "deadline", error: "<seconds> s; pending: <hosts>"}]`, where `<hosts>` lists the host groups with requests still in flight or queued;
+- the run continues, and the end-of-run recheck (S50) runs such works once more under the same deadline;
+- output order stays deterministic.
+
+**Sound lookup fail-fast (S51).** In `hebrewAuthorBySound`, the first failed Simania search (timeout, 5xx, network error) stops the lookup and throws. It doesn't run the remaining queries of its plan.
+
 **Dictionary last resort (S39).** Applies only in `rematch:cached`, and only for a work where every other step gave no proposal and no provider failed.
 - **Scoring.** The candidates are the author's unlinked Hebrew books that the reverse step listed. Each candidate title is scored by Wiktionary glosses of its Hebrew words (`en.wiktionary.org/api/rest_v1/page/definition/<word>`, Hebrew sections only). Each word is also tried without a leading `ה ו ב ל מ ש כ` and without a plural suffix. The score is the share of the English title's content words that appear in the glosses.
 - **Accepting.** A book is proposed only when its score is `>= 0.5` and strictly higher than every other candidate's. It gets `via` `dictionary` and the new `resolve_status` `dictionary`, linked to the work itself.
