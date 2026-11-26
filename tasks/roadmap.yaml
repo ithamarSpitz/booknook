@@ -1835,3 +1835,10 @@ sprints:
         stage: 4
         depends_on:
         - S51-T3
+  S53-gh-speed:
+    name: rematch-measure English shards - concurrency 4 inside a shard, 2 shards at once
+    tasks:
+      S53-T1:
+        file: tasks/sprint-53-gh-speed/01-workflow-concurrency.md
+        stage: 1
+        depends_on: []
