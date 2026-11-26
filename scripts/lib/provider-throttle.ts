@@ -16,10 +16,20 @@ function isHardcover(input: RequestInfo | URL): boolean {
   return /hardcover\.app/.test(urlOf(input));
 }
 
-async function retryAfterWait(response: Response, sleep: Sleep) {
+const MAX_RETRY_AFTER_S = 60;
+const QUEUE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Seconds to wait before retrying a 429; Infinity-like (> cap) means give up. */
+function retryAfterSeconds(response: Response): number {
   const retryAfter = Number(response.headers.get("retry-after"));
-  await response.body?.cancel();
-  await sleep((retryAfter > 0 ? retryAfter : 15) * 1000);
+  return retryAfter > 0 ? retryAfter : 15;
+}
+
+const pending = new Map<string, number>();
+
+/** Host groups that currently have requests in flight or queued. */
+export function pendingHosts(): string[] {
+  return [...pending.keys()];
 }
 
 function isSimania(input: RequestInfo | URL): boolean {
@@ -59,13 +69,22 @@ export function hostLimitedFetch(
 ): typeof fetch {
   const states = groups.map((group) => ({
     group,
-    chain: Promise.resolve() as Promise<unknown>,
+    chain: Promise.resolve() as Promise<void>,
     lastStart: -Infinity,
   }));
   return ((input: RequestInfo | URL, init?: RequestInit) => {
     const state = states.find((s) => s.group.matches(input));
     if (!state) return fetchImpl(input, init);
     const { spacingMs, maxRetries } = state.group;
+    const name = Object.entries(HOST_GROUPS).find(([, g]) =>
+      g === state.group
+    )?.[0] ?? "custom";
+    pending.set(name, (pending.get(name) ?? 0) + 1);
+    const settle = () => {
+      const n = (pending.get(name) ?? 1) - 1;
+      if (n <= 0) pending.delete(name);
+      else pending.set(name, n);
+    };
     const run = async (): Promise<Response> => {
       for (let attempt = 0;; attempt++) {
         const wait = Math.max(0, spacingMs - (now() - state.lastStart));
@@ -73,12 +92,29 @@ export function hostLimitedFetch(
         state.lastStart = now();
         const response = await fetchImpl(input, init);
         if (response.status !== 429 || attempt >= maxRetries) return response;
-        await retryAfterWait(response, sleep);
+        const seconds = retryAfterSeconds(response);
+        if (seconds > MAX_RETRY_AFTER_S) return response;
+        await response.body?.cancel();
+        await sleep(seconds * 1000);
       }
     };
-    const result = state.chain.then(run, run);
-    state.chain = result.catch(() => undefined);
-    return result;
+    const prev = state.chain;
+    let release!: () => void;
+    state.chain = new Promise<void>((resolve) => (release = resolve));
+    const gate = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error("host queue timeout"));
+        release();
+      }, QUEUE_TIMEOUT_MS);
+      prev.then(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    return gate.then(run).finally(() => {
+      release();
+      settle();
+    });
   }) as typeof fetch;
 }
 
