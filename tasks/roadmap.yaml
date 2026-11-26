@@ -1813,3 +1813,25 @@ sprints:
         depends_on:
         - S50-T2
         - S50-T4
+  S51-bounded:
+    name: no hangs - bounded provider waits, work deadline, sound fail-fast
+    tasks:
+      S51-T1:
+        file: tasks/sprint-51-bounded/01-contract.md
+        stage: 1
+        depends_on: []
+      S51-T2:
+        file: tasks/sprint-51-bounded/02-bounded.md
+        stage: 2
+        depends_on:
+        - S51-T1
+      S51-T3:
+        file: tasks/sprint-51-bounded/03-deadline.md
+        stage: 3
+        depends_on:
+        - S51-T2
+      S51-T4:
+        file: tasks/sprint-51-bounded/04-docs.md
+        stage: 4
+        depends_on:
+        - S51-T3
